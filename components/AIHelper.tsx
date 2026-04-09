@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { supabase } from "../lib/supabase";
 
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
-type SavedUser = {
+type UserState = {
+  id: string;
   email: string;
-  password: string;
 };
 
 type AIHelperProps = {
@@ -24,7 +25,7 @@ export default function AIHelper({ onSend }: AIHelperProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [user, setUser] = useState<SavedUser | null>(null);
+  const [user, setUser] = useState<UserState | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [loginDismissed, setLoginDismissed] = useState(false);
 
@@ -34,37 +35,66 @@ export default function AIHelper({ onSend }: AIHelperProps) {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const storageKey = useMemo(() => {
-    if (!user?.email) return null;
+    if (!user?.email) return "svansai-guest-chat";
     return `svansai-chat-${user.email.trim().toLowerCase()}`;
   }, [user]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("svansai_user");
+    const openLogin = () => {
+      setShowLogin(true);
+    };
 
-    if (savedUser) {
-      try {
-        const parsed = JSON.parse(savedUser) as SavedUser;
-        setUser(parsed);
-      } catch {
-        // ignore bad local data
-      }
-    }
+    window.addEventListener("openLogin", openLogin);
+
+    return () => {
+      window.removeEventListener("openLogin", openLogin);
+    };
   }, []);
 
   useEffect(() => {
-    if (!user) {
-      setMessages([
-        {
-          role: "assistant",
-          content:
-            "What would you like help with today? I can guide you step by step.",
-        },
-      ]);
-      return;
-    }
+    let mounted = true;
 
-    if (!storageKey) return;
+    const initializeUser = async () => {
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
 
+      if (!mounted) return;
+
+      if (authUser?.id && authUser.email) {
+        setUser({
+          id: authUser.id,
+          email: authUser.email,
+        });
+      } else {
+        setUser(null);
+      }
+    };
+
+    initializeUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const authUser = session?.user;
+
+      if (authUser?.id && authUser.email) {
+        setUser({
+          id: authUser.id,
+          email: authUser.email,
+        });
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const savedMessages = localStorage.getItem(storageKey);
 
     if (savedMessages) {
@@ -77,45 +107,111 @@ export default function AIHelper({ onSend }: AIHelperProps) {
       }
     }
 
-    setMessages([
-      {
-        role: "assistant",
-        content:
-          "Welcome back. What would you like help with today? I can guide you step by step.",
-      },
-    ]);
-  }, [user, storageKey]);
+    if (user) {
+      setMessages([
+        {
+          role: "assistant",
+          content:
+            "Welcome back. What would you like help with today? I can guide you step by step.",
+        },
+      ]);
+    } else {
+      setMessages([
+        {
+          role: "assistant",
+          content:
+            "What would you like help with today? I can guide you step by step.",
+        },
+      ]);
+    }
+  }, [storageKey, user]);
 
   useEffect(() => {
-    if (!storageKey || !user) return;
     localStorage.setItem(storageKey, JSON.stringify(messages));
-  }, [messages, storageKey, user]);
+  }, [messages, storageKey]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
 
     if (!trimmedEmail || !trimmedPassword) return;
 
-    const newUser: SavedUser = {
+    const { error } = await supabase.auth.signUp({
       email: trimmedEmail,
       password: trimmedPassword,
-    };
+      options: {
+        emailRedirectTo:
+          typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
 
-    localStorage.setItem("svansai_user", JSON.stringify(newUser));
-    setUser(newUser);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
     setShowLogin(false);
     setLoginDismissed(false);
     setEmail("");
     setPassword("");
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("svansai_user");
+  const handleLogin = async () => {
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail || !trimmedPassword) return;
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password: trimmedPassword,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setShowLogin(false);
+    setLoginDismissed(false);
+    setEmail("");
+    setPassword("");
+  };
+
+  const handleGoogleLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo:
+          typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
+
+    if (error) {
+      alert(error.message);
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "apple",
+      options: {
+        redirectTo:
+          typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
+
+    if (error) {
+      alert(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
     setShowLogin(false);
     setLoginDismissed(false);
@@ -239,7 +335,7 @@ export default function AIHelper({ onSend }: AIHelperProps) {
                   fontWeight: 900,
                 }}
               >
-                Create Account
+                Log In or Create Account
               </h2>
 
               <p
@@ -286,26 +382,49 @@ export default function AIHelper({ onSend }: AIHelperProps) {
                   outline: "none",
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSignup();
+                  if (e.key === "Enter") handleLogin();
                 }}
               />
 
-              <button
-                onClick={handleSignup}
+              <div
                 style={{
+                  display: "flex",
+                  gap: "10px",
                   marginTop: "16px",
-                  width: "100%",
-                  padding: "14px",
-                  background: "#38bdf8",
-                  color: "#020617",
-                  border: "none",
-                  borderRadius: "12px",
-                  fontWeight: 800,
-                  cursor: "pointer",
                 }}
               >
-                Create Account
-              </button>
+                <button
+                  onClick={handleLogin}
+                  style={{
+                    flex: 1,
+                    padding: "14px",
+                    background: "rgba(255,255,255,0.08)",
+                    color: "white",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: "12px",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  Log In
+                </button>
+
+                <button
+                  onClick={handleSignup}
+                  style={{
+                    flex: 1,
+                    padding: "14px",
+                    background: "#38bdf8",
+                    color: "#020617",
+                    border: "none",
+                    borderRadius: "12px",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  Create Account
+                </button>
+              </div>
 
               <hr
                 style={{
@@ -315,6 +434,7 @@ export default function AIHelper({ onSend }: AIHelperProps) {
               />
 
               <button
+                onClick={handleGoogleLogin}
                 style={{
                   width: "100%",
                   padding: "12px",
@@ -330,6 +450,7 @@ export default function AIHelper({ onSend }: AIHelperProps) {
               </button>
 
               <button
+                onClick={handleAppleLogin}
                 style={{
                   width: "100%",
                   padding: "12px",

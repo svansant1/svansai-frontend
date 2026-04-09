@@ -1,17 +1,120 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
+import type { User } from "@supabase/supabase-js";
 import AIHelper from "../components/AIHelper";
 import type { ChatMessage } from "../components/AIHelper";
+import { supabase } from "../lib/supabase";
 import svRobot from "../mascot/sv-robot.png";
 
 export default function HomePage() {
   const [isThinking, setIsThinking] = useState(false);
   const [lastThought, setLastThought] = useState("Ready to help.");
+
+  const [user, setUser] = useState<User | null>(null);
+
+  const [showLogin, setShowLogin] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const updateMobile = () => setIsMobile(window.innerWidth <= 768);
+    updateMobile();
+    window.addEventListener("resize", updateMobile);
+    return () => window.removeEventListener("resize", updateMobile);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (mounted) setUser(data.user ?? null);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleEmailAuth = async () => {
+    if (!email.trim() || !password.trim()) return;
+
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    try {
+      if (authMode === "signup") {
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: password.trim(),
+        });
+
+        if (error) {
+          setAuthMessage(error.message);
+        } else {
+          setAuthMessage(
+            "Account created. Check your email if confirmation is required.",
+          );
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: password.trim(),
+        });
+
+        if (error) {
+          setAuthMessage(error.message);
+        } else {
+          setShowLogin(false);
+          setAuthMessage("");
+          setEmail("");
+          setPassword("");
+        }
+      }
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleOAuth = async (provider: "google" | "apple") => {
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setAuthBusy(false);
+      setAuthMessage(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
 
   const handleSVSend = async (messages: ChatMessage[]) => {
     const latestUserMessage =
@@ -46,26 +149,49 @@ export default function HomePage() {
       return data.text || "I’m here, but I didn’t generate a response.";
     } catch (error) {
       console.error(error);
-      setIsThinking(false);
+
+      setTimeout(() => {
+        setIsThinking(false);
+      }, 1800);
+
       setLastThought("Still working through it.");
-      return "I’m still here. Something interrupted my response, but let’s keep going. Tell me a little more and I’ll help you figure it out.";
+
+      return "Let’s keep going. Something interrupted my last response, but I can still help.";
     }
   };
 
-  const handleSubmitFeedback = () => {
+  const handleSubmitFeedback = async () => {
+    if (!user) {
+      setShowLogin(true);
+      setShowFeedback(false);
+      return;
+    }
+
     if (!feedbackText.trim()) return;
 
-    const existing = localStorage.getItem("svansai_feedback");
-    const parsed = existing ? JSON.parse(existing) : [];
+    setFeedbackBusy(true);
+    setFeedbackMessage("");
 
-    parsed.push({
-      message: feedbackText.trim(),
-      createdAt: new Date().toISOString(),
-    });
+    const { error } = await supabase.from("feedback").insert([
+      {
+        user_id: user.id,
+        email: user.email,
+        message: feedbackText.trim(),
+      },
+    ]);
 
-    localStorage.setItem("svansai_feedback", JSON.stringify(parsed));
-    setFeedbackText("");
-    setShowFeedback(false);
+    if (error) {
+      setFeedbackMessage(error.message);
+    } else {
+      setFeedbackMessage("Feedback sent. Thank you.");
+      setFeedbackText("");
+      setTimeout(() => {
+        setShowFeedback(false);
+        setFeedbackMessage("");
+      }, 1200);
+    }
+
+    setFeedbackBusy(false);
   };
 
   return (
@@ -78,7 +204,7 @@ export default function HomePage() {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: "20px",
+        padding: isMobile ? "14px" : "20px",
         position: "relative",
         overflow: "hidden",
         color: "white",
@@ -93,6 +219,235 @@ export default function HomePage() {
           pointerEvents: "none",
         }}
       />
+
+      <AnimatePresence>
+        {showLogin && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.82)",
+              backdropFilter: "blur(12px)",
+              zIndex: 1000,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px",
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 14, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+              transition={{ duration: 0.22 }}
+              style={{
+                background: "#020617",
+                padding: isMobile ? "24px" : "34px",
+                borderRadius: "24px",
+                width: "100%",
+                maxWidth: "460px",
+                color: "white",
+                position: "relative",
+                boxShadow: "0 20px 80px rgba(0,0,0,0.35)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <button
+                onClick={() => setShowLogin(false)}
+                style={{
+                  position: "absolute",
+                  top: "14px",
+                  right: "14px",
+                  width: "34px",
+                  height: "34px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "white",
+                  cursor: "pointer",
+                  fontSize: "1rem",
+                  fontWeight: 700,
+                }}
+              >
+                ×
+              </button>
+
+              <h2 style={{ margin: 0, fontSize: "2rem", fontWeight: 900 }}>
+                {authMode === "signin" ? "Log In" : "Create Account"}
+              </h2>
+
+              <p
+                style={{
+                  marginTop: "12px",
+                  color: "rgba(255,255,255,0.82)",
+                  lineHeight: 1.6,
+                }}
+              >
+                {authMode === "signin"
+                  ? "Log in to keep your progress and use feedback."
+                  : "Create an account to save your progress and use feedback."}
+              </p>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  marginTop: "18px",
+                }}
+              >
+                <button
+                  onClick={() => setAuthMode("signin")}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background:
+                      authMode === "signin"
+                        ? "rgba(56,189,248,0.18)"
+                        : "rgba(255,255,255,0.04)",
+                    color: "white",
+                    cursor: "pointer",
+                  }}
+                >
+                  Sign In
+                </button>
+
+                <button
+                  onClick={() => setAuthMode("signup")}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background:
+                      authMode === "signup"
+                        ? "rgba(56,189,248,0.18)"
+                        : "rgba(255,255,255,0.04)",
+                    color: "white",
+                    cursor: "pointer",
+                  }}
+                >
+                  Sign Up
+                </button>
+              </div>
+
+              <input
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  marginTop: "18px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "white",
+                  boxSizing: "border-box",
+                  outline: "none",
+                }}
+              />
+
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  marginTop: "12px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "white",
+                  boxSizing: "border-box",
+                  outline: "none",
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleEmailAuth();
+                }}
+              />
+
+              <button
+                onClick={handleEmailAuth}
+                disabled={authBusy}
+                style={{
+                  marginTop: "16px",
+                  width: "100%",
+                  padding: "14px",
+                  background: "#38bdf8",
+                  color: "#020617",
+                  border: "none",
+                  borderRadius: "12px",
+                  fontWeight: 800,
+                  cursor: authBusy ? "not-allowed" : "pointer",
+                }}
+              >
+                {authBusy
+                  ? "Please wait..."
+                  : authMode === "signin"
+                    ? "Log In"
+                    : "Create Account"}
+              </button>
+
+              <hr
+                style={{
+                  margin: "22px 0",
+                  borderColor: "rgba(255,255,255,0.12)",
+                }}
+              />
+
+              <button
+                onClick={() => handleOAuth("google")}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  marginBottom: "10px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "white",
+                  cursor: "pointer",
+                }}
+              >
+                Continue with Google
+              </button>
+
+              <button
+                onClick={() => handleOAuth("apple")}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "white",
+                  cursor: "pointer",
+                }}
+              >
+                Continue with Apple
+              </button>
+
+              {authMessage && (
+                <p
+                  style={{
+                    marginTop: "14px",
+                    color: "#bae6fd",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {authMessage}
+                </p>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showFeedback && (
@@ -119,7 +474,7 @@ export default function HomePage() {
               transition={{ duration: 0.22 }}
               style={{
                 background: "#020617",
-                padding: "34px",
+                padding: isMobile ? "24px" : "34px",
                 borderRadius: "24px",
                 width: "100%",
                 maxWidth: "520px",
@@ -145,18 +500,11 @@ export default function HomePage() {
                   fontSize: "1rem",
                   fontWeight: 700,
                 }}
-                aria-label="Close feedback modal"
               >
                 ×
               </button>
 
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "2rem",
-                  fontWeight: 900,
-                }}
-              >
+              <h2 style={{ margin: 0, fontSize: "2rem", fontWeight: 900 }}>
                 Send Feedback
               </h2>
 
@@ -191,6 +539,7 @@ export default function HomePage() {
 
               <button
                 onClick={handleSubmitFeedback}
+                disabled={feedbackBusy}
                 style={{
                   marginTop: "16px",
                   width: "100%",
@@ -200,11 +549,23 @@ export default function HomePage() {
                   border: "none",
                   borderRadius: "12px",
                   fontWeight: 800,
-                  cursor: "pointer",
+                  cursor: feedbackBusy ? "not-allowed" : "pointer",
                 }}
               >
-                Submit Feedback
+                {feedbackBusy ? "Sending..." : "Submit Feedback"}
               </button>
+
+              {feedbackMessage && (
+                <p
+                  style={{
+                    marginTop: "14px",
+                    color: "#bae6fd",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {feedbackMessage}
+                </p>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -213,8 +574,8 @@ export default function HomePage() {
       <div
         style={{
           position: "fixed",
-          left: "18px",
-          bottom: "18px",
+          left: isMobile ? "10px" : "18px",
+          bottom: isMobile ? "14px" : "18px",
           zIndex: 40,
           pointerEvents: "none",
         }}
@@ -233,8 +594,8 @@ export default function HomePage() {
           <Image
             src={svRobot}
             alt="SV Robot"
-            width={230}
-            height={230}
+            width={isMobile ? 170 : 230}
+            height={isMobile ? 170 : 230}
             style={{
               position: "relative",
               filter: "drop-shadow(0 0 40px rgba(56, 189, 248, 0.3))",
@@ -263,8 +624,8 @@ export default function HomePage() {
                     }}
                     style={{
                       position: "absolute",
-                      left: "120px",
-                      bottom: "130px",
+                      left: isMobile ? "86px" : "120px",
+                      bottom: isMobile ? "90px" : "130px",
                       width: `${16 + i * 6}px`,
                       height: `${16 + i * 6}px`,
                       borderRadius: "999px",
@@ -282,15 +643,15 @@ export default function HomePage() {
             animate={{ opacity: 1, x: 0 }}
             style={{
               position: "absolute",
-              left: "155px",
-              bottom: "180px",
-              maxWidth: "180px",
+              left: isMobile ? "105px" : "155px",
+              bottom: isMobile ? "145px" : "180px",
+              maxWidth: isMobile ? "140px" : "180px",
               background: "rgba(255,255,255,0.10)",
               border: "1px solid rgba(255,255,255,0.18)",
               borderRadius: "22px",
-              padding: "10px 16px",
+              padding: isMobile ? "8px 12px" : "10px 16px",
               color: "white",
-              fontSize: "0.95rem",
+              fontSize: isMobile ? "0.82rem" : "0.95rem",
               fontWeight: 600,
               textAlign: "center",
               lineHeight: 1.35,
@@ -307,8 +668,8 @@ export default function HomePage() {
       <div
         style={{
           backgroundColor: "rgba(255, 255, 255, 0.03)",
-          padding: "40px",
-          borderRadius: "40px",
+          padding: isMobile ? "24px" : "40px",
+          borderRadius: isMobile ? "24px" : "40px",
           backdropFilter: "blur(30px)",
           border: "1px solid rgba(255, 255, 255, 0.1)",
           maxWidth: "900px",
@@ -322,16 +683,25 @@ export default function HomePage() {
       >
         <div
           style={{
-            position: "absolute",
-            top: "20px",
-            right: "25px",
+            position: isMobile ? "static" : "absolute",
+            top: isMobile ? undefined : "20px",
+            right: isMobile ? undefined : "25px",
             display: "flex",
             gap: "10px",
             alignItems: "center",
+            justifyContent: isMobile ? "center" : "flex-end",
+            marginBottom: isMobile ? "18px" : 0,
+            flexWrap: "wrap",
           }}
         >
           <button
-            onClick={() => setShowFeedback(true)}
+            onClick={() => {
+              if (!user) {
+                setShowLogin(true);
+              } else {
+                setShowFeedback(true);
+              }
+            }}
             style={{
               padding: "8px 16px",
               borderRadius: "999px",
@@ -347,25 +717,41 @@ export default function HomePage() {
             Feedback
           </button>
 
-          <button
-            onClick={() => {
-              const event = new CustomEvent("openLogin");
-              window.dispatchEvent(event);
-            }}
-            style={{
-              padding: "8px 18px",
-              borderRadius: "999px",
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.05)",
-              color: "white",
-              cursor: "pointer",
-              fontSize: "12px",
-              letterSpacing: "0.08em",
-              fontWeight: 600,
-            }}
-          >
-            Login
-          </button>
+          {user ? (
+            <button
+              onClick={handleLogout}
+              style={{
+                padding: "8px 18px",
+                borderRadius: "999px",
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.05)",
+                color: "white",
+                cursor: "pointer",
+                fontSize: "12px",
+                letterSpacing: "0.08em",
+                fontWeight: 600,
+              }}
+            >
+              Log Out
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowLogin(true)}
+              style={{
+                padding: "8px 18px",
+                borderRadius: "999px",
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.05)",
+                color: "white",
+                cursor: "pointer",
+                fontSize: "12px",
+                letterSpacing: "0.08em",
+                fontWeight: 600,
+              }}
+            >
+              Login
+            </button>
+          )}
         </div>
 
         <p
@@ -382,7 +768,7 @@ export default function HomePage() {
 
         <h1
           style={{
-            fontSize: "clamp(2.2rem, 7vw, 4.6rem)",
+            fontSize: isMobile ? "2.3rem" : "clamp(2.2rem, 7vw, 4.6rem)",
             fontWeight: 900,
             margin: 0,
             lineHeight: 1,
@@ -395,7 +781,7 @@ export default function HomePage() {
           style={{
             marginTop: "18px",
             color: "rgba(255,255,255,0.78)",
-            fontSize: "1rem",
+            fontSize: isMobile ? "0.95rem" : "1rem",
             lineHeight: 1.8,
           }}
         >
@@ -406,8 +792,8 @@ export default function HomePage() {
       <div
         style={{
           backgroundColor: "rgba(255, 255, 255, 0.02)",
-          padding: "50px",
-          borderRadius: "40px",
+          padding: isMobile ? "20px" : "50px",
+          borderRadius: isMobile ? "24px" : "40px",
           backdropFilter: "blur(40px)",
           border: "1px solid rgba(255, 255, 255, 0.08)",
           maxWidth: "900px",
