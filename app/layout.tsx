@@ -1,8 +1,11 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "SVANSAI Parent",
-  description: "SVANSAI AI parent app",
+  title: "SVANS-AI",
+  description: "Your AI Guide for Anything",
+  icons: {
+    icon: "/sv-bot.png",
+  },
 };
 
 export default function RootLayout({
