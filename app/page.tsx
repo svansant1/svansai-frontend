@@ -521,23 +521,27 @@ export default function HomePage() {
           style={{
             width: sidebarWidth,
             minWidth: sidebarWidth,
-            transition: "width 0.2s ease",
-            background: "rgba(255,255,255,0.03)",
+            transition: "width 0.22s ease",
+            background:
+              isMobile && isSidebarCollapsed
+                ? "rgba(255,255,255,0.02)"
+                : "rgba(255,255,255,0.03)",
             borderRight: "1px solid rgba(255,255,255,0.08)",
             backdropFilter: "blur(28px)",
-            padding: "14px",
+            padding: isMobile && isSidebarCollapsed ? "10px 6px" : "14px",
             boxSizing: "border-box",
-            zIndex: 20,
+            zIndex: 30,
             overflow: "hidden",
+            position: "relative",
           }}
         >
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
+              justifyContent: isSidebarCollapsed ? "center" : "space-between",
               gap: "8px",
-              marginBottom: "14px",
+              marginBottom: isSidebarCollapsed ? "8px" : "14px",
             }}
           >
             {!isSidebarCollapsed && (
@@ -551,9 +555,19 @@ export default function HomePage() {
                 border: "1px solid rgba(255,255,255,0.12)",
                 color: "white",
                 borderRadius: "10px",
-                padding: "8px 10px",
+                padding:
+                  isMobile && isSidebarCollapsed ? "8px 8px" : "8px 10px",
                 cursor: "pointer",
+                minWidth: isMobile && isSidebarCollapsed ? "26px" : "unset",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
+              title={
+                isSidebarCollapsed
+                  ? "Open chat history"
+                  : "Collapse chat history"
+              }
             >
               {isSidebarCollapsed ? "›" : "‹"}
             </button>
@@ -564,14 +578,16 @@ export default function HomePage() {
             style={{
               width: "100%",
               marginBottom: "12px",
-              padding: "12px",
+              padding: isMobile && isSidebarCollapsed ? "10px 6px" : "12px",
               borderRadius: "12px",
               border: "1px solid rgba(255,255,255,0.12)",
               background: "rgba(56,189,248,0.16)",
               color: "white",
               cursor: "pointer",
               fontWeight: 700,
+              fontSize: isMobile && isSidebarCollapsed ? "0.9rem" : "1rem",
             }}
+            title="New Chat"
           >
             {isSidebarCollapsed ? "+" : "New Chat"}
           </button>
@@ -959,7 +975,7 @@ export default function HomePage() {
             position: "fixed",
             left: mascotPosition.x,
             top: mascotPosition.y,
-            zIndex: 40,
+            zIndex: 60,
           }}
         >
           <RobotMascot size={robotSize} />
