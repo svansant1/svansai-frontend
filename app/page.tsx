@@ -16,6 +16,7 @@ import {
   replaceConversationMessages,
   type ConversationRecord,
 } from "@/lib/db/chat-history";
+import { logPageView, getTotalViews } from "@/lib/db/engagement";
 
 type AiUser = {
   id: string;
@@ -65,6 +66,7 @@ export default function HomePage() {
     y: 18,
   });
   const [dragging, setDragging] = useState(false);
+  const [totalViews, setTotalViews] = useState(0);
 
   const aiUser: AiUser | null = useMemo(() => {
     if (user?.id && user?.email) {
@@ -92,7 +94,7 @@ export default function HomePage() {
         // ignore
       }
     } else {
-      setMascotPosition(isMobile ? { x: 10, y: 12 } : { x: 18, y: 18 });
+      setMascotPosition(isMobile ? { x: 10, y: 420 } : { x: 18, y: 520 });
     }
   }, [isMobile]);
 
@@ -114,6 +116,34 @@ export default function HomePage() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const sessionKey = "svansai-view-session-id";
+    const alreadyLoggedKey = "svansai-view-logged";
+
+    let sessionId = sessionStorage.getItem(sessionKey);
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      sessionStorage.setItem(sessionKey, sessionId);
+    }
+
+    const alreadyLogged = sessionStorage.getItem(alreadyLoggedKey);
+
+    void (async () => {
+      if (!alreadyLogged) {
+        await logPageView({
+          path: "/",
+          sessionId,
+          userId: user?.id ?? null,
+          userAgent: navigator.userAgent,
+        });
+        sessionStorage.setItem(alreadyLoggedKey, "true");
+      }
+
+      const count = await getTotalViews();
+      setTotalViews(count);
+    })();
+  }, [user?.id]);
 
   useEffect(() => {
     const onStart = (e: Event) => {
@@ -928,7 +958,7 @@ export default function HomePage() {
           style={{
             position: "fixed",
             left: mascotPosition.x,
-            bottom: mascotPosition.y,
+            top: mascotPosition.y,
             zIndex: 40,
           }}
         >
@@ -1024,6 +1054,20 @@ export default function HomePage() {
           >
             Your AI Guide for Anything
           </p>
+        </div>
+        <div
+          style={{
+            marginTop: "10px",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: "8px",
+            color: "rgba(255,255,255,0.72)",
+            fontSize: isMobile ? "0.82rem" : "0.9rem",
+          }}
+        >
+          <span>👁</span>
+          <span>{totalViews.toLocaleString()} views</span>
         </div>
 
         <div

@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import {
+  submitMessageFeedback,
+  getFeedbackSummary,
+  getTotalViews,
+} from "@/lib/db/engagement";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -78,6 +83,13 @@ export default function AIHelper({
   const [isMobile, setIsMobile] = useState(false);
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [fileError, setFileError] = useState("");
+  const [feedbackState, setFeedbackState] = useState<
+    Record<number, "up" | "down" | null>
+  >({});
+  const [feedbackSummary, setFeedbackSummary] = useState<
+    Record<number, { up: number; down: number }>
+  >({});
+  const [totalViews, setTotalViews] = useState(0);
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -109,17 +121,6 @@ export default function AIHelper({
       return;
     }
 
-    const saved = localStorage.getItem(storageKey);
-    if (!user && saved) {
-      try {
-        const parsed = JSON.parse(saved) as ChatMessage[];
-        setMessages(parsed.slice(-MAX_STORED_MESSAGES));
-        return;
-      } catch {
-        // ignore bad data
-      }
-    }
-
     setMessages([
       {
         role: "assistant",
@@ -128,25 +129,34 @@ export default function AIHelper({
           : "What would you like help with today? I can guide you step by step. You can also attach images, PDFs, or code files.",
       },
     ]);
-  }, [storageKey, user, initialMessages, conversationId]);
+  }, [user, initialMessages, conversationId]);
 
   useEffect(() => {
     onMessagesChange?.(messages);
-
-    if (!user) {
-      const stripped = messages.slice(-MAX_STORED_MESSAGES).map((m) => ({
-        role: m.role,
-        content: m.content,
-        fileName: m.fileName,
-        fileType: m.fileType,
-      }));
-      localStorage.setItem(storageKey, JSON.stringify(stripped));
-    }
-  }, [messages, storageKey, user, onMessagesChange]);
+  }, [messages, onMessagesChange]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setFeedbackSummary({});
+      return;
+    }
+
+    void (async () => {
+      const summary = await getFeedbackSummary(conversationId);
+      setFeedbackSummary(summary);
+    })();
+  }, [conversationId, messages.length]);
+
+  useEffect(() => {
+    void (async () => {
+      const views = await getTotalViews();
+      setTotalViews(views);
+    })();
+  }, []);
 
   const notifyThinking = (thinking: boolean, msg?: string) => {
     window.dispatchEvent(
@@ -158,8 +168,6 @@ export default function AIHelper({
       }),
     );
   };
-
-  const mobileMascotReserve = 92;
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError("");
@@ -203,6 +211,33 @@ export default function AIHelper({
   const removeAttachment = () => {
     setAttachedFile(null);
     setFileError("");
+  };
+
+  const handleFeedback = async (messageIndex: number, vote: "up" | "down") => {
+    if (!conversationId) return;
+
+    setFeedbackState((prev) => ({
+      ...prev,
+      [messageIndex]: vote,
+    }));
+
+    await submitMessageFeedback({
+      conversationId,
+      messageIndex,
+      vote,
+      userId: user?.id ?? null,
+    });
+
+    setFeedbackSummary((prev) => {
+      const current = prev[messageIndex] ?? { up: 0, down: 0 };
+      return {
+        ...prev,
+        [messageIndex]: {
+          up: current.up + (vote === "up" ? 1 : 0),
+          down: current.down + (vote === "down" ? 1 : 0),
+        },
+      };
+    });
   };
 
   const handleSend = async () => {
@@ -314,28 +349,6 @@ export default function AIHelper({
               ? `LOGGED IN AS ${user.email}`
               : "GUEST MODE"}
         </p>
-
-        {!user && (
-          <button
-            onClick={() => {
-              setLoginDismissed(false);
-              onRequestLogin();
-            }}
-            style={{
-              padding: "7px 14px",
-              borderRadius: "999px",
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.04)",
-              color: "white",
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: "0.78rem",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Log In
-          </button>
-        )}
       </div>
 
       <div
@@ -346,7 +359,6 @@ export default function AIHelper({
           overflowY: "auto",
           marginBottom: "16px",
           paddingRight: "2px",
-          paddingLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
           borderRadius: "20px",
           scrollBehavior: "smooth",
           boxSizing: "border-box",
@@ -440,6 +452,70 @@ export default function AIHelper({
                   !msg.fileName && (
                     <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
                   )}
+
+                {msg.role === "assistant" && conversationId && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      marginTop: "10px",
+                      opacity: 0.95,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      onClick={() => handleFeedback(i, "up")}
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        background:
+                          feedbackState[i] === "up"
+                            ? "rgba(56,189,248,0.18)"
+                            : "rgba(255,255,255,0.04)",
+                        color: "white",
+                        borderRadius: "10px",
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      👍 {feedbackSummary[i]?.up ?? 0}
+                    </button>
+
+                    <button
+                      onClick={() => handleFeedback(i, "down")}
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        background:
+                          feedbackState[i] === "down"
+                            ? "rgba(248,113,113,0.18)"
+                            : "rgba(255,255,255,0.04)",
+                        color: "white",
+                        borderRadius: "10px",
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      👎 {feedbackSummary[i]?.down ?? 0}
+                    </button>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        padding: "6px 10px",
+                        borderRadius: "10px",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        background: "rgba(255,255,255,0.04)",
+                        fontSize: "0.85rem",
+                        color: "white",
+                      }}
+                    >
+                      <span>👁</span>
+                      <span>{totalViews.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           ))}
@@ -472,7 +548,6 @@ export default function AIHelper({
             borderRadius: "14px",
             padding: "10px 14px",
             marginBottom: "10px",
-            marginLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
             boxSizing: "border-box",
           }}
         >
@@ -548,7 +623,6 @@ export default function AIHelper({
             fontSize: "0.82rem",
             marginBottom: "8px",
             marginTop: 0,
-            marginLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
           }}
         >
           {fileError}
@@ -558,7 +632,6 @@ export default function AIHelper({
       <div
         style={{
           width: "100%",
-          paddingLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
           boxSizing: "border-box",
         }}
       >
