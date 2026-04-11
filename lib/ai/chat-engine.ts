@@ -28,6 +28,8 @@ import {
   getTemperature,
 } from "@/lib/ai/prompt";
 
+import { learnFromConversation } from "@/lib/ai/conversation-learning";
+
 const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = new GoogleGenAI({ apiKey });
 
@@ -102,12 +104,11 @@ export async function generateChatResponse(
 User attached file: ${attachedFile.name}
 ${latestUserMessage}
 `;
-
     questionType = await detectQuestionType(fileContext);
   }
 
   if (isContextDependentFollowUp(latestUserMessage) && lastAssistantMessage) {
-  effectiveMessage = `
+    effectiveMessage = `
 User follow-up:
 ${latestUserMessage}
 
@@ -116,7 +117,7 @@ ${lastAssistantMessage}
 
 Use conversation memory to interpret this follow-up correctly.
 `.trim();
-}
+  }
 
   const responseStyle = detectResponseStyle(effectiveMessage, questionType);
 
@@ -170,7 +171,10 @@ async function generateBestResponse(
       secondPass: false,
     });
 
-    if (firstAttempt) return firstAttempt;
+    if (firstAttempt) {
+      await learnFromConversation(context.messages, firstAttempt);
+      return firstAttempt;
+    }
 
     const secondAttempt = await tryGenerate({
       model,
@@ -180,10 +184,15 @@ async function generateBestResponse(
       secondPass: true,
     });
 
-    if (secondAttempt) return secondAttempt;
+    if (secondAttempt) {
+      await learnFromConversation(context.messages, secondAttempt);
+      return secondAttempt;
+    }
   }
 
-  return finalFallback(context.latestUserMessage, context.questionType);
+  const fallback = finalFallback(context.latestUserMessage, context.questionType);
+  await learnFromConversation(context.messages, fallback);
+  return fallback;
 }
 
 async function tryGenerate(params: {

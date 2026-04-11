@@ -2,21 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { supabase } from "../lib/supabase";
 
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
-  filePreview?: string; // base64 data URL for images
-  fileName?: string; // display name for non-image files
-  fileType?: string; // mime type
+  filePreview?: string;
+  fileName?: string;
+  fileType?: string;
 };
 
 type AttachedFile = {
   name: string;
   type: string;
-  base64: string; // raw base64 (no prefix)
-  dataUrl: string; // full data URL for preview
+  base64: string;
+  dataUrl: string;
   size: number;
 };
 
@@ -28,6 +27,9 @@ type UserState = {
 type AIHelperProps = {
   user: UserState | null;
   onRequestLogin: () => void;
+  initialMessages?: ChatMessage[];
+  onMessagesChange?: (messages: ChatMessage[]) => void;
+  conversationId?: string | null;
 };
 
 const GUEST_LIMIT = 5;
@@ -62,15 +64,13 @@ function isPdfType(type: string) {
   return type === "application/pdf";
 }
 
-function isTextType(type: string) {
-  return (
-    type.startsWith("text/") ||
-    type === "application/json" ||
-    type === "application/x-python"
-  );
-}
-
-export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
+export default function AIHelper({
+  user,
+  onRequestLogin,
+  initialMessages,
+  onMessagesChange,
+  conversationId,
+}: AIHelperProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -95,36 +95,54 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
   }, []);
 
   useEffect(() => {
+    if (conversationId && initialMessages) {
+      setMessages(
+        initialMessages.length
+          ? initialMessages
+          : [
+              {
+                role: "assistant",
+                content: "What would you like help with today?",
+              },
+            ],
+      );
+      return;
+    }
+
     const saved = localStorage.getItem(storageKey);
-    if (saved) {
+    if (!user && saved) {
       try {
         const parsed = JSON.parse(saved) as ChatMessage[];
         setMessages(parsed.slice(-MAX_STORED_MESSAGES));
         return;
       } catch {
-        // bad data — fall through
+        // ignore bad data
       }
     }
+
     setMessages([
       {
         role: "assistant",
         content: user
-          ? "Welcome back. What would you like help with today?"
+          ? "What would you like help with today?"
           : "What would you like help with today? I can guide you step by step. You can also attach images, PDFs, or code files.",
       },
     ]);
-  }, [storageKey, user]);
+  }, [storageKey, user, initialMessages, conversationId]);
 
   useEffect(() => {
-    // Strip file previews before saving to keep localStorage small
-    const stripped = messages.slice(-MAX_STORED_MESSAGES).map((m) => ({
-      role: m.role,
-      content: m.content,
-      fileName: m.fileName,
-      fileType: m.fileType,
-    }));
-    localStorage.setItem(storageKey, JSON.stringify(stripped));
-  }, [messages, storageKey]);
+    onMessagesChange?.(messages);
+
+    if (!user) {
+      const stripped = messages.slice(-MAX_STORED_MESSAGES).map((m) => ({
+        role: m.role,
+        content: m.content,
+        fileName: m.fileName,
+        fileType: m.fileType,
+      }));
+      localStorage.setItem(storageKey, JSON.stringify(stripped));
+    }
+  }, [messages, storageKey, user, onMessagesChange]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -141,16 +159,13 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
     );
   };
 
-  // Mobile left-side reserve so bottom-left mascot doesn't block chat/input
   const mobileMascotReserve = 92;
 
-  // ─── File handling ────────────────────────────────────────────────────────
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError("");
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Reset input so same file can be re-selected
     e.target.value = "";
 
     if (
@@ -190,7 +205,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
     setFileError("");
   };
 
-  // ─── Send ─────────────────────────────────────────────────────────────────
   const handleSend = async () => {
     if ((!input.trim() && !attachedFile) || loading) return;
 
@@ -199,7 +213,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
     if (!user && userCount >= GUEST_LIMIT && !loginDismissed) {
       setLoginDismissed(true);
       onRequestLogin();
-      // Don't return — let message send anyway
     }
 
     const userMessage: ChatMessage = {
@@ -219,7 +232,10 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
     const fileToSend = attachedFile;
     setAttachedFile(null);
     setLoading(true);
-    notifyThinking(true, "Reading your file...");
+    notifyThinking(
+      true,
+      fileToSend ? "Reading your file..." : "Thinking it through...",
+    );
 
     try {
       const body: Record<string, unknown> = {
@@ -229,7 +245,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
         })),
       };
 
-      // Attach file data for the API
       if (fileToSend) {
         body.file = {
           name: fileToSend.name,
@@ -269,10 +284,8 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
     }
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ width: "100%" }}>
-      {/* ── Status bar ── */}
       <div
         style={{
           width: "100%",
@@ -325,7 +338,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
         )}
       </div>
 
-      {/* ── Chat window ── */}
       <div
         style={{
           width: "100%",
@@ -382,7 +394,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
                   {msg.role === "user" ? "You" : "SV"}
                 </strong>
 
-                {/* File preview inside message bubble */}
                 {msg.filePreview && isImageType(msg.fileType || "") && (
                   <img
                     src={msg.filePreview}
@@ -420,10 +431,10 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
                   </div>
                 )}
 
-                {/* Message text — hide "[Attached: ...]" if we already show preview */}
                 {msg.content && !msg.content.startsWith("[Attached:") && (
                   <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
                 )}
+
                 {msg.content.startsWith("[Attached:") &&
                   !msg.filePreview &&
                   !msg.fileName && (
@@ -450,7 +461,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
         <div ref={chatEndRef} />
       </div>
 
-      {/* ── File attachment preview strip ── */}
       {attachedFile && (
         <div
           style={{
@@ -531,7 +541,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
         </div>
       )}
 
-      {/* File error */}
       {fileError && (
         <p
           style={{
@@ -546,7 +555,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
         </p>
       )}
 
-      {/* ── Input area ── */}
       <div
         style={{
           width: "100%",
@@ -584,7 +592,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
           }}
         />
 
-        {/* Bottom row: attach button + send button */}
         <div
           style={{
             display: "flex",
@@ -593,7 +600,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
             alignItems: "center",
           }}
         >
-          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -605,7 +611,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
             style={{ display: "none" }}
           />
 
-          {/* Attach button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={loading}
@@ -631,7 +636,6 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
             📎
           </button>
 
-          {/* Send button */}
           <button
             onClick={handleSend}
             disabled={loading}
