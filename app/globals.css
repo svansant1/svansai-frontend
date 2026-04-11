@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;900&family=Space+Mono:wght@400;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,5 +10,27 @@ body {
   padding: 0;
   background: #09090b;
   color: white;
-  font-family: Arial, Helvetica, sans-serif;
+
+  /* Space Grotesk for UI text — geometric, modern, matches the sci-fi brand */
+  /* Space Mono for monospace/code — pairs naturally with the Space family    */
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: 'Space Mono', 'Fira Code', monospace;
+}
+
+/* Smooth scrolling globally */
+* {
+  scroll-behavior: smooth;
+}
+
+/* Remove default textarea font override so it inherits Space Grotesk */
+textarea,
+input,
+button {
+  font-family: inherit;
 }

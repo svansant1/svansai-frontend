@@ -5,16 +5,14 @@ import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import type { User } from "@supabase/supabase-js";
 import AIHelper from "../components/AIHelper";
-import type { ChatMessage } from "../components/AIHelper";
 import { supabase } from "../lib/supabase";
 import svRobot from "../mascot/sv-robot.png";
 
 export default function HomePage() {
-  const [isThinking, setIsThinking] = useState(false);
-  const [lastThought, setLastThought] = useState("Ready to help.");
-
+  // ─── Auth ─────────────────────────────────────────────────────────────────
   const [user, setUser] = useState<User | null>(null);
 
+  // ─── Login modal ──────────────────────────────────────────────────────────
   const [showLogin, setShowLogin] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -22,20 +20,27 @@ export default function HomePage() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
 
+  // ─── Feedback modal ───────────────────────────────────────────────────────
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
 
+  // ─── Robot state ──────────────────────────────────────────────────────────
+  const [isThinking, setIsThinking] = useState(false);
+  const [lastThought, setLastThought] = useState("Ready to help.");
+
+  // ─── Layout ───────────────────────────────────────────────────────────────
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    const updateMobile = () => setIsMobile(window.innerWidth <= 768);
-    updateMobile();
-    window.addEventListener("resize", updateMobile);
-    return () => window.removeEventListener("resize", updateMobile);
+    const update = () => setIsMobile(window.innerWidth <= 768);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
   }, []);
 
+  // ─── Single Supabase auth listener ────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
 
@@ -45,9 +50,9 @@ export default function HomePage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
+    } = supabase.auth.onAuthStateChange((_event, session) =>
+      setUser(session?.user ?? null),
+    );
 
     return () => {
       mounted = false;
@@ -55,9 +60,33 @@ export default function HomePage() {
     };
   }, []);
 
+  // ─── Robot thinking — driven by events from AIHelper ─────────────────────
+  useEffect(() => {
+    const onStart = (e: Event) => {
+      const detail = (e as CustomEvent<{ message: string }>).detail;
+      setIsThinking(true);
+      setLastThought(detail?.message || "Thinking it through...");
+    };
+
+    const onEnd = (e: Event) => {
+      const detail = (e as CustomEvent<{ message: string }>).detail;
+      setTimeout(() => {
+        setIsThinking(false);
+        setLastThought(detail?.message || "Ready to help.");
+      }, 1800);
+    };
+
+    window.addEventListener("sv-thinking-start", onStart);
+    window.addEventListener("sv-thinking-end", onEnd);
+    return () => {
+      window.removeEventListener("sv-thinking-start", onStart);
+      window.removeEventListener("sv-thinking-end", onEnd);
+    };
+  }, []);
+
+  // ─── Auth handlers ────────────────────────────────────────────────────────
   const handleEmailAuth = async () => {
     if (!email.trim() || !password.trim()) return;
-
     setAuthBusy(true);
     setAuthMessage("");
 
@@ -67,20 +96,16 @@ export default function HomePage() {
           email: email.trim(),
           password: password.trim(),
         });
-
-        if (error) {
-          setAuthMessage(error.message);
-        } else {
-          setAuthMessage(
-            "Account created. Check your email if confirmation is required.",
-          );
-        }
+        setAuthMessage(
+          error
+            ? error.message
+            : "Account created. Check your email if confirmation is required.",
+        );
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password: password.trim(),
         });
-
         if (error) {
           setAuthMessage(error.message);
         } else {
@@ -98,14 +123,10 @@ export default function HomePage() {
   const handleOAuth = async (provider: "google" | "apple") => {
     setAuthBusy(true);
     setAuthMessage("");
-
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: {
-        redirectTo: window.location.origin,
-      },
+      options: { redirectTo: window.location.origin },
     });
-
     if (error) {
       setAuthBusy(false);
       setAuthMessage(error.message);
@@ -114,71 +135,24 @@ export default function HomePage() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-  };
-
-  const handleSVSend = async (messages: ChatMessage[]) => {
-    const latestUserMessage =
-      [...messages].reverse().find((m) => m.role === "user")?.content || "";
-
-    setIsThinking(true);
-    setLastThought("Thinking it through...");
-
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ messages }),
-      });
-
-      const data = await response.json();
-
-      setTimeout(() => {
-        setIsThinking(false);
-      }, 1800);
-
-      if (latestUserMessage.length > 55) {
-        setLastThought("I found a path forward.");
-      } else if (latestUserMessage.trim()) {
-        setLastThought(`Working on: "${latestUserMessage}"`);
-      } else {
-        setLastThought("Ready to help.");
-      }
-
-      return data.text || "I’m here, but I didn’t generate a response.";
-    } catch (error) {
-      console.error(error);
-
-      setTimeout(() => {
-        setIsThinking(false);
-      }, 1800);
-
-      setLastThought("Still working through it.");
-
-      return "Let’s keep going. Something interrupted my last response, but I can still help.";
-    }
+    setUser(null);
   };
 
   const handleSubmitFeedback = async () => {
     if (!user) {
-      setShowLogin(true);
       setShowFeedback(false);
+      setShowLogin(true);
       return;
     }
-
     if (!feedbackText.trim()) return;
-
     setFeedbackBusy(true);
     setFeedbackMessage("");
 
-    const { error } = await supabase.from("feedback").insert([
-      {
-        user_id: user.id,
-        email: user.email,
-        message: feedbackText.trim(),
-      },
-    ]);
+    const { error } = await supabase
+      .from("feedback")
+      .insert([
+        { user_id: user.id, email: user.email, message: feedbackText.trim() },
+      ]);
 
     if (error) {
       setFeedbackMessage(error.message);
@@ -190,9 +164,107 @@ export default function HomePage() {
         setFeedbackMessage("");
       }, 1200);
     }
-
     setFeedbackBusy(false);
   };
+
+  const aiUser =
+    user?.id && user?.email ? { id: user.id, email: user.email } : null;
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "14px",
+    borderRadius: "12px",
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.05)",
+    color: "white",
+    boxSizing: "border-box",
+    outline: "none",
+    fontSize: "1rem",
+  };
+
+  // ─── Robot component — reused in two positions ────────────────────────────
+  const RobotMascot = ({ size }: { size: number }) => (
+    <div style={{ position: "relative", width: size, height: size }}>
+      {/* Thought bubble */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: size + 8,
+          left: "50%",
+          transform: "translateX(-50%)",
+          whiteSpace: "nowrap",
+          background: "rgba(255,255,255,0.10)",
+          border: "1px solid rgba(255,255,255,0.18)",
+          borderRadius: "22px",
+          padding: "8px 14px",
+          color: "white",
+          fontSize: "0.82rem",
+          fontWeight: 600,
+          textAlign: "center",
+          backdropFilter: "blur(18px)",
+          boxShadow: "0 8px 25px rgba(0,0,0,0.25)",
+        }}
+      >
+        {lastThought}
+      </div>
+
+      {/* Glow */}
+      <div
+        style={{
+          position: "absolute",
+          inset: "20% 20% 12% 20%",
+          background: "rgba(56, 189, 248, 0.14)",
+          filter: "blur(30px)",
+          borderRadius: "999px",
+        }}
+      />
+
+      <Image
+        src={svRobot}
+        alt="SV Robot"
+        width={size}
+        height={size}
+        style={{
+          position: "relative",
+          filter: "drop-shadow(0 0 30px rgba(56, 189, 248, 0.3))",
+        }}
+      />
+
+      {/* Thinking dots */}
+      <AnimatePresence>
+        {isThinking &&
+          [0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, scale: 0.6 }}
+              animate={{
+                opacity: [0, 0.9, 0],
+                y: -(40 + i * 18),
+                x: 10 + i * 12,
+                scale: [0.6, 1, 0.88],
+              }}
+              exit={{ opacity: 0 }}
+              transition={{
+                duration: 1.6,
+                repeat: Infinity,
+                delay: i * 0.18,
+                ease: "easeOut",
+              }}
+              style={{
+                position: "absolute",
+                bottom: size * 0.4,
+                left: size * 0.55,
+                width: `${12 + i * 5}px`,
+                height: `${12 + i * 5}px`,
+                borderRadius: "999px",
+                background: "rgba(255,255,255,0.75)",
+                boxShadow: "0 0 14px rgba(255,255,255,0.18)",
+              }}
+            />
+          ))}
+      </AnimatePresence>
+    </div>
+  );
 
   return (
     <main
@@ -204,12 +276,13 @@ export default function HomePage() {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: isMobile ? "14px" : "20px",
+        padding: isMobile ? "14px 14px 32px" : "20px",
         position: "relative",
         overflow: "hidden",
         color: "white",
       }}
     >
+      {/* Background orbs */}
       <div
         style={{
           position: "absolute",
@@ -220,6 +293,7 @@ export default function HomePage() {
         }}
       />
 
+      {/* ── Login modal ── */}
       <AnimatePresence>
         {showLogin && (
           <motion.div
@@ -256,7 +330,10 @@ export default function HomePage() {
               }}
             >
               <button
-                onClick={() => setShowLogin(false)}
+                onClick={() => {
+                  setShowLogin(false);
+                  setAuthMessage("");
+                }}
                 style={{
                   position: "absolute",
                   top: "14px",
@@ -291,86 +368,44 @@ export default function HomePage() {
                   : "Create an account to save your progress and use feedback."}
               </p>
 
-              <div
-                style={{
-                  display: "flex",
-                  gap: "10px",
-                  marginTop: "18px",
-                }}
-              >
-                <button
-                  onClick={() => setAuthMode("signin")}
-                  style={{
-                    flex: 1,
-                    padding: "12px",
-                    borderRadius: "12px",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background:
-                      authMode === "signin"
-                        ? "rgba(56,189,248,0.18)"
-                        : "rgba(255,255,255,0.04)",
-                    color: "white",
-                    cursor: "pointer",
-                  }}
-                >
-                  Sign In
-                </button>
-
-                <button
-                  onClick={() => setAuthMode("signup")}
-                  style={{
-                    flex: 1,
-                    padding: "12px",
-                    borderRadius: "12px",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background:
-                      authMode === "signup"
-                        ? "rgba(56,189,248,0.18)"
-                        : "rgba(255,255,255,0.04)",
-                    color: "white",
-                    cursor: "pointer",
-                  }}
-                >
-                  Sign Up
-                </button>
+              <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
+                {(["signin", "signup"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setAuthMode(mode)}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      borderRadius: "12px",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background:
+                        authMode === mode
+                          ? "rgba(56,189,248,0.18)"
+                          : "rgba(255,255,255,0.04)",
+                      color: "white",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {mode === "signin" ? "Sign In" : "Sign Up"}
+                  </button>
+                ))}
               </div>
 
               <input
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "14px",
-                  marginTop: "18px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "white",
-                  boxSizing: "border-box",
-                  outline: "none",
-                }}
+                style={{ ...inputStyle, marginTop: "18px" }}
               />
-
               <input
                 type="password"
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "14px",
-                  marginTop: "12px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "white",
-                  boxSizing: "border-box",
-                  outline: "none",
-                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleEmailAuth();
                 }}
+                style={{ ...inputStyle, marginTop: "12px" }}
               />
 
               <button
@@ -386,6 +421,7 @@ export default function HomePage() {
                   borderRadius: "12px",
                   fontWeight: 800,
                   cursor: authBusy ? "not-allowed" : "pointer",
+                  fontSize: "1rem",
                 }}
               >
                 {authBusy
@@ -449,6 +485,7 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
+      {/* ── Feedback modal ── */}
       <AnimatePresence>
         {showFeedback && (
           <motion.div
@@ -507,7 +544,6 @@ export default function HomePage() {
               <h2 style={{ margin: 0, fontSize: "2rem", fontWeight: 900 }}>
                 Send Feedback
               </h2>
-
               <p
                 style={{
                   marginTop: "12px",
@@ -571,116 +607,39 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
-      <div
-        style={{
-          position: "fixed",
-          left: isMobile ? "10px" : "18px",
-          bottom: isMobile ? "14px" : "18px",
-          zIndex: 40,
-          pointerEvents: "none",
-        }}
-      >
-        <div style={{ position: "relative" }}>
-          <div
-            style={{
-              position: "absolute",
-              inset: "20% 20% 12% 20%",
-              background: "rgba(56, 189, 248, 0.14)",
-              filter: "blur(35px)",
-              borderRadius: "999px",
-            }}
-          />
-
-          <Image
-            src={svRobot}
-            alt="SV Robot"
-            width={isMobile ? 170 : 230}
-            height={isMobile ? 170 : 230}
-            style={{
-              position: "relative",
-              filter: "drop-shadow(0 0 40px rgba(56, 189, 248, 0.3))",
-            }}
-          />
-
-          <AnimatePresence>
-            {isThinking && (
-              <>
-                {[0, 1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 0, x: 0, scale: 0.6 }}
-                    animate={{
-                      opacity: [0, 0.9, 0],
-                      y: -95 - i * 34,
-                      x: 35 + i * 26,
-                      scale: [0.6, 1, 0.88],
-                    }}
-                    exit={{ opacity: 0 }}
-                    transition={{
-                      duration: 1.6,
-                      repeat: Infinity,
-                      delay: i * 0.18,
-                      ease: "easeOut",
-                    }}
-                    style={{
-                      position: "absolute",
-                      left: isMobile ? "86px" : "120px",
-                      bottom: isMobile ? "90px" : "130px",
-                      width: `${16 + i * 6}px`,
-                      height: `${16 + i * 6}px`,
-                      borderRadius: "999px",
-                      background: "rgba(255,255,255,0.75)",
-                      boxShadow: "0 0 18px rgba(255,255,255,0.18)",
-                    }}
-                  />
-                ))}
-              </>
-            )}
-          </AnimatePresence>
-
-          <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            style={{
-              position: "absolute",
-              left: isMobile ? "105px" : "155px",
-              bottom: isMobile ? "145px" : "180px",
-              maxWidth: isMobile ? "140px" : "180px",
-              background: "rgba(255,255,255,0.10)",
-              border: "1px solid rgba(255,255,255,0.18)",
-              borderRadius: "22px",
-              padding: isMobile ? "8px 12px" : "10px 16px",
-              color: "white",
-              fontSize: isMobile ? "0.82rem" : "0.95rem",
-              fontWeight: 600,
-              textAlign: "center",
-              lineHeight: 1.35,
-              letterSpacing: "0.02em",
-              backdropFilter: "blur(18px)",
-              boxShadow: "0 8px 25px rgba(0,0,0,0.25)",
-            }}
-          >
-            {lastThought}
-          </motion.div>
+      {/* ── DESKTOP ONLY: Robot fixed bottom-left ── */}
+      {!isMobile && (
+        <div
+          style={{
+            position: "fixed",
+            left: "18px",
+            bottom: "18px",
+            zIndex: 40,
+            pointerEvents: "none",
+          }}
+        >
+          <RobotMascot size={230} />
         </div>
-      </div>
+      )}
 
+      {/* ── Header card ── */}
       <div
         style={{
           backgroundColor: "rgba(255, 255, 255, 0.03)",
-          padding: isMobile ? "24px" : "40px",
+          padding: isMobile ? "20px 20px 16px" : "40px",
           borderRadius: isMobile ? "24px" : "40px",
           backdropFilter: "blur(30px)",
           border: "1px solid rgba(255, 255, 255, 0.1)",
           maxWidth: "900px",
           width: "100%",
-          marginBottom: "20px",
+          marginBottom: "16px",
           textAlign: "center",
           position: "relative",
           zIndex: 10,
           boxShadow: "0 20px 80px rgba(0,0,0,0.35)",
         }}
       >
+        {/* Top-right buttons */}
         <div
           style={{
             position: isMobile ? "static" : "absolute",
@@ -690,7 +649,7 @@ export default function HomePage() {
             gap: "10px",
             alignItems: "center",
             justifyContent: isMobile ? "center" : "flex-end",
-            marginBottom: isMobile ? "18px" : 0,
+            marginBottom: isMobile ? "14px" : 0,
             flexWrap: "wrap",
           }}
         >
@@ -760,7 +719,7 @@ export default function HomePage() {
             color: "#38bdf8",
             fontWeight: "bold",
             fontSize: "10px",
-            marginBottom: "16px",
+            marginBottom: "12px",
           }}
         >
           NEURAL LINK ESTABLISHED
@@ -768,7 +727,7 @@ export default function HomePage() {
 
         <h1
           style={{
-            fontSize: isMobile ? "2.3rem" : "clamp(2.2rem, 7vw, 4.6rem)",
+            fontSize: isMobile ? "2rem" : "clamp(2.2rem, 7vw, 4.6rem)",
             fontWeight: 900,
             margin: 0,
             lineHeight: 1,
@@ -779,9 +738,9 @@ export default function HomePage() {
 
         <p
           style={{
-            marginTop: "18px",
+            marginTop: "14px",
             color: "rgba(255,255,255,0.78)",
-            fontSize: isMobile ? "0.95rem" : "1rem",
+            fontSize: isMobile ? "0.9rem" : "1rem",
             lineHeight: 1.8,
           }}
         >
@@ -789,10 +748,29 @@ export default function HomePage() {
         </p>
       </div>
 
+      {/* ── MOBILE ONLY: Robot sits between header and chat ── */}
+      {isMobile && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-end",
+            width: "100%",
+            marginBottom: "8px",
+            paddingTop: "28px", // space for thought bubble above robot
+            zIndex: 10,
+            position: "relative",
+          }}
+        >
+          <RobotMascot size={130} />
+        </div>
+      )}
+
+      {/* ── Chat card ── */}
       <div
         style={{
           backgroundColor: "rgba(255, 255, 255, 0.02)",
-          padding: isMobile ? "20px" : "50px",
+          padding: isMobile ? "18px" : "50px",
           borderRadius: isMobile ? "24px" : "40px",
           backdropFilter: "blur(40px)",
           border: "1px solid rgba(255, 255, 255, 0.08)",
@@ -803,18 +781,19 @@ export default function HomePage() {
           boxShadow: "0 20px 80px rgba(0,0,0,0.35)",
         }}
       >
-        <AIHelper onSend={handleSVSend} />
+        <AIHelper user={aiUser} onRequestLogin={() => setShowLogin(true)} />
       </div>
 
+      {/* ── Footer ── */}
       <div
         style={{
-          position: "fixed",
-          bottom: "10px",
-          right: "14px",
+          marginTop: "16px",
           fontSize: "11px",
           color: "rgba(255,255,255,0.35)",
           letterSpacing: "0.08em",
-          zIndex: 1000,
+          textAlign: "center",
+          zIndex: 10,
+          position: "relative",
         }}
       >
         SVANS-AI • Built by Shawn Vansant

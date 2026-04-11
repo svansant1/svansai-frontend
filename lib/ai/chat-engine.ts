@@ -9,13 +9,13 @@ import {
   normalizeText,
 } from "@/lib/ai/cleanup";
 import {
-  detectQuestionType,
   detectResponseStyle,
   detectFollowUpIntent,
   isContextDependentFollowUp,
   type ResponseStyle,
   type FollowUpIntent,
 } from "@/lib/ai/router";
+import { detectQuestionType } from "@/lib/ai/detectQuestionType";
 import { getMemoryContext } from "@/lib/ai/memory";
 import { getRetrievedKnowledge } from "@/lib/ai/retrieval";
 import {
@@ -30,14 +30,47 @@ const ai = new GoogleGenAI({ apiKey });
 
 const MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"];
 
+export type AttachedFile = {
+  name: string;
+  type: string;
+  base64: string;
+};
+
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
   followUpIntent: FollowUpIntent;
   lastAssistantMessage: string;
   effectiveMessage: string;
+  attachedFile?: AttachedFile;
 };
 
-export async function generateChatResponse(rawMessages: unknown[]): Promise<string> {
+// ─── Retry with exponential backoff ──────────────────────────────────────────
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 2,
+  delayMs = 400
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries) {
+        await new Promise((res) =>
+          setTimeout(res, delayMs * Math.pow(2, attempt))
+        );
+      }
+    }
+  }
+  throw lastError;
+}
+
+// ─── Main entry ───────────────────────────────────────────────────────────────
+export async function generateChatResponse(
+  rawMessages: unknown[],
+  attachedFile?: AttachedFile
+): Promise<string> {
   if (!apiKey) {
     return "The AI service is not configured yet. Add GEMINI_API_KEY to your environment settings.";
   }
@@ -45,20 +78,26 @@ export async function generateChatResponse(rawMessages: unknown[]): Promise<stri
   const messages = sanitizeMessages(rawMessages);
 
   if (messages.length === 0) {
-    return "I’m SVANSAI. Ask me anything, and I’ll help as clearly and directly as I can.";
+    return "I'm SVANSAI. Ask me anything, and I'll help as clearly and directly as I can.";
   }
 
   const latestUserMessage = getLatestUserMessage(messages);
 
-  if (!latestUserMessage) {
-    return "I’m ready when you are. Send me your question, and I’ll help.";
+  if (!latestUserMessage && !attachedFile) {
+    return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
   }
 
   const lastAssistantMessage = getLastAssistantMessage(messages);
   const followUpIntent = detectFollowUpIntent(latestUserMessage);
 
   let effectiveMessage = latestUserMessage;
-  let questionType = detectQuestionType(latestUserMessage);
+  let questionType = await detectQuestionType(latestUserMessage || "general");
+
+  // If a file is attached, steer classification toward the right domain
+  if (attachedFile) {
+    const fileContext = `User attached a file named "${attachedFile.name}" (${attachedFile.type}). ${latestUserMessage}`;
+    questionType = await detectQuestionType(fileContext);
+  }
 
   if (isContextDependentFollowUp(latestUserMessage) && lastAssistantMessage) {
     effectiveMessage = `
@@ -68,8 +107,7 @@ ${latestUserMessage}
 Previous assistant response:
 ${lastAssistantMessage}
 `.trim();
-
-    questionType = detectQuestionType(lastAssistantMessage || latestUserMessage);
+    questionType = await detectQuestionType(lastAssistantMessage || latestUserMessage);
   }
 
   const responseStyle = detectResponseStyle(effectiveMessage, questionType);
@@ -86,12 +124,15 @@ ${lastAssistantMessage}
     effectiveMessage,
     memory,
     retrieval,
+    attachedFile,
   };
 
   return generateBestResponse(context);
 }
 
+// ─── Generation loop ──────────────────────────────────────────────────────────
 async function generateBestResponse(context: ExtendedChatContext): Promise<string> {
+  // Build conversation history (all but last message)
   const contents = context.messages.slice(0, -1).map((message) => ({
     role: message.role === "assistant" ? "model" : "user",
     parts: [{ text: message.content }],
@@ -106,6 +147,7 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
     lastAssistantMessage: context.lastAssistantMessage,
     memory: context.memory,
     retrieval: context.retrieval,
+    hasFile: !!context.attachedFile,
   });
 
   const retryPrompt = buildRetryPrompt(basePrompt);
@@ -118,7 +160,6 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
       prompt: basePrompt,
       secondPass: false,
     });
-
     if (firstAttempt) return firstAttempt;
 
     const secondAttempt = await tryGenerate({
@@ -128,7 +169,6 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
       prompt: retryPrompt,
       secondPass: true,
     });
-
     if (secondAttempt) return secondAttempt;
   }
 
@@ -139,6 +179,55 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
   );
 }
 
+// ─── Build the last user turn, injecting file parts if present ────────────────
+function buildLastUserParts(
+  prompt: string,
+  attachedFile?: AttachedFile
+): Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> {
+  const parts: Array<{
+    text?: string;
+    inlineData?: { mimeType: string; data: string };
+  }> = [];
+
+  if (attachedFile) {
+    const isImage = attachedFile.type.startsWith("image/");
+    const isPdf = attachedFile.type === "application/pdf";
+    const isText =
+      attachedFile.type.startsWith("text/") ||
+      attachedFile.type === "application/json" ||
+      attachedFile.type === "application/x-python";
+
+    if (isImage || isPdf) {
+      // Gemini natively handles images and PDFs as inline data
+      parts.push({
+        inlineData: {
+          mimeType: attachedFile.type,
+          data: attachedFile.base64,
+        },
+      });
+      parts.push({
+        text: prompt,
+      });
+    } else if (isText) {
+      // Decode text files and inject as readable content
+      const decoded = Buffer.from(attachedFile.base64, "base64").toString("utf-8");
+      parts.push({
+        text: `The user attached a file named "${attachedFile.name}".\n\nFile contents:\n\`\`\`\n${decoded}\n\`\`\`\n\n${prompt}`,
+      });
+    } else {
+      // Unknown type — just mention the file name
+      parts.push({
+        text: `The user attached a file named "${attachedFile.name}" (type: ${attachedFile.type}).\n\n${prompt}`,
+      });
+    }
+  } else {
+    parts.push({ text: prompt });
+  }
+
+  return parts;
+}
+
+// ─── Single generation attempt ────────────────────────────────────────────────
 async function tryGenerate(params: {
   model: string;
   context: ExtendedChatContext;
@@ -152,30 +241,42 @@ async function tryGenerate(params: {
       params.context.responseStyle
     );
 
-    const result = await ai.models.generateContent({
-      model: params.model,
-      contents: [
-        ...params.contents,
-        {
-          role: "user",
-          parts: [{ text: params.prompt }],
+    const lastUserParts = buildLastUserParts(
+      params.prompt,
+      params.context.attachedFile
+    );
+
+    const result = await withRetry(() =>
+      ai.models.generateContent({
+        model: params.model,
+        contents: [
+          ...params.contents,
+          {
+            role: "user",
+            parts: lastUserParts,
+          },
+        ],
+        config: {
+          systemInstruction,
+          temperature: getTemperature(
+            params.context.questionType,
+            params.context.responseStyle
+          ),
+          topP: 0.9,
         },
-      ],
-      config: {
-        systemInstruction,
-        temperature: getTemperature(
-          params.context.questionType,
-          params.context.responseStyle
-        ),
-        topP: 0.9,
-      },
-    });
+      })
+    );
 
     const text = cleanResponse(result?.text?.trim() || "");
-
     if (!text) return null;
 
-    if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) {
+    if (
+      !isUsableResponse(
+        text,
+        params.context.messages,
+        params.context.latestUserMessage
+      )
+    ) {
       return null;
     }
 
@@ -193,6 +294,7 @@ async function tryGenerate(params: {
   }
 }
 
+// ─── Generic response filter ──────────────────────────────────────────────────
 function looksTooGeneric(text: string, latestUserMessage: string): boolean {
   const normalized = normalizeText(text);
 
@@ -205,10 +307,10 @@ function looksTooGeneric(text: string, latestUserMessage: string): boolean {
     "give me more detail",
     "i can help with that",
     "could you rephrase",
-    "i’m still here with you",
+    "i'm still here with you",
     "im still here with you",
     "even if my live model response is delayed",
-    "let’s start here",
+    "let's start here",
     "lets start here",
   ];
 
@@ -223,6 +325,7 @@ function looksTooGeneric(text: string, latestUserMessage: string): boolean {
   return false;
 }
 
+// ─── Final fallback ───────────────────────────────────────────────────────────
 function finalFallback(
   question: string,
   type: QuestionType,
@@ -230,40 +333,26 @@ function finalFallback(
 ): string {
   switch (type) {
     case "coding":
-      return `Here’s a simple coding example:
-
-\`\`\`python
-print("hello world")
-\`\`\`
-
-If you want a smaller, longer, or different language version, say "shorter", "more", or name the language.`;
-
+      return `Here's a simple coding example:\n\n\`\`\`python\nprint("hello world")\n\`\`\`\n\nIf you want a different language or approach, just say so.`;
     case "business":
-      return "Tell me the business goal, audience, or offer, and I’ll help you shape a clearer strategy with suggestions and next steps.";
-
+      return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
     case "writing":
-      return "Paste the writing, and I’ll rewrite it, clean it up, or make it sound stronger based on the tone you want.";
-
+      return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
     case "tech_support":
-      return "Tell me the device, what exactly is happening, and what changed before the issue started. I’ll guide you through the best checks first.";
-
+      return "Tell me the device, what exactly is happening, and what changed before the issue started.";
     case "learning":
-      return "This looks like a learning or math question. If you want, I can explain what the expression means, simplify it, or solve it step by step depending on the exact problem.";
-
+      return "I can explain that step by step. Send the full question or problem and I'll break it down.";
     case "life":
-      return "Tell me the situation, and I’ll help you sort through your options, pros and cons, and the best next move.";
-
+      return "Tell me the situation, and I'll help you sort through your options and next move.";
     default:
       if (responseStyle === "brainstorm") {
-        return "Give me the topic or goal, and I’ll generate ideas, directions, and suggestions to build from.";
+        return "Give me the topic or goal, and I'll generate ideas and directions to build from.";
       }
-
       if (responseStyle === "guide") {
-        return "Tell me what you’re trying to do, and I’ll walk you through it step by step.";
+        return "Tell me what you're trying to do, and I'll walk you through it step by step.";
       }
-
       return question.trim()
-        ? `Here’s a direct start based on what you asked: ${question}`
-        : "I’m here and ready. Ask me anything.";
+        ? "I'm here and ready. Send the full question and I'll answer it directly."
+        : "I'm here and ready. Ask me anything.";
   }
 }

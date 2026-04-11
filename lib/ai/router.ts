@@ -24,7 +24,6 @@ function hasAny(text: string, terms: string[]): boolean {
 
 function looksLikeMath(input: string): boolean {
   const q = input.toLowerCase().trim();
-
   return (
     /[\dxyza-bc]\s*[\+\-\*\/\^]\s*[\dxyza-bc]/i.test(q) ||
     q.includes("solve") ||
@@ -42,172 +41,60 @@ function looksLikeMath(input: string): boolean {
 export function detectQuestionType(input: string): QuestionType {
   const q = input.toLowerCase();
 
-  if (looksLikeMath(q)) {
-    return "learning";
-  }
+  if (looksLikeMath(q)) return "learning";
 
   if (
     hasAny(q, [
-      "python",
-      "javascript",
-      "typescript",
-      "java",
-      "c++",
-      "c#",
-      "html",
-      "css",
-      "react",
-      "next",
-      "nextjs",
-      "node",
-      "api",
-      "sql",
-      "database",
-      "bug",
-      "debug",
-      "error",
-      "render",
-      "vercel",
-      "deploy",
-      "build",
-      "code",
-      "programming",
-      "function",
-      "variable",
-      "loop",
-      "array",
-      "class",
-      "tailwind",
-      "flask",
-      "fastapi",
-      "git",
-      "github",
-      "print(",
-      "console.log",
+      "python", "javascript", "typescript", "java", "c++", "c#",
+      "html", "css", "react", "next", "nextjs", "node", "api",
+      "sql", "database", "bug", "debug", "error", "render", "vercel",
+      "deploy", "build", "code", "programming", "function", "variable",
+      "loop", "array", "class", "tailwind", "flask", "fastapi", "git",
+      "github", "print(", "console.log",
     ])
-  ) {
-    return "coding";
-  }
+  ) return "coding";
 
   if (
     hasAny(q, [
-      "business",
-      "startup",
-      "market",
-      "marketing",
-      "branding",
-      "brand",
-      "customer",
-      "audience",
-      "offer",
-      "sales",
-      "profit",
-      "pricing",
-      "website",
-      "service",
-      "company",
-      "roi",
-      "strategy",
+      "business", "startup", "market", "marketing", "branding", "brand",
+      "customer", "audience", "offer", "sales", "profit", "pricing",
+      "website", "service", "company", "roi", "strategy",
     ])
-  ) {
-    return "business";
-  }
+  ) return "business";
 
   if (
     hasAny(q, [
-      "write",
-      "rewrite",
-      "essay",
-      "paragraph",
-      "email",
-      "resume",
-      "cover letter",
-      "grammar",
-      "sentence",
-      "speech",
-      "discussion post",
-      "make this sound better",
-      "word this",
-      "clean this up",
-      "reword",
+      "write", "rewrite", "essay", "paragraph", "email", "resume",
+      "cover letter", "grammar", "sentence", "speech", "discussion post",
+      "make this sound better", "word this", "clean this up", "reword",
     ])
-  ) {
-    return "writing";
-  }
+  ) return "writing";
 
   if (
     hasAny(q, [
-      "computer",
-      "pc",
-      "laptop",
-      "wifi",
-      "internet",
-      "driver",
-      "display",
-      "monitor",
-      "motherboard",
-      "gpu",
-      "cpu",
-      "ram",
-      "bios",
-      "windows",
-      "linux",
-      "iphone",
-      "ipad",
-      "android",
-      "phone",
-      "black screen",
-      "crash",
-      "freeze",
-      "freezing",
-      "not working",
+      "computer", "pc", "laptop", "wifi", "internet", "driver",
+      "display", "monitor", "motherboard", "gpu", "cpu", "ram", "bios",
+      "windows", "linux", "iphone", "ipad", "android", "phone",
+      "black screen", "crash", "freeze", "freezing", "not working",
       "stopped working",
     ])
-  ) {
-    return "tech_support";
-  }
+  ) return "tech_support";
 
   if (
     hasAny(q, [
-      "learn",
-      "study",
-      "teach",
-      "explain",
-      "lesson",
-      "homework",
-      "school",
-      "math",
-      "science",
-      "history",
-      "english",
-      "what is",
-      "how does",
-      "why does",
-      "understand",
-      "meaning of",
+      "learn", "study", "teach", "explain", "lesson", "homework",
+      "school", "math", "science", "history", "english", "what is",
+      "how does", "why does", "understand", "meaning of",
     ])
-  ) {
-    return "learning";
-  }
+  ) return "learning";
 
   if (
     hasAny(q, [
-      "life",
-      "career",
-      "future",
-      "goal",
-      "stress",
-      "motivation",
-      "relationship",
-      "decision",
-      "direction",
-      "plan",
-      "stuck",
+      "life", "career", "future", "goal", "stress", "motivation",
+      "relationship", "decision", "direction", "plan", "stuck",
       "what should i do",
     ])
-  ) {
-    return "life";
-  }
+  ) return "life";
 
   return "general";
 }
@@ -220,59 +107,27 @@ export function detectResponseStyle(
 
   if (
     hasAny(q, [
-      "step by step",
-      "walk me through",
-      "guide me",
-      "how do i",
-      "show me how",
-      "teach me",
-      "help me do",
+      "step by step", "walk me through", "guide me", "how do i",
+      "show me how", "teach me", "help me do",
     ])
-  ) {
-    return "guide";
-  }
+  ) return "guide";
 
   if (
     hasAny(q, [
-      "ideas",
-      "brainstorm",
-      "suggest",
-      "options",
-      "recommend",
-      "creative",
-      "possibilities",
+      "ideas", "brainstorm", "suggest", "options", "recommend",
+      "creative", "possibilities",
     ])
-  ) {
-    return "brainstorm";
-  }
+  ) return "brainstorm";
 
   if (
     questionType === "tech_support" ||
-    hasAny(q, [
-      "fix",
-      "broken",
-      "error",
-      "issue",
-      "problem",
-      "not working",
-      "troubleshoot",
-    ])
-  ) {
-    return "troubleshooting";
-  }
+    hasAny(q, ["fix", "broken", "error", "issue", "problem", "not working", "troubleshoot"])
+  ) return "troubleshooting";
 
   if (
     questionType === "writing" ||
-    hasAny(q, [
-      "rewrite",
-      "reword",
-      "make this sound better",
-      "clean this up",
-      "edit this",
-    ])
-  ) {
-    return "rewrite";
-  }
+    hasAny(q, ["rewrite", "reword", "make this sound better", "clean this up", "edit this"])
+  ) return "rewrite";
 
   if (
     q.includes("?") ||
@@ -282,118 +137,112 @@ export function detectResponseStyle(
     q.startsWith("can") ||
     q.startsWith("is") ||
     q.startsWith("are")
-  ) {
-    return "direct_answer";
-  }
+  ) return "direct_answer";
 
   return "conversation";
 }
 
+// ─── Follow-up intent — partial matching so natural language works ────────────
+
+type IntentRule = {
+  intent: FollowUpIntent;
+  patterns: string[];
+};
+
+const FOLLOW_UP_RULES: IntentRule[] = [
+  {
+    intent: "shorten",
+    patterns: [
+      "shorter", "shorten", "make it shorter", "make it smaller",
+      "smaller", "less", "cut it down", "cut it", "too long",
+      "brief", "briefer", "more concise", "condense",
+    ],
+  },
+  {
+    intent: "expand",
+    patterns: [
+      "more", "more detail", "expand", "go deeper", "add more",
+      "more on that", "elaborate", "tell me more", "keep going",
+      "go on", "longer", "make it longer", "extend",
+    ],
+  },
+  {
+    intent: "simplify",
+    patterns: [
+      "simpler", "make it simpler", "simplify", "dumb it down",
+      "easier", "in plain english", "layman", "like i'm five",
+      "eli5", "break it down", "basic",
+    ],
+  },
+  {
+    intent: "continue",
+    patterns: [
+      "continue", "keep going", "go on", "next", "what's next",
+      "and then", "finish it", "keep writing",
+    ],
+  },
+  {
+    intent: "rewrite",
+    patterns: [
+      "rewrite it", "rewrite that", "reword it", "clean that up",
+      "say it better", "rephrase", "rephrase that", "say that differently",
+      "word it differently",
+    ],
+  },
+  {
+    intent: "clarify",
+    patterns: [
+      "explain that", "clarify", "what do you mean", "break that down",
+      "i don't understand", "i dont understand", "confused",
+      "what does that mean", "can you explain",
+    ],
+  },
+  {
+    intent: "example",
+    patterns: [
+      "give me an example", "example", "show me an example",
+      "code example", "another example", "show an example",
+      "for example", "like what", "such as",
+    ],
+  },
+];
+
 export function detectFollowUpIntent(input: string): FollowUpIntent {
   const q = input.toLowerCase().trim();
 
-  if (
-    [
-      "a little",
-      "shorter",
-      "make it shorter",
-      "smaller",
-      "less",
-      "cut it down",
-      "shorten it",
-    ].includes(q)
-  ) {
-    return "shorten";
-  }
-
-  if (
-    [
-      "more",
-      "more detail",
-      "expand",
-      "go deeper",
-      "add more",
-      "more on that",
-    ].includes(q)
-  ) {
-    return "expand";
-  }
-
-  if (
-    [
-      "simpler",
-      "make it simpler",
-      "simplify",
-      "dumb it down",
-      "easier",
-    ].includes(q)
-  ) {
-    return "simplify";
-  }
-
-  if (["continue", "keep going", "go on", "next"].includes(q)) {
-    return "continue";
-  }
-
-  if (
-    [
-      "rewrite it",
-      "rewrite that",
-      "reword it",
-      "clean that up",
-      "say it better",
-    ].includes(q)
-  ) {
-    return "rewrite";
-  }
-
-  if (
-    [
-      "explain that",
-      "clarify",
-      "what do you mean",
-      "break that down",
-    ].includes(q)
-  ) {
-    return "clarify";
-  }
-
-  if (
-    [
-      "give me an example",
-      "example",
-      "show me an example",
-      "code example",
-      "another example",
-    ].includes(q)
-  ) {
-    return "example";
+  for (const rule of FOLLOW_UP_RULES) {
+    if (rule.patterns.some((pattern) => q.includes(pattern))) {
+      return rule.intent;
+    }
   }
 
   return "none";
 }
 
+// ─── Context-dependent follow-up detection — partial matching ────────────────
+
+const CONTEXT_DEPENDENT_PATTERNS = [
+  "more", "shorter", "simpler", "continue", "rewrite", "explain that",
+  "clarify", "example", "give me an example", "another example",
+  "make it smaller", "make it longer", "go deeper", "break that down",
+  "keep going", "go on", "next", "expand", "elaborate", "tell me more",
+  "dumb it down", "in plain english", "like i'm five", "eli5",
+  "make it shorter", "make it simpler", "rephrase", "rephrase that",
+  "word it differently", "say it better", "i don't understand",
+  "i dont understand", "what does that mean",
+];
+
+/**
+ * Returns true if the message is a short follow-up that only makes sense
+ * in the context of the previous assistant response.
+ */
 export function isContextDependentFollowUp(input: string): boolean {
   const q = input.toLowerCase().trim();
 
-  const explicitFollowUps = [
-    "a little",
-    "more",
-    "shorter",
-    "simpler",
-    "continue",
-    "rewrite it",
-    "rewrite that",
-    "explain that",
-    "clarify",
-    "example",
-    "give me an example",
-    "another example",
-    "make it smaller",
-    "make it longer",
-    "go deeper",
-    "break that down",
-  ];
+  // Short messages that match a known follow-up pattern
+  if (q.length <= 60 && CONTEXT_DEPENDENT_PATTERNS.some((p) => q.includes(p))) {
+    return true;
+  }
 
-  return explicitFollowUps.includes(q);
+  return false;
 }

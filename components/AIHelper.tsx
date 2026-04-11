@@ -7,6 +7,17 @@ import { supabase } from "../lib/supabase";
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  filePreview?: string; // base64 data URL for images
+  fileName?: string; // display name for non-image files
+  fileType?: string; // mime type
+};
+
+type AttachedFile = {
+  name: string;
+  type: string;
+  base64: string; // raw base64 (no prefix)
+  dataUrl: string; // full data URL for preview
+  size: number;
 };
 
 type UserState = {
@@ -15,24 +26,61 @@ type UserState = {
 };
 
 type AIHelperProps = {
-  onSend: (messages: ChatMessage[]) => Promise<string>;
+  user: UserState | null;
+  onRequestLogin: () => void;
 };
 
 const GUEST_LIMIT = 5;
+const MAX_STORED_MESSAGES = 40;
+const MAX_FILE_MB = 10;
 
-export default function AIHelper({ onSend }: AIHelperProps) {
+const ACCEPTED_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/javascript",
+  "text/typescript",
+  "text/html",
+  "text/css",
+  "application/json",
+  "application/x-python",
+  "text/x-python",
+  "text/x-java-source",
+  "text/x-c",
+  "text/x-cpp",
+];
+
+function isImageType(type: string) {
+  return type.startsWith("image/");
+}
+
+function isPdfType(type: string) {
+  return type === "application/pdf";
+}
+
+function isTextType(type: string) {
+  return (
+    type.startsWith("text/") ||
+    type === "application/json" ||
+    type === "application/x-python"
+  );
+}
+
+export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const [user, setUser] = useState<UserState | null>(null);
-  const [showLogin, setShowLogin] = useState(false);
   const [loginDismissed, setLoginDismissed] = useState(false);
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  const [fileError, setFileError] = useState("");
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const storageKey = useMemo(() => {
     if (!user?.email) return "svansai-guest-chat";
@@ -40,434 +88,188 @@ export default function AIHelper({ onSend }: AIHelperProps) {
   }, [user]);
 
   useEffect(() => {
-    const openLogin = () => {
-      setShowLogin(true);
-    };
-
-    window.addEventListener("openLogin", openLogin);
-
-    return () => {
-      window.removeEventListener("openLogin", openLogin);
-    };
+    const update = () => setIsMobile(window.innerWidth <= 768);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-
-    const initializeUser = async () => {
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
-
-      if (!mounted) return;
-
-      if (authUser?.id && authUser.email) {
-        setUser({
-          id: authUser.id,
-          email: authUser.email,
-        });
-      } else {
-        setUser(null);
-      }
-    };
-
-    initializeUser();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      const authUser = session?.user;
-
-      if (authUser?.id && authUser.email) {
-        setUser({
-          id: authUser.id,
-          email: authUser.email,
-        });
-      } else {
-        setUser(null);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    const savedMessages = localStorage.getItem(storageKey);
-
-    if (savedMessages) {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
       try {
-        const parsed = JSON.parse(savedMessages) as ChatMessage[];
-        setMessages(parsed);
+        const parsed = JSON.parse(saved) as ChatMessage[];
+        setMessages(parsed.slice(-MAX_STORED_MESSAGES));
         return;
       } catch {
-        // ignore bad saved history
+        // bad data — fall through
       }
     }
-
-    if (user) {
-      setMessages([
-        {
-          role: "assistant",
-          content:
-            "Welcome back. What would you like help with today? I can guide you step by step.",
-        },
-      ]);
-    } else {
-      setMessages([
-        {
-          role: "assistant",
-          content:
-            "What would you like help with today? I can guide you step by step.",
-        },
-      ]);
-    }
+    setMessages([
+      {
+        role: "assistant",
+        content: user
+          ? "Welcome back. What would you like help with today?"
+          : "What would you like help with today? I can guide you step by step. You can also attach images, PDFs, or code files.",
+      },
+    ]);
   }, [storageKey, user]);
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(messages));
+    // Strip file previews before saving to keep localStorage small
+    const stripped = messages.slice(-MAX_STORED_MESSAGES).map((m) => ({
+      role: m.role,
+      content: m.content,
+      fileName: m.fileName,
+      fileType: m.fileType,
+    }));
+    localStorage.setItem(storageKey, JSON.stringify(stripped));
   }, [messages, storageKey]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const handleSignup = async () => {
-    const trimmedEmail = email.trim();
-    const trimmedPassword = password.trim();
+  const notifyThinking = (thinking: boolean, msg?: string) => {
+    window.dispatchEvent(
+      new CustomEvent(thinking ? "sv-thinking-start" : "sv-thinking-end", {
+        detail: {
+          message:
+            msg || (thinking ? "Thinking it through..." : "Ready to help."),
+        },
+      }),
+    );
+  };
 
-    if (!trimmedEmail || !trimmedPassword) return;
+  // ─── File handling ────────────────────────────────────────────────────────
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFileError("");
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const { error } = await supabase.auth.signUp({
-      email: trimmedEmail,
-      password: trimmedPassword,
-      options: {
-        emailRedirectTo:
-          typeof window !== "undefined" ? window.location.origin : undefined,
-      },
-    });
+    // Reset input so same file can be re-selected
+    e.target.value = "";
 
-    if (error) {
-      alert(error.message);
+    if (
+      !ACCEPTED_TYPES.includes(file.type) &&
+      !file.name.match(
+        /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md)$/i,
+      )
+    ) {
+      setFileError(
+        "That file type isn't supported. Try an image, PDF, or code/text file.",
+      );
       return;
     }
 
-    setShowLogin(false);
-    setLoginDismissed(false);
-    setEmail("");
-    setPassword("");
-  };
-
-  const handleLogin = async () => {
-    const trimmedEmail = email.trim();
-    const trimmedPassword = password.trim();
-
-    if (!trimmedEmail || !trimmedPassword) return;
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password: trimmedPassword,
-    });
-
-    if (error) {
-      alert(error.message);
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+      setFileError(`File is too large. Max size is ${MAX_FILE_MB}MB.`);
       return;
     }
 
-    setShowLogin(false);
-    setLoginDismissed(false);
-    setEmail("");
-    setPassword("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1];
+      setAttachedFile({
+        name: file.name,
+        type: file.type || "text/plain",
+        base64,
+        dataUrl,
+        size: file.size,
+      });
+    };
+    reader.readAsDataURL(file);
   };
 
-  const handleGoogleLogin = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo:
-          typeof window !== "undefined" ? window.location.origin : undefined,
-      },
-    });
-
-    if (error) {
-      alert(error.message);
-    }
+  const removeAttachment = () => {
+    setAttachedFile(null);
+    setFileError("");
   };
 
-  const handleAppleLogin = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "apple",
-      options: {
-        redirectTo:
-          typeof window !== "undefined" ? window.location.origin : undefined,
-      },
-    });
-
-    if (error) {
-      alert(error.message);
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setShowLogin(false);
-    setLoginDismissed(false);
-    setEmail("");
-    setPassword("");
-    setInput("");
-  };
-
+  // ─── Send ─────────────────────────────────────────────────────────────────
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
+    if ((!input.trim() && !attachedFile) || loading) return;
 
     const userCount = messages.filter((m) => m.role === "user").length;
 
     if (!user && userCount >= GUEST_LIMIT && !loginDismissed) {
-      setShowLogin(true);
-      return;
+      setLoginDismissed(true);
+      onRequestLogin();
+      // Don't return — let message send anyway
     }
 
-    const nextMessages: ChatMessage[] = [
-      ...messages,
-      {
-        role: "user",
-        content: input.trim(),
-      },
-    ];
+    const userMessage: ChatMessage = {
+      role: "user",
+      content:
+        input.trim() ||
+        (attachedFile ? `[Attached: ${attachedFile.name}]` : ""),
+      filePreview: attachedFile?.dataUrl,
+      fileName: attachedFile?.name,
+      fileType: attachedFile?.type,
+    };
 
+    const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
+
+    const fileToSend = attachedFile;
+    setAttachedFile(null);
     setLoading(true);
+    notifyThinking(true, "Reading your file...");
 
     try {
-      const reply = await onSend(nextMessages);
+      const body: Record<string, unknown> = {
+        messages: nextMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      };
 
-      setMessages([
-        ...nextMessages,
-        {
-          role: "assistant",
-          content: reply,
-        },
-      ]);
+      // Attach file data for the API
+      if (fileToSend) {
+        body.file = {
+          name: fileToSend.name,
+          type: fileToSend.type,
+          base64: fileToSend.base64,
+        };
+      }
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+      const reply: string =
+        data?.text?.trim() ||
+        "I processed that but didn't generate a response. Try sending it again.";
+
+      setMessages([...nextMessages, { role: "assistant", content: reply }]);
+      notifyThinking(false, "Ready to help.");
     } catch (error) {
-      console.error(error);
+      console.error("SEND_ERROR:", error);
       setMessages([
         ...nextMessages,
         {
           role: "assistant",
           content:
-            "I ran into a problem while trying to respond. Please try again.",
+            "Something interrupted my response. Please send it again and I'll pick right back up.",
         },
       ]);
+      notifyThinking(false, "Still here.");
     } finally {
       setLoading(false);
     }
   };
 
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <>
-      <AnimatePresence>
-        {showLogin && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.82)",
-              backdropFilter: "blur(12px)",
-              zIndex: 1000,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "20px",
-            }}
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 14, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.98 }}
-              transition={{ duration: 0.22 }}
-              style={{
-                background: "#020617",
-                padding: "34px",
-                borderRadius: "24px",
-                width: "100%",
-                maxWidth: "460px",
-                color: "white",
-                position: "relative",
-                boxShadow: "0 20px 80px rgba(0,0,0,0.35)",
-                border: "1px solid rgba(255,255,255,0.08)",
-              }}
-            >
-              <button
-                onClick={() => {
-                  setShowLogin(false);
-                  setLoginDismissed(true);
-                }}
-                style={{
-                  position: "absolute",
-                  top: "14px",
-                  right: "14px",
-                  width: "34px",
-                  height: "34px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.04)",
-                  color: "white",
-                  cursor: "pointer",
-                  fontSize: "1rem",
-                  fontWeight: 700,
-                }}
-                aria-label="Close login modal"
-              >
-                ×
-              </button>
-
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "2rem",
-                  fontWeight: 900,
-                }}
-              >
-                Log In or Create Account
-              </h2>
-
-              <p
-                style={{
-                  marginTop: "12px",
-                  color: "rgba(255,255,255,0.82)",
-                  lineHeight: 1.6,
-                }}
-              >
-                Save your conversations and continue learning.
-              </p>
-
-              <input
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "14px",
-                  marginTop: "18px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "white",
-                  boxSizing: "border-box",
-                  outline: "none",
-                }}
-              />
-
-              <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "14px",
-                  marginTop: "12px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "white",
-                  boxSizing: "border-box",
-                  outline: "none",
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleLogin();
-                }}
-              />
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: "10px",
-                  marginTop: "16px",
-                }}
-              >
-                <button
-                  onClick={handleLogin}
-                  style={{
-                    flex: 1,
-                    padding: "14px",
-                    background: "rgba(255,255,255,0.08)",
-                    color: "white",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    borderRadius: "12px",
-                    fontWeight: 800,
-                    cursor: "pointer",
-                  }}
-                >
-                  Log In
-                </button>
-
-                <button
-                  onClick={handleSignup}
-                  style={{
-                    flex: 1,
-                    padding: "14px",
-                    background: "#38bdf8",
-                    color: "#020617",
-                    border: "none",
-                    borderRadius: "12px",
-                    fontWeight: 800,
-                    cursor: "pointer",
-                  }}
-                >
-                  Create Account
-                </button>
-              </div>
-
-              <hr
-                style={{
-                  margin: "22px 0",
-                  borderColor: "rgba(255,255,255,0.12)",
-                }}
-              />
-
-              <button
-                onClick={handleGoogleLogin}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  marginBottom: "10px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.04)",
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                Continue with Google
-              </button>
-
-              <button
-                onClick={handleAppleLogin}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "12px",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.04)",
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                Continue with Apple
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+    <div style={{ width: "100%" }}>
+      {/* ── Status bar ── */}
       <div
         style={{
           width: "100%",
@@ -475,7 +277,7 @@ export default function AIHelper({ onSend }: AIHelperProps) {
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: "14px",
-          gap: "12px",
+          gap: "10px",
           flexWrap: "wrap",
         }}
       >
@@ -483,10 +285,11 @@ export default function AIHelper({ onSend }: AIHelperProps) {
           style={{
             color: "white",
             opacity: 0.6,
-            fontSize: "0.82rem",
+            fontSize: "0.78rem",
             margin: 0,
             letterSpacing: "0.12em",
             fontWeight: 700,
+            wordBreak: "break-word",
           }}
         >
           {loading
@@ -496,32 +299,40 @@ export default function AIHelper({ onSend }: AIHelperProps) {
               : "GUEST MODE"}
         </p>
 
-        {user && (
+        {!user && (
           <button
-            onClick={handleLogout}
+            onClick={() => {
+              setLoginDismissed(false);
+              onRequestLogin();
+            }}
             style={{
-              padding: "9px 14px",
+              padding: "7px 14px",
               borderRadius: "999px",
               border: "1px solid rgba(255,255,255,0.12)",
               background: "rgba(255,255,255,0.04)",
               color: "white",
               cursor: "pointer",
               fontWeight: 700,
+              fontSize: "0.78rem",
+              whiteSpace: "nowrap",
             }}
           >
-            Log Out
+            Log In
           </button>
         )}
       </div>
 
+      {/* ── Chat window ── */}
       <div
         style={{
           width: "100%",
-          minHeight: "320px",
-          maxHeight: "460px",
+          minHeight: isMobile ? "260px" : "320px",
+          maxHeight: isMobile ? "380px" : "460px",
           overflowY: "auto",
-          marginBottom: "18px",
-          paddingRight: "4px",
+          marginBottom: "16px",
+          paddingRight: "2px",
+          borderRadius: "20px",
+          scrollBehavior: "smooth",
         }}
       >
         <AnimatePresence initial={false}>
@@ -538,87 +349,295 @@ export default function AIHelper({ onSend }: AIHelperProps) {
             >
               <div
                 style={{
-                  position: "relative",
-                  maxWidth: "82%",
+                  maxWidth: isMobile ? "88%" : "82%",
                   background:
                     msg.role === "user"
                       ? "rgba(56, 189, 248, 0.18)"
                       : "rgba(255, 255, 255, 0.05)",
-                  padding: "15px 18px",
+                  padding: isMobile ? "12px 14px" : "15px 18px",
                   borderRadius: "18px",
                   color: "white",
                   lineHeight: 1.65,
+                  fontSize: isMobile ? "0.93rem" : "1rem",
                   border:
                     msg.role === "user"
                       ? "1px solid rgba(56, 189, 248, 0.24)"
                       : "1px solid rgba(255,255,255,0.08)",
+                  wordBreak: "break-word",
                 }}
               >
                 <strong
                   style={{
                     display: "block",
-                    marginBottom: "6px",
+                    marginBottom: "5px",
                     color: msg.role === "user" ? "#7dd3fc" : "#38bdf8",
+                    fontSize: isMobile ? "0.82rem" : "0.9rem",
                   }}
                 >
                   {msg.role === "user" ? "You" : "SV"}
                 </strong>
 
-                {msg.content}
+                {/* File preview inside message bubble */}
+                {msg.filePreview && isImageType(msg.fileType || "") && (
+                  <img
+                    src={msg.filePreview}
+                    alt={msg.fileName || "Attached image"}
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: "220px",
+                      borderRadius: "10px",
+                      marginBottom: "8px",
+                      objectFit: "contain",
+                      display: "block",
+                    }}
+                  />
+                )}
+
+                {msg.fileName && !isImageType(msg.fileType || "") && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      background: "rgba(255,255,255,0.07)",
+                      borderRadius: "10px",
+                      padding: "8px 12px",
+                      marginBottom: "8px",
+                      fontSize: "0.82rem",
+                    }}
+                  >
+                    <span style={{ fontSize: "1.2rem" }}>
+                      {isPdfType(msg.fileType || "") ? "📄" : "📎"}
+                    </span>
+                    <span style={{ opacity: 0.85, wordBreak: "break-all" }}>
+                      {msg.fileName}
+                    </span>
+                  </div>
+                )}
+
+                {/* Message text — hide "[Attached: ...]" if we already show preview */}
+                {msg.content && !msg.content.startsWith("[Attached:") && (
+                  <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                )}
+                {msg.content.startsWith("[Attached:") &&
+                  !msg.filePreview &&
+                  !msg.fileName && (
+                    <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                  )}
               </div>
             </motion.div>
           ))}
         </AnimatePresence>
 
         {loading && (
-          <div style={{ opacity: 0.7, color: "white" }}>SV is thinking...</div>
+          <div
+            style={{
+              opacity: 0.6,
+              color: "white",
+              fontSize: "0.88rem",
+              paddingLeft: "4px",
+            }}
+          >
+            SV is thinking...
+          </div>
         )}
 
         <div ref={chatEndRef} />
       </div>
 
-      <textarea
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-          }
-        }}
-        placeholder="Ask a question or answer SV's last prompt..."
-        style={{
-          width: "100%",
-          minHeight: "130px",
-          backgroundColor: "rgba(255, 255, 255, 0.04)",
-          border: "1px solid rgba(255, 255, 255, 0.14)",
-          borderRadius: "24px",
-          padding: "22px",
-          color: "white",
-          fontSize: "1.05rem",
-          outline: "none",
-          resize: "none",
-          boxSizing: "border-box",
-        }}
-      />
+      {/* ── File attachment preview strip ── */}
+      {attachedFile && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            background: "rgba(56,189,248,0.08)",
+            border: "1px solid rgba(56,189,248,0.2)",
+            borderRadius: "14px",
+            padding: "10px 14px",
+            marginBottom: "10px",
+          }}
+        >
+          {isImageType(attachedFile.type) ? (
+            <img
+              src={attachedFile.dataUrl}
+              alt={attachedFile.name}
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "8px",
+                objectFit: "cover",
+                flexShrink: 0,
+              }}
+            />
+          ) : (
+            <span style={{ fontSize: "1.6rem", flexShrink: 0 }}>
+              {isPdfType(attachedFile.type) ? "📄" : "📎"}
+            </span>
+          )}
 
-      <button
-        onClick={handleSend}
-        disabled={loading}
-        style={{
-          marginTop: "18px",
-          padding: "14px 56px",
-          borderRadius: "18px",
-          backgroundColor: loading ? "#7dd3fc" : "#38bdf8",
-          color: "#020617",
-          fontWeight: "900",
-          border: "none",
-          cursor: loading ? "not-allowed" : "pointer",
-          letterSpacing: "0.08em",
-        }}
-      >
-        {loading ? "THINKING..." : "SEND"}
-      </button>
-    </>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p
+              style={{
+                margin: 0,
+                color: "white",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {attachedFile.name}
+            </p>
+            <p
+              style={{
+                margin: 0,
+                color: "rgba(255,255,255,0.45)",
+                fontSize: "0.75rem",
+              }}
+            >
+              {(attachedFile.size / 1024).toFixed(0)} KB
+            </p>
+          </div>
+
+          <button
+            onClick={removeAttachment}
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.14)",
+              borderRadius: "999px",
+              color: "white",
+              cursor: "pointer",
+              width: "28px",
+              height: "28px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "0.85rem",
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* File error */}
+      {fileError && (
+        <p
+          style={{
+            color: "#f87171",
+            fontSize: "0.82rem",
+            marginBottom: "8px",
+            marginTop: 0,
+          }}
+        >
+          {fileError}
+        </p>
+      )}
+
+      {/* ── Input area ── */}
+      <div style={{ width: "100%" }}>
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder={
+            attachedFile
+              ? "Add a message about this file, or just hit Send..."
+              : "Ask anything or follow up on SV's last response..."
+          }
+          style={{
+            width: "100%",
+            minHeight: isMobile ? "100px" : "130px",
+            backgroundColor: "rgba(255, 255, 255, 0.04)",
+            border: "1px solid rgba(255, 255, 255, 0.14)",
+            borderRadius: "20px",
+            padding: isMobile ? "16px" : "22px",
+            color: "white",
+            fontSize: isMobile ? "0.95rem" : "1.05rem",
+            outline: "none",
+            resize: "none",
+            boxSizing: "border-box",
+            display: "block",
+          }}
+        />
+
+        {/* Bottom row: attach button + send button */}
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            marginTop: "14px",
+            alignItems: "center",
+          }}
+        >
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={
+              ACCEPTED_TYPES.join(",") +
+              ",.py,.ts,.tsx,.js,.jsx,.java,.c,.cpp,.cs,.go,.rb,.rs,.swift,.kt,.md"
+            }
+            onChange={handleFileSelect}
+            style={{ display: "none" }}
+          />
+
+          {/* Attach button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            title="Attach file"
+            style={{
+              padding: "14px 18px",
+              borderRadius: "16px",
+              backgroundColor: attachedFile
+                ? "rgba(56,189,248,0.2)"
+                : "rgba(255,255,255,0.06)",
+              border: attachedFile
+                ? "1px solid rgba(56,189,248,0.4)"
+                : "1px solid rgba(255,255,255,0.12)",
+              color: "white",
+              cursor: loading ? "not-allowed" : "pointer",
+              fontSize: "1.1rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            📎
+          </button>
+
+          {/* Send button */}
+          <button
+            onClick={handleSend}
+            disabled={loading}
+            style={{
+              flex: 1,
+              padding: "14px",
+              borderRadius: "16px",
+              backgroundColor: loading ? "#7dd3fc" : "#38bdf8",
+              color: "#020617",
+              fontWeight: 900,
+              border: "none",
+              cursor: loading ? "not-allowed" : "pointer",
+              letterSpacing: "0.08em",
+              fontSize: "0.95rem",
+            }}
+          >
+            {loading ? "THINKING..." : "SEND"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
