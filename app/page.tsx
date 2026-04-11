@@ -18,15 +18,8 @@ import {
 } from "@/lib/db/chat-history";
 import { logPageView, getTotalViews } from "@/lib/db/engagement";
 
-type AiUser = {
-  id: string;
-  email: string;
-};
-
-type MascotPosition = {
-  x: number;
-  y: number;
-};
+type AiUser = { id: string; email: string };
+type MascotPosition = { x: number; y: number };
 
 const SIDEBAR_KEY = "svansai-sidebar-collapsed";
 const MASCOT_KEY = "svansai-mascot-position";
@@ -50,7 +43,10 @@ export default function HomePage() {
   const [lastThought, setLastThought] = useState("Ready to help.");
 
   const [isMobile, setIsMobile] = useState(false);
+
+  // Desktop: collapsed/expanded. Mobile: drawer open/closed
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<
@@ -69,12 +65,11 @@ export default function HomePage() {
   const [totalViews, setTotalViews] = useState(0);
 
   const aiUser: AiUser | null = useMemo(() => {
-    if (user?.id && user?.email) {
-      return { id: user.id, email: user.email };
-    }
+    if (user?.id && user?.email) return { id: user.id, email: user.email };
     return null;
   }, [user]);
 
+  // ─── Mobile detection ─────────────────────────────────────────────────────
   useEffect(() => {
     const update = () => setIsMobile(window.innerWidth <= 768);
     update();
@@ -82,6 +77,7 @@ export default function HomePage() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // ─── Restore saved sidebar + mascot ───────────────────────────────────────
   useEffect(() => {
     const collapsed = localStorage.getItem(SIDEBAR_KEY);
     setIsSidebarCollapsed(collapsed === "true");
@@ -91,44 +87,40 @@ export default function HomePage() {
       try {
         setMascotPosition(JSON.parse(saved));
       } catch {
-        // ignore
+        /* ignore */
       }
     } else {
       setMascotPosition(isMobile ? { x: 10, y: 420 } : { x: 18, y: 520 });
     }
   }, [isMobile]);
 
+  // ─── Auth ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-
     supabase.auth.getUser().then(({ data }) => {
       if (mounted) setUser(data.user ?? null);
     });
-
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
+    } = supabase.auth.onAuthStateChange((_e, session) =>
+      setUser(session?.user ?? null),
+    );
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
   }, []);
 
+  // ─── Page view tracking ───────────────────────────────────────────────────
   useEffect(() => {
     const sessionKey = "svansai-view-session-id";
     const alreadyLoggedKey = "svansai-view-logged";
-
     let sessionId = sessionStorage.getItem(sessionKey);
     if (!sessionId) {
       sessionId = crypto.randomUUID();
       sessionStorage.setItem(sessionKey, sessionId);
     }
-
     const alreadyLogged = sessionStorage.getItem(alreadyLoggedKey);
-
     void (async () => {
       if (!alreadyLogged) {
         await logPageView({
@@ -139,36 +131,34 @@ export default function HomePage() {
         });
         sessionStorage.setItem(alreadyLoggedKey, "true");
       }
-
       const count = await getTotalViews();
       setTotalViews(count);
     })();
   }, [user?.id]);
 
+  // ─── Robot thinking events ────────────────────────────────────────────────
   useEffect(() => {
     const onStart = (e: Event) => {
-      const detail = (e as CustomEvent<{ message: string }>).detail;
+      const d = (e as CustomEvent<{ message: string }>).detail;
       setIsThinking(true);
-      setLastThought(detail?.message || "Thinking it through...");
+      setLastThought(d?.message || "Thinking it through...");
     };
-
     const onEnd = (e: Event) => {
-      const detail = (e as CustomEvent<{ message: string }>).detail;
+      const d = (e as CustomEvent<{ message: string }>).detail;
       setTimeout(() => {
         setIsThinking(false);
-        setLastThought(detail?.message || "Ready to help.");
+        setLastThought(d?.message || "Ready to help.");
       }, 1800);
     };
-
     window.addEventListener("sv-thinking-start", onStart);
     window.addEventListener("sv-thinking-end", onEnd);
-
     return () => {
       window.removeEventListener("sv-thinking-start", onStart);
       window.removeEventListener("sv-thinking-end", onEnd);
     };
   }, []);
 
+  // ─── Conversations ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.id) {
       setConversations([]);
@@ -176,7 +166,6 @@ export default function HomePage() {
       setInitialMessages(undefined);
       return;
     }
-
     void loadConversationList(user.id);
     setActiveConversationId(null);
     setInitialMessages(undefined);
@@ -195,19 +184,17 @@ export default function HomePage() {
     setConversations(rows);
   };
 
+  // ─── Auth handlers ────────────────────────────────────────────────────────
   const handleEmailAuth = async () => {
     if (!email.trim() || !password.trim()) return;
-
     setAuthBusy(true);
     setAuthMessage("");
-
     try {
       if (authMode === "signup") {
         const { error } = await supabase.auth.signUp({
           email: email.trim(),
           password: password.trim(),
         });
-
         setAuthMessage(
           error
             ? error.message
@@ -218,7 +205,6 @@ export default function HomePage() {
           email: email.trim(),
           password: password.trim(),
         });
-
         if (error) {
           setAuthMessage(error.message);
         } else {
@@ -236,14 +222,10 @@ export default function HomePage() {
   const handleOAuth = async (provider: "google" | "apple") => {
     setAuthBusy(true);
     setAuthMessage("");
-
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: {
-        redirectTo: window.location.origin,
-      },
+      options: { redirectTo: window.location.origin },
     });
-
     if (error) {
       setAuthBusy(false);
       setAuthMessage(error.message);
@@ -261,20 +243,14 @@ export default function HomePage() {
       setShowLogin(true);
       return;
     }
-
     if (!feedbackText.trim()) return;
-
     setFeedbackBusy(true);
     setFeedbackMessage("");
-
-    const { error } = await supabase.from("feedback").insert([
-      {
-        user_id: user.id,
-        email: user.email,
-        message: feedbackText.trim(),
-      },
-    ]);
-
+    const { error } = await supabase
+      .from("feedback")
+      .insert([
+        { user_id: user.id, email: user.email, message: feedbackText.trim() },
+      ]);
     if (error) {
       setFeedbackMessage(error.message);
     } else {
@@ -285,31 +261,25 @@ export default function HomePage() {
         setFeedbackMessage("");
       }, 1200);
     }
-
     setFeedbackBusy(false);
   };
 
+  // ─── Conversation handlers ────────────────────────────────────────────────
   const handleMessagesChange = async (messages: ChatMessage[]) => {
     setCurrentMessages(messages);
-
     if (!aiUser) return;
-
     let conversationId = activeConversationId;
-
     if (!conversationId) {
       const created = await createConversation(
         aiUser.id,
         messages.find((m) => m.role === "user")?.content,
       );
       if (!created) return;
-
       conversationId = created.id;
       setActiveConversationId(created.id);
       setConversations((prev) => [created, ...prev]);
     }
-
     await replaceConversationMessages(conversationId, messages);
-
     const firstUserMessage = messages.find((m) => m.role === "user")?.content;
     if (firstUserMessage) {
       const title = buildConversationTitle(firstUserMessage);
@@ -317,47 +287,40 @@ export default function HomePage() {
         prev.map((c) => (c.id === conversationId ? { ...c, title } : c)),
       );
     }
-
-    if (aiUser?.id) {
-      void loadConversationList(aiUser.id);
-    }
+    if (aiUser?.id) void loadConversationList(aiUser.id);
   };
 
   const handleLoadConversation = async (conversationId: string) => {
     const msgs = await getConversationMessages(conversationId);
     setActiveConversationId(conversationId);
     setInitialMessages(msgs);
+    if (isMobile) setMobileSidebarOpen(false);
   };
 
   const handleNewChat = () => {
     setActiveConversationId(null);
     setInitialMessages([
-      {
-        role: "assistant",
-        content: "What would you like help with today?",
-      },
+      { role: "assistant", content: "What would you like help with today?" },
     ]);
+    if (isMobile) setMobileSidebarOpen(false);
   };
 
   const handleDeleteConversation = async (conversationId: string) => {
     await deleteConversation(conversationId);
     setConversations((prev) => prev.filter((c) => c.id !== conversationId));
-
-    if (activeConversationId === conversationId) {
-      handleNewChat();
-    }
+    if (activeConversationId === conversationId) handleNewChat();
   };
 
+  // ─── Mascot drag — single finger on mobile ────────────────────────────────
   const beginDrag = (clientX: number, clientY: number) => {
     setDragging(true);
-
     const startX = clientX - mascotPosition.x;
     const startY = clientY - mascotPosition.y;
 
     const move = (moveX: number, moveY: number) => {
-      const maxX = window.innerWidth - (isMobile ? 96 : 230);
-      const maxY = window.innerHeight - (isMobile ? 96 : 230);
-
+      const size = isMobile ? 96 : 230;
+      const maxX = window.innerWidth - size;
+      const maxY = window.innerHeight - size;
       setMascotPosition({
         x: Math.max(0, Math.min(maxX, moveX - startX)),
         y: Math.max(0, Math.min(maxY, moveY - startY)),
@@ -366,10 +329,10 @@ export default function HomePage() {
 
     const onMouseMove = (e: MouseEvent) => move(e.clientX, e.clientY);
     const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault(); // prevents page scroll while dragging
       const touch = e.touches[0];
       if (touch) move(touch.clientX, touch.clientY);
     };
-
     const end = () => {
       setDragging(false);
       window.removeEventListener("mousemove", onMouseMove);
@@ -384,9 +347,9 @@ export default function HomePage() {
     window.addEventListener("touchend", end);
   };
 
+  // ─── Robot mascot component ───────────────────────────────────────────────
   const robotSize = isMobile ? 96 : 230;
-  const bubbleBottom = isMobile ? robotSize + 14 : robotSize + 18;
-  const bubbleMaxWidth = isMobile ? 118 : 180;
+  const bubbleBottom = isMobile ? robotSize + 10 : robotSize + 18;
 
   const RobotMascot = ({ size }: { size: number }) => (
     <div
@@ -396,14 +359,21 @@ export default function HomePage() {
         height: size,
         cursor: dragging ? "grabbing" : "grab",
         pointerEvents: "auto",
-        touchAction: "none",
+        touchAction: "none", // critical: allows single-finger drag without scroll interference
+        userSelect: "none",
+        WebkitUserSelect: "none",
       }}
-      onMouseDown={(e) => beginDrag(e.clientX, e.clientY)}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        beginDrag(e.clientX, e.clientY);
+      }}
       onTouchStart={(e) => {
+        // Single touch only — no multi-finger requirement
         const touch = e.touches[0];
         if (touch) beginDrag(touch.clientX, touch.clientY);
       }}
     >
+      {/* Thought bubble */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -411,25 +381,25 @@ export default function HomePage() {
           position: "absolute",
           bottom: bubbleBottom,
           left: 0,
-          maxWidth: bubbleMaxWidth,
+          maxWidth: isMobile ? 110 : 180,
           background: "rgba(255,255,255,0.10)",
           border: "1px solid rgba(255,255,255,0.18)",
-          borderRadius: "20px",
-          padding: isMobile ? "7px 10px" : "10px 16px",
+          borderRadius: "18px",
+          padding: isMobile ? "6px 10px" : "10px 16px",
           color: "white",
-          fontSize: isMobile ? "0.72rem" : "0.95rem",
+          fontSize: isMobile ? "0.68rem" : "0.95rem",
           fontWeight: 600,
           textAlign: "center",
-          lineHeight: 1.35,
+          lineHeight: 1.3,
           backdropFilter: "blur(18px)",
           boxShadow: "0 8px 25px rgba(0,0,0,0.25)",
-          whiteSpace: "normal",
           pointerEvents: "none",
         }}
       >
         {lastThought}
       </motion.div>
 
+      {/* Glow */}
       <div
         style={{
           position: "absolute",
@@ -454,6 +424,7 @@ export default function HomePage() {
         }}
       />
 
+      {/* Thinking dots */}
       <AnimatePresence>
         {isThinking &&
           [0, 1, 2].map((i) => (
@@ -477,8 +448,8 @@ export default function HomePage() {
                 position: "absolute",
                 bottom: size * 0.4,
                 left: size * 0.55,
-                width: `${(isMobile ? 9 : 12) + i * (isMobile ? 4 : 5)}px`,
-                height: `${(isMobile ? 9 : 12) + i * (isMobile ? 4 : 5)}px`,
+                width: `${(isMobile ? 8 : 12) + i * (isMobile ? 3 : 5)}px`,
+                height: `${(isMobile ? 8 : 12) + i * (isMobile ? 3 : 5)}px`,
                 borderRadius: "999px",
                 background: "rgba(255,255,255,0.75)",
                 boxShadow: "0 0 14px rgba(255,255,255,0.18)",
@@ -490,7 +461,115 @@ export default function HomePage() {
     </div>
   );
 
-  const sidebarWidth = isSidebarCollapsed ? 72 : isMobile ? 260 : 300;
+  // ─── Sidebar content (shared between desktop + mobile drawer) ─────────────
+  const SidebarContent = () => (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "14px",
+        }}
+      >
+        <strong style={{ fontSize: "0.95rem" }}>Chats</strong>
+        {isMobile && (
+          <button
+            onClick={() => setMobileSidebarOpen(false)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "white",
+              fontSize: "1.2rem",
+              cursor: "pointer",
+              padding: "4px 8px",
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      <button
+        onClick={handleNewChat}
+        style={{
+          width: "100%",
+          marginBottom: "12px",
+          padding: "12px",
+          borderRadius: "12px",
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(56,189,248,0.16)",
+          color: "white",
+          cursor: "pointer",
+          fontWeight: 700,
+          fontSize: "1rem",
+        }}
+      >
+        + New Chat
+      </button>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+          overflowY: "auto",
+          maxHeight: "calc(100vh - 140px)",
+        }}
+      >
+        {conversations.map((conversation) => (
+          <div
+            key={conversation.id}
+            style={{ display: "flex", gap: "6px", alignItems: "stretch" }}
+          >
+            <button
+              onClick={() => handleLoadConversation(conversation.id)}
+              style={{
+                flex: 1,
+                textAlign: "left",
+                padding: "10px 12px",
+                borderRadius: "12px",
+                border:
+                  activeConversationId === conversation.id
+                    ? "1px solid rgba(56,189,248,0.45)"
+                    : "1px solid rgba(255,255,255,0.10)",
+                background:
+                  activeConversationId === conversation.id
+                    ? "rgba(56,189,248,0.14)"
+                    : "rgba(255,255,255,0.04)",
+                color: "white",
+                cursor: "pointer",
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                fontSize: "0.9rem",
+              }}
+              title={conversation.title}
+            >
+              {conversation.title}
+            </button>
+            <button
+              onClick={() => handleDeleteConversation(conversation.id)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: "12px",
+                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.04)",
+                color: "white",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  // ─── Desktop sidebar width ────────────────────────────────────────────────
+  const desktopSidebarWidth = isSidebarCollapsed ? 72 : 300;
 
   return (
     <main
@@ -506,6 +585,7 @@ export default function HomePage() {
         color: "white",
       }}
     >
+      {/* Background orbs */}
       <div
         style={{
           position: "absolute",
@@ -516,19 +596,92 @@ export default function HomePage() {
         }}
       />
 
-      {user && (
+      {/* ── MOBILE: floating tab to open sidebar ── */}
+      {isMobile && user && (
+        <button
+          onClick={() => setMobileSidebarOpen(true)}
+          style={{
+            position: "fixed",
+            left: 0,
+            top: "50%",
+            transform: "translateY(-50%)",
+            zIndex: 50,
+            background: "rgba(56,189,248,0.18)",
+            border: "1px solid rgba(56,189,248,0.35)",
+            borderLeft: "none",
+            borderRadius: "0 10px 10px 0",
+            color: "white",
+            padding: "10px 7px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "0.9rem",
+            backdropFilter: "blur(12px)",
+            boxShadow: "2px 0 12px rgba(0,0,0,0.3)",
+          }}
+          title="Open chat history"
+        >
+          ›
+        </button>
+      )}
+
+      {/* ── MOBILE: full-screen drawer overlay ── */}
+      <AnimatePresence>
+        {isMobile && mobileSidebarOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileSidebarOpen(false)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.6)",
+                zIndex: 55,
+                backdropFilter: "blur(4px)",
+              }}
+            />
+            {/* Drawer */}
+            <motion.div
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              style={{
+                position: "fixed",
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 280,
+                background: "rgba(2,6,23,0.97)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                backdropFilter: "blur(28px)",
+                padding: "20px 16px",
+                boxSizing: "border-box",
+                zIndex: 60,
+                overflowY: "auto",
+              }}
+            >
+              <SidebarContent />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── DESKTOP: sidebar ── */}
+      {!isMobile && user && (
         <aside
           style={{
-            width: sidebarWidth,
-            minWidth: sidebarWidth,
+            width: desktopSidebarWidth,
+            minWidth: desktopSidebarWidth,
             transition: "width 0.22s ease",
-            background:
-              isMobile && isSidebarCollapsed
-                ? "rgba(255,255,255,0.02)"
-                : "rgba(255,255,255,0.03)",
+            background: "rgba(255,255,255,0.03)",
             borderRight: "1px solid rgba(255,255,255,0.08)",
             backdropFilter: "blur(28px)",
-            padding: isMobile && isSidebarCollapsed ? "10px 6px" : "14px",
+            padding: "14px",
             boxSizing: "border-box",
             zIndex: 30,
             overflow: "hidden",
@@ -541,13 +694,12 @@ export default function HomePage() {
               alignItems: "center",
               justifyContent: isSidebarCollapsed ? "center" : "space-between",
               gap: "8px",
-              marginBottom: isSidebarCollapsed ? "8px" : "14px",
+              marginBottom: "14px",
             }}
           >
             {!isSidebarCollapsed && (
               <strong style={{ fontSize: "0.95rem" }}>Chats</strong>
             )}
-
             <button
               onClick={() => setIsSidebarCollapsed((v) => !v)}
               style={{
@@ -555,10 +707,8 @@ export default function HomePage() {
                 border: "1px solid rgba(255,255,255,0.12)",
                 color: "white",
                 borderRadius: "10px",
-                padding:
-                  isMobile && isSidebarCollapsed ? "8px 8px" : "8px 10px",
+                padding: "8px 10px",
                 cursor: "pointer",
-                minWidth: isMobile && isSidebarCollapsed ? "26px" : "unset",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -578,65 +728,60 @@ export default function HomePage() {
             style={{
               width: "100%",
               marginBottom: "12px",
-              padding: isMobile && isSidebarCollapsed ? "10px 6px" : "12px",
+              padding: "12px",
               borderRadius: "12px",
               border: "1px solid rgba(255,255,255,0.12)",
               background: "rgba(56,189,248,0.16)",
               color: "white",
               cursor: "pointer",
               fontWeight: 700,
-              fontSize: isMobile && isSidebarCollapsed ? "0.9rem" : "1rem",
+              fontSize: isSidebarCollapsed ? "0.9rem" : "1rem",
             }}
             title="New Chat"
           >
             {isSidebarCollapsed ? "+" : "New Chat"}
           </button>
 
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-              overflowY: "auto",
-              maxHeight: "calc(100vh - 120px)",
-            }}
-          >
-            {conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                style={{
-                  display: "flex",
-                  gap: "6px",
-                  alignItems: "stretch",
-                }}
-              >
-                <button
-                  onClick={() => handleLoadConversation(conversation.id)}
-                  style={{
-                    flex: 1,
-                    textAlign: "left",
-                    padding: "10px 12px",
-                    borderRadius: "12px",
-                    border:
-                      activeConversationId === conversation.id
-                        ? "1px solid rgba(56,189,248,0.45)"
-                        : "1px solid rgba(255,255,255,0.10)",
-                    background:
-                      activeConversationId === conversation.id
-                        ? "rgba(56,189,248,0.14)"
-                        : "rgba(255,255,255,0.04)",
-                    color: "white",
-                    cursor: "pointer",
-                    overflow: "hidden",
-                    whiteSpace: "nowrap",
-                    textOverflow: "ellipsis",
-                  }}
-                  title={conversation.title}
+          {!isSidebarCollapsed && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                overflowY: "auto",
+                maxHeight: "calc(100vh - 120px)",
+              }}
+            >
+              {conversations.map((conversation) => (
+                <div
+                  key={conversation.id}
+                  style={{ display: "flex", gap: "6px", alignItems: "stretch" }}
                 >
-                  {isSidebarCollapsed ? "💬" : conversation.title}
-                </button>
-
-                {!isSidebarCollapsed && (
+                  <button
+                    onClick={() => handleLoadConversation(conversation.id)}
+                    style={{
+                      flex: 1,
+                      textAlign: "left",
+                      padding: "10px 12px",
+                      borderRadius: "12px",
+                      border:
+                        activeConversationId === conversation.id
+                          ? "1px solid rgba(56,189,248,0.45)"
+                          : "1px solid rgba(255,255,255,0.10)",
+                      background:
+                        activeConversationId === conversation.id
+                          ? "rgba(56,189,248,0.14)"
+                          : "rgba(255,255,255,0.04)",
+                      color: "white",
+                      cursor: "pointer",
+                      overflow: "hidden",
+                      whiteSpace: "nowrap",
+                      textOverflow: "ellipsis",
+                    }}
+                    title={conversation.title}
+                  >
+                    {conversation.title}
+                  </button>
                   <button
                     onClick={() => handleDeleteConversation(conversation.id)}
                     style={{
@@ -650,23 +795,65 @@ export default function HomePage() {
                   >
                     ×
                   </button>
-                )}
-              </div>
-            ))}
-          </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {isSidebarCollapsed && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                overflowY: "auto",
+                maxHeight: "calc(100vh - 120px)",
+              }}
+            >
+              {conversations.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  onClick={() => handleLoadConversation(conversation.id)}
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "12px",
+                    border:
+                      activeConversationId === conversation.id
+                        ? "1px solid rgba(56,189,248,0.45)"
+                        : "1px solid rgba(255,255,255,0.10)",
+                    background:
+                      activeConversationId === conversation.id
+                        ? "rgba(56,189,248,0.14)"
+                        : "rgba(255,255,255,0.04)",
+                    color: "white",
+                    cursor: "pointer",
+                    textAlign: "center",
+                    fontSize: "1rem",
+                  }}
+                  title={conversation.title}
+                >
+                  💬
+                </button>
+              ))}
+            </div>
+          )}
         </aside>
       )}
 
+      {/* ── Main content ── */}
       <div
         style={{
           flex: 1,
           minWidth: 0,
-          padding: isMobile ? "14px 14px 140px" : "20px",
+          padding: isMobile ? "14px 14px 32px" : "20px",
           boxSizing: "border-box",
           position: "relative",
           zIndex: 10,
+          overflowY: "auto",
         }}
       >
+        {/* Modals */}
         <AnimatePresence>
           {showLogin && (
             <motion.div
@@ -724,11 +911,9 @@ export default function HomePage() {
                 >
                   ×
                 </button>
-
                 <h2 style={{ margin: 0, fontSize: "2rem", fontWeight: 900 }}>
                   {authMode === "signin" ? "Log In" : "Create Account"}
                 </h2>
-
                 <p
                   style={{
                     marginTop: "12px",
@@ -740,13 +925,8 @@ export default function HomePage() {
                     ? "Log in to keep your progress and use feedback."
                     : "Create an account to save your progress and use feedback."}
                 </p>
-
                 <div
-                  style={{
-                    display: "flex",
-                    gap: "10px",
-                    marginTop: "18px",
-                  }}
+                  style={{ display: "flex", gap: "10px", marginTop: "18px" }}
                 >
                   {(["signin", "signup"] as const).map((mode) => (
                     <button
@@ -769,14 +949,12 @@ export default function HomePage() {
                     </button>
                   ))}
                 </div>
-
                 <input
                   placeholder="Email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   style={inputStyle({ marginTop: "18px" })}
                 />
-
                 <input
                   type="password"
                   placeholder="Password"
@@ -787,7 +965,6 @@ export default function HomePage() {
                   }}
                   style={inputStyle({ marginTop: "12px" })}
                 />
-
                 <button
                   onClick={handleEmailAuth}
                   disabled={authBusy}
@@ -810,28 +987,24 @@ export default function HomePage() {
                       ? "Log In"
                       : "Create Account"}
                 </button>
-
                 <hr
                   style={{
                     margin: "22px 0",
                     borderColor: "rgba(255,255,255,0.12)",
                   }}
                 />
-
                 <button
                   onClick={() => handleOAuth("google")}
                   style={oauthButtonStyle()}
                 >
                   Continue with Google
                 </button>
-
                 <button
                   onClick={() => handleOAuth("apple")}
                   style={oauthButtonStyle({ marginTop: "10px" })}
                 >
                   Continue with Apple
                 </button>
-
                 {authMessage && (
                   <p
                     style={{
@@ -902,11 +1075,9 @@ export default function HomePage() {
                 >
                   ×
                 </button>
-
                 <h2 style={{ margin: 0, fontSize: "2rem", fontWeight: 900 }}>
                   Send Feedback
                 </h2>
-
                 <p
                   style={{
                     marginTop: "12px",
@@ -916,7 +1087,6 @@ export default function HomePage() {
                 >
                   Have an idea to make SVANS-AI better? Send it here.
                 </p>
-
                 <textarea
                   value={feedbackText}
                   onChange={(e) => setFeedbackText(e.target.value)}
@@ -935,7 +1105,6 @@ export default function HomePage() {
                     resize: "none",
                   }}
                 />
-
                 <button
                   onClick={handleSubmitFeedback}
                   disabled={feedbackBusy}
@@ -953,7 +1122,6 @@ export default function HomePage() {
                 >
                   {feedbackBusy ? "Sending..." : "Submit Feedback"}
                 </button>
-
                 {feedbackMessage && (
                   <p
                     style={{
@@ -970,6 +1138,7 @@ export default function HomePage() {
           )}
         </AnimatePresence>
 
+        {/* Mascot — fixed, draggable */}
         <div
           style={{
             position: "fixed",
@@ -981,6 +1150,7 @@ export default function HomePage() {
           <RobotMascot size={robotSize} />
         </div>
 
+        {/* Header card */}
         <div
           style={{
             backgroundColor: "rgba(255, 255, 255, 0.03)",
@@ -1022,7 +1192,6 @@ export default function HomePage() {
             >
               Feedback
             </button>
-
             {user ? (
               <button onClick={handleLogout} style={pillButtonStyle()}>
                 Log Out
@@ -1048,7 +1217,6 @@ export default function HomePage() {
           >
             NEURAL LINK ESTABLISHED
           </p>
-
           <h1
             style={{
               fontSize: isMobile ? "2rem" : "clamp(2.2rem, 7vw, 4.6rem)",
@@ -1059,7 +1227,6 @@ export default function HomePage() {
           >
             SVANS-AI
           </h1>
-
           <p
             style={{
               marginTop: "14px",
@@ -1071,6 +1238,8 @@ export default function HomePage() {
             Your AI Guide for Anything
           </p>
         </div>
+
+        {/* Views counter */}
         <div
           style={{
             marginTop: "10px",
@@ -1086,6 +1255,7 @@ export default function HomePage() {
           <span>{totalViews.toLocaleString()} views</span>
         </div>
 
+        {/* Chat card */}
         <div
           style={{
             backgroundColor: "rgba(255, 255, 255, 0.02)",
@@ -1095,7 +1265,7 @@ export default function HomePage() {
             border: "1px solid rgba(255, 255, 255, 0.08)",
             width: "100%",
             maxWidth: "900px",
-            margin: "0 auto",
+            margin: "16px auto 0",
             position: "relative",
             zIndex: 10,
             boxShadow: "0 20px 80px rgba(0,0,0,0.35)",
@@ -1110,6 +1280,7 @@ export default function HomePage() {
           />
         </div>
 
+        {/* Footer */}
         <div
           style={{
             marginTop: "16px",
