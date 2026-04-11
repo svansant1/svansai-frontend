@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import type { User } from "@supabase/supabase-js";
@@ -9,10 +9,8 @@ import { supabase } from "../lib/supabase";
 import svRobot from "../mascot/sv-robot.png";
 
 export default function HomePage() {
-  // ─── Auth ─────────────────────────────────────────────────────────────────
   const [user, setUser] = useState<User | null>(null);
 
-  // ─── Login modal ──────────────────────────────────────────────────────────
   const [showLogin, setShowLogin] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -20,17 +18,14 @@ export default function HomePage() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
 
-  // ─── Feedback modal ───────────────────────────────────────────────────────
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
 
-  // ─── Robot state ──────────────────────────────────────────────────────────
   const [isThinking, setIsThinking] = useState(false);
   const [lastThought, setLastThought] = useState("Ready to help.");
 
-  // ─── Layout ───────────────────────────────────────────────────────────────
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -40,7 +35,6 @@ export default function HomePage() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  // ─── Single Supabase auth listener ────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
 
@@ -50,9 +44,9 @@ export default function HomePage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) =>
-      setUser(session?.user ?? null),
-    );
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
 
     return () => {
       mounted = false;
@@ -60,7 +54,6 @@ export default function HomePage() {
     };
   }, []);
 
-  // ─── Robot thinking — driven by events from AIHelper ─────────────────────
   useEffect(() => {
     const onStart = (e: Event) => {
       const detail = (e as CustomEvent<{ message: string }>).detail;
@@ -78,15 +71,16 @@ export default function HomePage() {
 
     window.addEventListener("sv-thinking-start", onStart);
     window.addEventListener("sv-thinking-end", onEnd);
+
     return () => {
       window.removeEventListener("sv-thinking-start", onStart);
       window.removeEventListener("sv-thinking-end", onEnd);
     };
   }, []);
 
-  // ─── Auth handlers ────────────────────────────────────────────────────────
   const handleEmailAuth = async () => {
     if (!email.trim() || !password.trim()) return;
+
     setAuthBusy(true);
     setAuthMessage("");
 
@@ -96,6 +90,7 @@ export default function HomePage() {
           email: email.trim(),
           password: password.trim(),
         });
+
         setAuthMessage(
           error
             ? error.message
@@ -106,6 +101,7 @@ export default function HomePage() {
           email: email.trim(),
           password: password.trim(),
         });
+
         if (error) {
           setAuthMessage(error.message);
         } else {
@@ -123,10 +119,14 @@ export default function HomePage() {
   const handleOAuth = async (provider: "google" | "apple") => {
     setAuthBusy(true);
     setAuthMessage("");
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: window.location.origin },
+      options: {
+        redirectTo: window.location.origin,
+      },
     });
+
     if (error) {
       setAuthBusy(false);
       setAuthMessage(error.message);
@@ -144,15 +144,19 @@ export default function HomePage() {
       setShowLogin(true);
       return;
     }
+
     if (!feedbackText.trim()) return;
+
     setFeedbackBusy(true);
     setFeedbackMessage("");
 
-    const { error } = await supabase
-      .from("feedback")
-      .insert([
-        { user_id: user.id, email: user.email, message: feedbackText.trim() },
-      ]);
+    const { error } = await supabase.from("feedback").insert([
+      {
+        user_id: user.id,
+        email: user.email,
+        message: feedbackText.trim(),
+      },
+    ]);
 
     if (error) {
       setFeedbackMessage(error.message);
@@ -164,13 +168,14 @@ export default function HomePage() {
         setFeedbackMessage("");
       }, 1200);
     }
+
     setFeedbackBusy(false);
   };
 
   const aiUser =
     user?.id && user?.email ? { id: user.id, email: user.email } : null;
 
-  const inputStyle: React.CSSProperties = {
+  const inputStyle: CSSProperties = {
     width: "100%",
     padding: "14px",
     borderRadius: "12px",
@@ -182,39 +187,45 @@ export default function HomePage() {
     fontSize: "1rem",
   };
 
-  // ─── Robot component — reused in two positions ────────────────────────────
+  const robotSize = isMobile ? 96 : 230;
+  const robotBottom = isMobile ? 12 : 18;
+  const robotLeft = isMobile ? 10 : 18;
+  const bubbleBottom = isMobile ? robotSize + 14 : robotSize + 18;
+  const bubbleMaxWidth = isMobile ? 118 : 180;
+
   const RobotMascot = ({ size }: { size: number }) => (
     <div style={{ position: "relative", width: size, height: size }}>
-      {/* Thought bubble */}
-      <div
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
         style={{
           position: "absolute",
-          bottom: size + 8,
-          left: "50%",
-          transform: "translateX(-50%)",
-          whiteSpace: "nowrap",
+          bottom: bubbleBottom,
+          left: 0,
+          maxWidth: bubbleMaxWidth,
           background: "rgba(255,255,255,0.10)",
           border: "1px solid rgba(255,255,255,0.18)",
-          borderRadius: "22px",
-          padding: "8px 14px",
+          borderRadius: "20px",
+          padding: isMobile ? "7px 10px" : "10px 16px",
           color: "white",
-          fontSize: "0.82rem",
+          fontSize: isMobile ? "0.72rem" : "0.95rem",
           fontWeight: 600,
           textAlign: "center",
+          lineHeight: 1.35,
           backdropFilter: "blur(18px)",
           boxShadow: "0 8px 25px rgba(0,0,0,0.25)",
+          whiteSpace: "normal",
         }}
       >
         {lastThought}
-      </div>
+      </motion.div>
 
-      {/* Glow */}
       <div
         style={{
           position: "absolute",
           inset: "20% 20% 12% 20%",
           background: "rgba(56, 189, 248, 0.14)",
-          filter: "blur(30px)",
+          filter: isMobile ? "blur(20px)" : "blur(30px)",
           borderRadius: "999px",
         }}
       />
@@ -226,11 +237,12 @@ export default function HomePage() {
         height={size}
         style={{
           position: "relative",
-          filter: "drop-shadow(0 0 30px rgba(56, 189, 248, 0.3))",
+          filter: isMobile
+            ? "drop-shadow(0 0 20px rgba(56, 189, 248, 0.28))"
+            : "drop-shadow(0 0 30px rgba(56, 189, 248, 0.3))",
         }}
       />
 
-      {/* Thinking dots */}
       <AnimatePresence>
         {isThinking &&
           [0, 1, 2].map((i) => (
@@ -239,7 +251,7 @@ export default function HomePage() {
               initial={{ opacity: 0, scale: 0.6 }}
               animate={{
                 opacity: [0, 0.9, 0],
-                y: -(40 + i * 18),
+                y: isMobile ? -(28 + i * 12) : -(40 + i * 18),
                 x: 10 + i * 12,
                 scale: [0.6, 1, 0.88],
               }}
@@ -254,8 +266,8 @@ export default function HomePage() {
                 position: "absolute",
                 bottom: size * 0.4,
                 left: size * 0.55,
-                width: `${12 + i * 5}px`,
-                height: `${12 + i * 5}px`,
+                width: `${(isMobile ? 9 : 12) + i * (isMobile ? 4 : 5)}px`,
+                height: `${(isMobile ? 9 : 12) + i * (isMobile ? 4 : 5)}px`,
                 borderRadius: "999px",
                 background: "rgba(255,255,255,0.75)",
                 boxShadow: "0 0 14px rgba(255,255,255,0.18)",
@@ -276,13 +288,12 @@ export default function HomePage() {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: isMobile ? "14px 14px 32px" : "20px",
+        padding: isMobile ? "14px 14px 140px" : "20px",
         position: "relative",
         overflow: "hidden",
         color: "white",
       }}
     >
-      {/* Background orbs */}
       <div
         style={{
           position: "absolute",
@@ -293,7 +304,6 @@ export default function HomePage() {
         }}
       />
 
-      {/* ── Login modal ── */}
       <AnimatePresence>
         {showLogin && (
           <motion.div
@@ -368,7 +378,13 @@ export default function HomePage() {
                   : "Create an account to save your progress and use feedback."}
               </p>
 
-              <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  marginTop: "18px",
+                }}
+              >
                 {(["signin", "signup"] as const).map((mode) => (
                   <button
                     key={mode}
@@ -397,6 +413,7 @@ export default function HomePage() {
                 onChange={(e) => setEmail(e.target.value)}
                 style={{ ...inputStyle, marginTop: "18px" }}
               />
+
               <input
                 type="password"
                 placeholder="Password"
@@ -485,7 +502,6 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* ── Feedback modal ── */}
       <AnimatePresence>
         {showFeedback && (
           <motion.div
@@ -544,6 +560,7 @@ export default function HomePage() {
               <h2 style={{ margin: 0, fontSize: "2rem", fontWeight: 900 }}>
                 Send Feedback
               </h2>
+
               <p
                 style={{
                   marginTop: "12px",
@@ -607,22 +624,18 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* ── DESKTOP ONLY: Robot fixed bottom-left ── */}
-      {!isMobile && (
-        <div
-          style={{
-            position: "fixed",
-            left: "18px",
-            bottom: "18px",
-            zIndex: 40,
-            pointerEvents: "none",
-          }}
-        >
-          <RobotMascot size={230} />
-        </div>
-      )}
+      <div
+        style={{
+          position: "fixed",
+          left: robotLeft,
+          bottom: robotBottom,
+          zIndex: 40,
+          pointerEvents: "none",
+        }}
+      >
+        <RobotMascot size={robotSize} />
+      </div>
 
-      {/* ── Header card ── */}
       <div
         style={{
           backgroundColor: "rgba(255, 255, 255, 0.03)",
@@ -639,7 +652,6 @@ export default function HomePage() {
           boxShadow: "0 20px 80px rgba(0,0,0,0.35)",
         }}
       >
-        {/* Top-right buttons */}
         <div
           style={{
             position: isMobile ? "static" : "absolute",
@@ -748,25 +760,6 @@ export default function HomePage() {
         </p>
       </div>
 
-      {/* ── MOBILE ONLY: Robot sits between header and chat ── */}
-      {isMobile && (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "flex-end",
-            width: "100%",
-            marginBottom: "8px",
-            paddingTop: "28px", // space for thought bubble above robot
-            zIndex: 10,
-            position: "relative",
-          }}
-        >
-          <RobotMascot size={130} />
-        </div>
-      )}
-
-      {/* ── Chat card ── */}
       <div
         style={{
           backgroundColor: "rgba(255, 255, 255, 0.02)",
@@ -784,7 +777,6 @@ export default function HomePage() {
         <AIHelper user={aiUser} onRequestLogin={() => setShowLogin(true)} />
       </div>
 
-      {/* ── Footer ── */}
       <div
         style={{
           marginTop: "16px",

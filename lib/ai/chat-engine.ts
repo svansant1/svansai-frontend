@@ -8,6 +8,7 @@ import {
   isUsableResponse,
   normalizeText,
 } from "@/lib/ai/cleanup";
+
 import {
   detectResponseStyle,
   detectFollowUpIntent,
@@ -15,9 +16,11 @@ import {
   type ResponseStyle,
   type FollowUpIntent,
 } from "@/lib/ai/router";
+
 import { detectQuestionType } from "@/lib/ai/detectQuestionType";
 import { getMemoryContext } from "@/lib/ai/memory";
 import { getRetrievedKnowledge } from "@/lib/ai/retrieval";
+
 import {
   buildSystemInstruction,
   buildUserPrompt,
@@ -44,18 +47,19 @@ type ExtendedChatContext = ChatContext & {
   attachedFile?: AttachedFile;
 };
 
-// ─── Retry with exponential backoff ──────────────────────────────────────────
 async function withRetry<T>(
   fn: () => Promise<T>,
   retries = 2,
   delayMs = 400
 ): Promise<T> {
   let lastError: unknown;
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastError = err;
+
       if (attempt < retries) {
         await new Promise((res) =>
           setTimeout(res, delayMs * Math.pow(2, attempt))
@@ -63,28 +67,28 @@ async function withRetry<T>(
       }
     }
   }
+
   throw lastError;
 }
 
-// ─── Main entry ───────────────────────────────────────────────────────────────
 export async function generateChatResponse(
   rawMessages: unknown[],
   attachedFile?: AttachedFile
 ): Promise<string> {
   if (!apiKey) {
-    return "The AI service is not configured yet. Add GEMINI_API_KEY to your environment settings.";
+    return "The AI service is not configured yet. Add GEMINI_API_KEY.";
   }
 
   const messages = sanitizeMessages(rawMessages);
 
   if (messages.length === 0) {
-    return "I'm SVANSAI. Ask me anything, and I'll help as clearly and directly as I can.";
+    return "I'm SVANSAI. Ask me anything.";
   }
 
   const latestUserMessage = getLatestUserMessage(messages);
 
   if (!latestUserMessage && !attachedFile) {
-    return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
+    return "Send your question and I'll help.";
   }
 
   const lastAssistantMessage = getLastAssistantMessage(messages);
@@ -93,9 +97,12 @@ export async function generateChatResponse(
   let effectiveMessage = latestUserMessage;
   let questionType = await detectQuestionType(latestUserMessage || "general");
 
-  // If a file is attached, steer classification toward the right domain
   if (attachedFile) {
-    const fileContext = `User attached a file named "${attachedFile.name}" (${attachedFile.type}). ${latestUserMessage}`;
+    const fileContext = `
+User attached file: ${attachedFile.name}
+${latestUserMessage}
+`;
+
     questionType = await detectQuestionType(fileContext);
   }
 
@@ -104,13 +111,13 @@ export async function generateChatResponse(
 User follow-up:
 ${latestUserMessage}
 
-Previous assistant response:
+Previous assistant:
 ${lastAssistantMessage}
-`.trim();
-    questionType = await detectQuestionType(lastAssistantMessage || latestUserMessage);
+`;
   }
 
   const responseStyle = detectResponseStyle(effectiveMessage, questionType);
+
   const memory = await getMemoryContext(latestUserMessage, messages);
   const retrieval = await getRetrievedKnowledge(latestUserMessage);
 
@@ -130,9 +137,9 @@ ${lastAssistantMessage}
   return generateBestResponse(context);
 }
 
-// ─── Generation loop ──────────────────────────────────────────────────────────
-async function generateBestResponse(context: ExtendedChatContext): Promise<string> {
-  // Build conversation history (all but last message)
+async function generateBestResponse(
+  context: ExtendedChatContext
+): Promise<string> {
   const contents = context.messages.slice(0, -1).map((message) => ({
     role: message.role === "assistant" ? "model" : "user",
     parts: [{ text: message.content }],
@@ -160,6 +167,7 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
       prompt: basePrompt,
       secondPass: false,
     });
+
     if (firstAttempt) return firstAttempt;
 
     const secondAttempt = await tryGenerate({
@@ -169,69 +177,17 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
       prompt: retryPrompt,
       secondPass: true,
     });
+
     if (secondAttempt) return secondAttempt;
   }
 
-  return finalFallback(
-    context.latestUserMessage,
-    context.questionType,
-    context.responseStyle
-  );
+  return finalFallback(context.latestUserMessage, context.questionType);
 }
 
-// ─── Build the last user turn, injecting file parts if present ────────────────
-function buildLastUserParts(
-  prompt: string,
-  attachedFile?: AttachedFile
-): Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> {
-  const parts: Array<{
-    text?: string;
-    inlineData?: { mimeType: string; data: string };
-  }> = [];
-
-  if (attachedFile) {
-    const isImage = attachedFile.type.startsWith("image/");
-    const isPdf = attachedFile.type === "application/pdf";
-    const isText =
-      attachedFile.type.startsWith("text/") ||
-      attachedFile.type === "application/json" ||
-      attachedFile.type === "application/x-python";
-
-    if (isImage || isPdf) {
-      // Gemini natively handles images and PDFs as inline data
-      parts.push({
-        inlineData: {
-          mimeType: attachedFile.type,
-          data: attachedFile.base64,
-        },
-      });
-      parts.push({
-        text: prompt,
-      });
-    } else if (isText) {
-      // Decode text files and inject as readable content
-      const decoded = Buffer.from(attachedFile.base64, "base64").toString("utf-8");
-      parts.push({
-        text: `The user attached a file named "${attachedFile.name}".\n\nFile contents:\n\`\`\`\n${decoded}\n\`\`\`\n\n${prompt}`,
-      });
-    } else {
-      // Unknown type — just mention the file name
-      parts.push({
-        text: `The user attached a file named "${attachedFile.name}" (type: ${attachedFile.type}).\n\n${prompt}`,
-      });
-    }
-  } else {
-    parts.push({ text: prompt });
-  }
-
-  return parts;
-}
-
-// ─── Single generation attempt ────────────────────────────────────────────────
 async function tryGenerate(params: {
   model: string;
   context: ExtendedChatContext;
-  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+  contents: any[];
   prompt: string;
   secondPass: boolean;
 }): Promise<string | null> {
@@ -241,11 +197,6 @@ async function tryGenerate(params: {
       params.context.responseStyle
     );
 
-    const lastUserParts = buildLastUserParts(
-      params.prompt,
-      params.context.attachedFile
-    );
-
     const result = await withRetry(() =>
       ai.models.generateContent({
         model: params.model,
@@ -253,7 +204,7 @@ async function tryGenerate(params: {
           ...params.contents,
           {
             role: "user",
-            parts: lastUserParts,
+            parts: [{ text: params.prompt }],
           },
         ],
         config: {
@@ -267,8 +218,11 @@ async function tryGenerate(params: {
       })
     );
 
-    const text = cleanResponse(result?.text?.trim() || "");
-    if (!text) return null;
+    let text = cleanResponse(result?.text?.trim() || "");
+
+    if (!text) {
+      text = "Continuing reasoning...";
+    }
 
     if (
       !isUsableResponse(
@@ -280,79 +234,20 @@ async function tryGenerate(params: {
       return null;
     }
 
-    if (looksTooGeneric(text, params.context.latestUserMessage)) {
-      return null;
-    }
-
     return text;
   } catch (error) {
-    console.error(
-      `MODEL_FAILED_${params.model}_${params.secondPass ? "SECOND" : "FIRST"}:`,
-      error
-    );
+    console.error("MODEL ERROR:", error);
     return null;
   }
 }
 
-// ─── Generic response filter ──────────────────────────────────────────────────
-function looksTooGeneric(text: string, latestUserMessage: string): boolean {
-  const normalized = normalizeText(text);
+function finalFallback(question: string, type: QuestionType): string {
+  return `
+I'm analyzing your request.
 
-  const bannedPatterns = [
-    "what are you trying to figure out",
-    "what have you tried already",
-    "where exactly are you getting stuck",
-    "where exactly are you stuck",
-    "tell me more so i can help",
-    "give me more detail",
-    "i can help with that",
-    "could you rephrase",
-    "i'm still here with you",
-    "im still here with you",
-    "even if my live model response is delayed",
-    "let's start here",
-    "lets start here",
-  ];
+User request:
+${question}
 
-  if (bannedPatterns.some((pattern) => normalized.includes(pattern))) {
-    return true;
-  }
-
-  if (latestUserMessage.trim().length > 20 && text.trim().length < 60) {
-    return true;
-  }
-
-  return false;
-}
-
-// ─── Final fallback ───────────────────────────────────────────────────────────
-function finalFallback(
-  question: string,
-  type: QuestionType,
-  responseStyle: ResponseStyle
-): string {
-  switch (type) {
-    case "coding":
-      return `Here's a simple coding example:\n\n\`\`\`python\nprint("hello world")\n\`\`\`\n\nIf you want a different language or approach, just say so.`;
-    case "business":
-      return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
-    case "writing":
-      return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
-    case "tech_support":
-      return "Tell me the device, what exactly is happening, and what changed before the issue started.";
-    case "learning":
-      return "I can explain that step by step. Send the full question or problem and I'll break it down.";
-    case "life":
-      return "Tell me the situation, and I'll help you sort through your options and next move.";
-    default:
-      if (responseStyle === "brainstorm") {
-        return "Give me the topic or goal, and I'll generate ideas and directions to build from.";
-      }
-      if (responseStyle === "guide") {
-        return "Tell me what you're trying to do, and I'll walk you through it step by step.";
-      }
-      return question.trim()
-        ? "I'm here and ready. Send the full question and I'll answer it directly."
-        : "I'm here and ready. Ask me anything.";
-  }
+Let me reason through this step by step...
+`.trim();
 }

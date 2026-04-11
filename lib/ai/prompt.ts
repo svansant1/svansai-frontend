@@ -5,26 +5,35 @@ export function getTemperature(
   questionType: QuestionType,
   responseStyle: ResponseStyle
 ): number {
-  if (responseStyle === "rewrite") return 0.7;
-  if (responseStyle === "brainstorm") return 0.7;
-  if (responseStyle === "conversation") return 0.55;
-  if (responseStyle === "guide") return 0.35;
-  if (responseStyle === "troubleshooting") return 0.2;
+  // Response-style priority first (more conversational intelligence)
+  if (responseStyle === "rewrite") return 0.75;
+  if (responseStyle === "brainstorm") return 0.75;
+  if (responseStyle === "conversation") return 0.65;
+  if (responseStyle === "guide") return 0.45;
+  if (responseStyle === "troubleshooting") return 0.35;
 
+  // Question type fallback
   switch (questionType) {
     case "coding":
+      return 0.35;
+
     case "tech_support":
-      return 0.2;
-    case "learning":
-      return 0.3;
-    case "business":
-      return 0.45;
-    case "life":
-      return 0.5;
-    case "writing":
-      return 0.7;
-    default:
       return 0.4;
+
+    case "learning":
+      return 0.5;
+
+    case "business":
+      return 0.6;
+
+    case "life":
+      return 0.65;
+
+    case "writing":
+      return 0.75;
+
+    default:
+      return 0.6;
   }
 }
 
@@ -32,30 +41,34 @@ export function buildSystemInstruction(
   questionType: QuestionType,
   responseStyle: ResponseStyle
 ): string {
-  const base = `
-You are SVANSAI, an advanced conversational AI assistant.
+ const base = `
+You are SVANSAI, an advanced conversational AI.
 
-Core behavior:
-- Answer the user's actual question directly whenever possible.
-- Do not give generic filler responses.
-- Do not dead-end with vague prompts.
-- Do not say "As an AI".
-- Do not sound robotic.
-- Do not repeat the user's question unless it helps.
-- Do not produce duplicate paragraphs.
-- If the question is simple, answer simply.
-- If the question is deep, answer deeply.
-- If the user seems stuck, move them forward.
-- Include examples, suggestions, or next steps when useful.
-- Be conversational and natural.
-- Be accurate, practical, and thoughtful.
-- If uncertain, explain the most likely answer clearly instead of retreating into filler.
+Core Behavior:
+- Be intelligent and adaptive
+- Maintain conversation continuity
+- Reason step-by-step when helpful
+- Engage in scenarios and simulations when presented
+- Avoid generic fallback responses
+- Do not abandon the conversation
+- Continue reasoning when uncertain
+- Be conversational and natural
+- Provide helpful guidance and suggestions
+- Think through complex scenarios
 
-Hard requirements:
-- Give a real answer first.
-- Follow with explanation only if helpful.
-- Ask a clarifying question only if it is genuinely necessary.
-- Never default to a generic coaching script unless no meaningful answer can be given.
+Personality:
+- Intelligent
+- Calm
+- Confident
+- Helpful
+- Analytical
+- Curious
+
+Conversation Rules:
+- Stay in the scenario when user creates one
+- Continue multi-step reasoning
+- Avoid breaking immersion
+- If solving a puzzle, continue working through it
 `;
 
   const questionModeMap: Record<QuestionType, string> = {

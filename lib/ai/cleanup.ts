@@ -70,34 +70,28 @@ export function isWeakResponse(text: string): boolean {
     "what are you trying to figure out",
     "what have you tried already",
     "where exactly are you getting stuck",
-    "where exactly are you stuck",
     "tell me more",
     "give me more detail",
-    "could you rephrase",
-    "i can help with that",
-    "let’s start here",
-    "lets start here",
   ];
 
   return weakPatterns.some((pattern) => normalized.includes(pattern));
 }
-
 export function isUsableResponse(
   text: string,
   messages: ChatMessage[],
   latestUserMessage: string
 ): boolean {
   if (!text) return false;
-  if (text.length < MIN_RESPONSE_LENGTH) return false;
 
-  if (latestUserMessage.trim().length > 6 && isWeakResponse(text)) {
-    return false;
-  }
+  if (text.length < 8) return false;
 
   const lastAssistantMessage =
     [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
 
-  if (lastAssistantMessage && normalizeText(lastAssistantMessage) === normalizeText(text)) {
+  if (
+    lastAssistantMessage &&
+    normalizeText(lastAssistantMessage) === normalizeText(text)
+  ) {
     return false;
   }
 

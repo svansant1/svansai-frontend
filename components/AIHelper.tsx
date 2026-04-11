@@ -141,6 +141,9 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
     );
   };
 
+  // Mobile left-side reserve so bottom-left mascot doesn't block chat/input
+  const mobileMascotReserve = 92;
+
   // ─── File handling ────────────────────────────────────────────────────────
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError("");
@@ -331,8 +334,10 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
           overflowY: "auto",
           marginBottom: "16px",
           paddingRight: "2px",
+          paddingLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
           borderRadius: "20px",
           scrollBehavior: "smooth",
+          boxSizing: "border-box",
         }}
       >
         <AnimatePresence initial={false}>
@@ -457,6 +462,8 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
             borderRadius: "14px",
             padding: "10px 14px",
             marginBottom: "10px",
+            marginLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
+            boxSizing: "border-box",
           }}
         >
           {isImageType(attachedFile.type) ? (
@@ -532,6 +539,7 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
             fontSize: "0.82rem",
             marginBottom: "8px",
             marginTop: 0,
+            marginLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
           }}
         >
           {fileError}
@@ -539,7 +547,13 @@ export default function AIHelper({ user, onRequestLogin }: AIHelperProps) {
       )}
 
       {/* ── Input area ── */}
-      <div style={{ width: "100%" }}>
+      <div
+        style={{
+          width: "100%",
+          paddingLeft: isMobile ? `${mobileMascotReserve}px` : "0px",
+          boxSizing: "border-box",
+        }}
+      >
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
