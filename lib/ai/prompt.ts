@@ -198,7 +198,7 @@ ${params.lastAssistantMessage || "None"}
 File attached:
 ${params.hasFile ? "Yes" : "No"}
 
-Relevant memory:
+Relevant memory and learned conversation patterns:
 ${memoryText}
 
 Retrieved knowledge:
@@ -213,6 +213,7 @@ Instructions for this response:
 - If the follow-up means continue, continue from the previous answer.
 - If the follow-up means example, give a useful example based on the prior topic.
 - If a file is attached, use it as important context.
+- Use learned memory to adapt your style, continuity, and usefulness when helpful.
 - Be useful immediately.
 - Avoid generic fallback language.
 - Avoid asking for more detail unless truly necessary.
@@ -224,10 +225,12 @@ export function buildRetryPrompt(originalPrompt: string): string {
 ${originalPrompt}
 
 Second-pass instruction:
-- Your first attempt was too weak, too generic, or too vague.
-- This time, give a stronger, more useful answer.
-- Do not say things like "tell me more," "what are you trying to figure out," "I’m still here with you," or "I can help with that."
-- Actually answer the question.
-- Be more specific, more developed, and more conversational.
+- Your first attempt was too weak, too generic, too vague, or not adaptive enough.
+- This time, answer more directly and more intelligently.
+- Use the learned memory if it helps.
+- Continue the conversation naturally.
+- Do not say things like "tell me more," "what are you trying to figure out," "I'm still here with you," or "I can help with that."
+- Actually answer the question or continue the scenario.
+- Be more specific, more developed, more conversational, and more useful.
 `.trim();
 }

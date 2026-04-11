@@ -6,7 +6,7 @@ export async function getMemoryContext(
 ): Promise<MemoryItem[]> {
   const recentUserMessages = messages
     .filter((m) => m.role === "user")
-    .slice(-5)
+    .slice(-8)
     .map((m, index) => ({
       id: `recent-${index}`,
       summary: m.content,
@@ -14,9 +14,94 @@ export async function getMemoryContext(
     }))
     .filter((item) => item.relevance > 0.15)
     .sort((a, b) => b.relevance - a.relevance)
-    .slice(0, 3);
+    .slice(0, 4);
 
-  return recentUserMessages;
+  const learnedMemory = extractLearnedMemory(messages);
+
+  return [...learnedMemory, ...recentUserMessages]
+    .sort((a, b) => b.relevance - a.relevance)
+    .slice(0, 6);
+}
+
+export function extractLearnedMemory(messages: ChatMessage[]): MemoryItem[] {
+  const learned: MemoryItem[] = [];
+
+  const userMessages = messages
+    .filter((m) => m.role === "user")
+    .map((m) => m.content.toLowerCase());
+
+  if (userMessages.some((m) => m.includes("step by step"))) {
+    learned.push({
+      id: "pref-step-by-step",
+      summary: "User prefers step-by-step explanations.",
+      relevance: 0.95,
+    });
+  }
+
+  if (
+    userMessages.some(
+      (m) =>
+        m.includes("example") ||
+        m.includes("show me code") ||
+        m.includes("code example")
+    )
+  ) {
+    learned.push({
+      id: "pref-examples",
+      summary: "User prefers examples and code when helpful.",
+      relevance: 0.9,
+    });
+  }
+
+  if (
+    userMessages.some(
+      (m) =>
+        m.includes("direct answer") ||
+        m.includes("answer directly") ||
+        m.includes("don't be generic") ||
+        m.includes("dont be generic")
+    )
+  ) {
+    learned.push({
+      id: "pref-direct",
+      summary: "User prefers direct answers and dislikes generic fallback responses.",
+      relevance: 0.98,
+    });
+  }
+
+  if (
+    userMessages.some(
+      (m) =>
+        m.includes("conversation") ||
+        m.includes("conversational") ||
+        m.includes("talk like") ||
+        m.includes("have conversations")
+    )
+  ) {
+    learned.push({
+      id: "pref-conversation",
+      summary: "User wants conversational, adaptive responses instead of rigid one-shot answers.",
+      relevance: 0.96,
+    });
+  }
+
+  if (
+    userMessages.some(
+      (m) =>
+        m.includes("svansai") ||
+        m.includes("super ai") ||
+        m.includes("make it smarter") ||
+        m.includes("make it more developed")
+    )
+  ) {
+    learned.push({
+      id: "project-svansai",
+      summary: "User is actively building SVANSAI and wants it to be smarter, more conversational, and more adaptive.",
+      relevance: 0.97,
+    });
+  }
+
+  return learned;
 }
 
 function scoreRelevance(query: string, text: string): number {

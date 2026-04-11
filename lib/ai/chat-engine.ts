@@ -107,14 +107,16 @@ ${latestUserMessage}
   }
 
   if (isContextDependentFollowUp(latestUserMessage) && lastAssistantMessage) {
-    effectiveMessage = `
+  effectiveMessage = `
 User follow-up:
 ${latestUserMessage}
 
-Previous assistant:
+Previous assistant response:
 ${lastAssistantMessage}
-`;
-  }
+
+Use conversation memory to interpret this follow-up correctly.
+`.trim();
+}
 
   const responseStyle = detectResponseStyle(effectiveMessage, questionType);
 
