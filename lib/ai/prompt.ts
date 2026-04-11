@@ -146,6 +146,7 @@ export function buildUserPrompt(params: {
   lastAssistantMessage: string;
   memory: MemoryItem[];
   retrieval: RetrievalItem[];
+  hasFile?: boolean;
 }): string {
   const memoryText =
     params.memory.length > 0
@@ -181,6 +182,9 @@ ${params.followUpIntent}
 Previous assistant response:
 ${params.lastAssistantMessage || "None"}
 
+File attached:
+${params.hasFile ? "Yes" : "No"}
+
 Relevant memory:
 ${memoryText}
 
@@ -195,6 +199,7 @@ Instructions for this response:
 - If the follow-up means simplify, simplify the previous answer.
 - If the follow-up means continue, continue from the previous answer.
 - If the follow-up means example, give a useful example based on the prior topic.
+- If a file is attached, use it as important context.
 - Be useful immediately.
 - Avoid generic fallback language.
 - Avoid asking for more detail unless truly necessary.
