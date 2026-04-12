@@ -1,0 +1,46 @@
+# render.yaml
+# Place this in the root of your GitHub repo
+# Render reads it automatically on deploy
+
+services:
+  # Your main Next.js web service
+  - type: web
+    name: svansai
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_OWNER
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+      - key: GITHUB_BRANCH
+        value: main
+      - key: MONITOR_SECRET
+        sync: false
+      - key: OWNER_USER_ID
+        sync: false
+
+  # Cron job — runs self-monitor every 6 hours automatically
+  - type: cron
+    name: svansai-self-monitor
+    env: node
+    schedule: "0 */6 * * *"
+    buildCommand: ""
+    startCommand: >
+      curl -s -X POST https://svansai.com/api/sv/monitor
+      -H "Content-Type: application/json"
+      -H "Authorization: Bearer $MONITOR_SECRET"
+    envVars:
+      - key: MONITOR_SECRET
+        sync: false
