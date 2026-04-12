@@ -69,7 +69,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 400): P
 export async function generateChatResponse(
   rawMessages: unknown[],
   attachedFile?: AttachedFile,
-  userId?: string | null
+  userEmail?: string | null
 ): Promise<string> {
   if (!apiKey) {
     return "The AI service is not configured yet. Add GEMINI_API_KEY to your environment settings.";
@@ -88,16 +88,23 @@ export async function generateChatResponse(
   }
 
   // ─── Phase 3: Check for sv commands FIRST ────────────────────────────────
-  const svCommand = parseSVCommand(latestUserMessage);
-  if (svCommand) {
-    const commandResponse = await handleSVCommand(svCommand, userId);
-    if (commandResponse) return commandResponse;
-  }
+  console.log("SV DEBUG → latestUserMessage:", latestUserMessage);
+
+const svCommand = parseSVCommand(latestUserMessage);
+console.log("SV DEBUG → parsed command:", svCommand);
+console.log("SV DEBUG → userEmail:", userEmail);
+
+if (svCommand) {
+  const commandResponse = await handleSVCommand(svCommand, userEmail);
+  console.log("SV DEBUG → commandResponse:", commandResponse);
+
+  if (commandResponse) return commandResponse;
+}
 
   // ─── Phase 3: Surface unnotified upgrades to owner at start of chat ───────
   // Only triggers on the FIRST message of a session (messages.length === 1)
   if (messages.length === 1) {
-    const upgradeNotice = await checkAndSurfaceUpgrades(userId);
+    const upgradeNotice = await checkAndSurfaceUpgrades(userEmail);
     if (upgradeNotice) return upgradeNotice;
   }
 

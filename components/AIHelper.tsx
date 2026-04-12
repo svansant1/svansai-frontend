@@ -107,17 +107,8 @@ export default function AIHelper({
   }, []);
 
   useEffect(() => {
-    if (conversationId && initialMessages) {
-      setMessages(
-        initialMessages.length
-          ? initialMessages
-          : [
-              {
-                role: "assistant",
-                content: "What would you like help with today?",
-              },
-            ],
-      );
+    if (initialMessages && initialMessages.length > 0) {
+      setMessages(initialMessages);
       return;
     }
 
@@ -129,7 +120,7 @@ export default function AIHelper({
           : "What would you like help with today? I can guide you step by step. You can also attach images, PDFs, or code files.",
       },
     ]);
-  }, [user, initialMessages, conversationId]);
+  }, [user, initialMessages]);
 
   useEffect(() => {
     onMessagesChange?.(messages);
@@ -278,6 +269,7 @@ export default function AIHelper({
           role: m.role,
           content: m.content,
         })),
+        userEmail: user?.email ?? null,
       };
 
       if (fileToSend) {

@@ -69,6 +69,8 @@ export default function HomePage() {
     return null;
   }, [user]);
 
+  const ACTIVE_CONVERSATION_SESSION_KEY = "svansai-active-conversation-id";
+
   // ─── Mobile detection ─────────────────────────────────────────────────────
   useEffect(() => {
     const update = () => setIsMobile(window.innerWidth <= 768);
@@ -164,11 +166,30 @@ export default function HomePage() {
       setConversations([]);
       setActiveConversationId(null);
       setInitialMessages(undefined);
+      sessionStorage.removeItem(ACTIVE_CONVERSATION_SESSION_KEY);
       return;
     }
-    void loadConversationList(user.id);
-    setActiveConversationId(null);
-    setInitialMessages(undefined);
+
+    void (async () => {
+      await loadConversationList(user.id);
+
+      const sessionConversationId = sessionStorage.getItem(
+        ACTIVE_CONVERSATION_SESSION_KEY,
+      );
+
+      if (sessionConversationId) {
+        const msgs = await getConversationMessages(sessionConversationId);
+
+        if (msgs.length > 0) {
+          setActiveConversationId(sessionConversationId);
+          setInitialMessages(msgs);
+          return;
+        }
+      }
+
+      setActiveConversationId(null);
+      setInitialMessages(undefined);
+    })();
   }, [user?.id]);
 
   useEffect(() => {
@@ -267,42 +288,50 @@ export default function HomePage() {
   // ─── Conversation handlers ────────────────────────────────────────────────
   const handleMessagesChange = async (messages: ChatMessage[]) => {
     setCurrentMessages(messages);
+
     if (!aiUser) return;
+
+    const firstUserMessage = messages.find(
+      (m) => m.role === "user" && m.content.trim(),
+    )?.content;
+
+    // Do not create/save a conversation until the user actually says something
+    if (!firstUserMessage) return;
+
     let conversationId = activeConversationId;
+
     if (!conversationId) {
-      const created = await createConversation(
-        aiUser.id,
-        messages.find((m) => m.role === "user")?.content,
-      );
+      const created = await createConversation(aiUser.id, firstUserMessage);
       if (!created) return;
+
       conversationId = created.id;
       setActiveConversationId(created.id);
-      setConversations((prev) => [created, ...prev]);
+
+      sessionStorage.setItem(ACTIVE_CONVERSATION_SESSION_KEY, created.id);
     }
+
     await replaceConversationMessages(conversationId, messages);
-    const firstUserMessage = messages.find((m) => m.role === "user")?.content;
-    if (firstUserMessage) {
-      const title = buildConversationTitle(firstUserMessage);
-      setConversations((prev) =>
-        prev.map((c) => (c.id === conversationId ? { ...c, title } : c)),
-      );
-    }
-    if (aiUser?.id) void loadConversationList(aiUser.id);
+
+    const rows = await listConversations(aiUser.id);
+    setConversations(rows);
   };
 
   const handleLoadConversation = async (conversationId: string) => {
     const msgs = await getConversationMessages(conversationId);
     setActiveConversationId(conversationId);
     setInitialMessages(msgs);
-    if (isMobile) setMobileSidebarOpen(false);
+    sessionStorage.setItem(ACTIVE_CONVERSATION_SESSION_KEY, conversationId);
   };
 
   const handleNewChat = () => {
     setActiveConversationId(null);
     setInitialMessages([
-      { role: "assistant", content: "What would you like help with today?" },
+      {
+        role: "assistant",
+        content: "What would you like help with today?",
+      },
     ]);
-    if (isMobile) setMobileSidebarOpen(false);
+    sessionStorage.removeItem(ACTIVE_CONVERSATION_SESSION_KEY);
   };
 
   const handleDeleteConversation = async (conversationId: string) => {

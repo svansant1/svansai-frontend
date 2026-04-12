@@ -25,12 +25,20 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const OWNER_USER_ID = process.env.OWNER_USER_ID;
 
-// ─── Check if this user is the owner ─────────────────────────────────────────
-export function isOwner(userId?: string | null): boolean {
-  if (!OWNER_USER_ID) return false;
-  return userId === OWNER_USER_ID;
+const OWNER_EMAIL = process.env.OWNER_EMAIL;
+
+
+export function isOwner(userEmail?: string | null): boolean {
+  console.log("SV DEBUG → OWNER_EMAIL:", OWNER_EMAIL);
+  console.log("SV DEBUG → incoming userEmail:", userEmail);
+  console.log(
+    "SV DEBUG → owner match:",
+    userEmail?.toLowerCase() === OWNER_EMAIL?.toLowerCase()
+  );
+
+  if (!OWNER_EMAIL) return false;
+  return userEmail?.toLowerCase() === OWNER_EMAIL.toLowerCase();
 }
 
 // ─── Parse a message for sv commands ─────────────────────────────────────────
@@ -84,10 +92,10 @@ async function storeInstruction(text: string): Promise<void> {
 // ─── Handle a detected sv command ────────────────────────────────────────────
 export async function handleSVCommand(
   command: SVCommand,
-  userId?: string | null
+  userEMAIL?: string | null
 ): Promise<string | null> {
   if (!command) return null;
-  if (!isOwner(userId)) return "Self-improvement commands are only available to the owner account.";
+  if (!isOwner(userEMAIL)) return "Self-improvement commands are only available to the owner account.";
 
   switch (command.type) {
 
@@ -199,8 +207,8 @@ export async function handleSVCommand(
 }
 
 // ─── Check for unnotified candidates and surface them to owner ────────────────
-export async function checkAndSurfaceUpgrades(userId?: string | null): Promise<string | null> {
-  if (!isOwner(userId)) return null;
+export async function checkAndSurfaceUpgrades(userEMAIL?: string | null): Promise<string | null> {
+  if (!isOwner(userEMAIL)) return null;
 
   const unnotified = await getUnnotifiedCandidates();
   if (unnotified.length === 0) return null;
