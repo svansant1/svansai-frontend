@@ -14,7 +14,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@supabase/supabase-js";
-import { getPendingCandidates, getUnnotifiedCandidates, markCandidatesNotified } from "./self-improve";
+import { GoogleGenAI } from "@google/genai";
+import fs from "fs";
+import path from "path";
+import {
+  getPendingCandidates,
+  getUnnotifiedCandidates,
+  markCandidatesNotified,
+} from "./self-improve";
 import { deployCandidate, rejectCandidate } from "./deployer";
 import { runMonitor } from "./self-monitor";
 import { getWeaknessSummary } from "./self-analysis";
@@ -33,14 +40,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+
 const OWNER_PASSWORD = process.env.SV_OWNER_PASSWORD;
 
+// Files that can never be touched by the improvement engine
+const LOCKED_FILES = [
+  "lib/ai/deployer.ts",
+  "lib/ai/self-monitor.ts",
+  "lib/ai/self-improve.ts",
+  "lib/ai/self-analysis.ts",
+  "app/api/sv/deploy/route.ts",
+  "app/api/sv/monitor/route.ts",
+];
+
 // ─── In-memory owner session ──────────────────────────────────────────────────
-// Stored per-process. Resets on server restart (deploy).
-// sessionId is passed from the frontend per browser session.
 const ownerSessions = new Set<string>();
 
-// ─── Session helpers ──────────────────────────────────────────────────────────
 export function isOwnerSession(sessionId: string): boolean {
   return ownerSessions.has(sessionId);
 }
@@ -71,7 +87,6 @@ type SVCommand =
   | null;
 
 // ─── Awaiting password state per session ─────────────────────────────────────
-// Tracks which sessions are in the middle of the unlock flow
 const awaitingPassword = new Set<string>();
 
 export function isAwaitingPassword(sessionId: string): boolean {
@@ -83,12 +98,10 @@ export function parseSVCommand(message: string, sessionId: string): SVCommand {
   const q = message.toLowerCase().trim();
   const raw = message.trim();
 
-  // If session is awaiting password — treat any message as a password attempt
   if (awaitingPassword.has(sessionId)) {
     return { type: "password_attempt", text: raw };
   }
 
-  // Must start with "sv " or be exactly "sv"
   if (!q.startsWith("sv ") && q !== "sv") return null;
 
   const body = q.slice(3).trim();
@@ -122,6 +135,157 @@ async function storeInstruction(text: string): Promise<void> {
   await supabase.from("sv_instructions").insert({ instruction: text });
 }
 
+// ─── Read a source file from disk ─────────────────────────────────────────────
+function readSourceFile(filePath: string): string | null {
+  try {
+    return fs.readFileSync(path.join(process.cwd(), filePath), "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+// ─── Generate a simple line-level diff ───────────────────────────────────────
+function generateDiff(original: string, improved: string): string {
+  const origLines = original.split("\n");
+  const newLines = improved.split("\n");
+  const diff: string[] = [];
+  const maxLen = Math.max(origLines.length, newLines.length);
+  for (let i = 0; i < maxLen; i++) {
+    const orig = origLines[i];
+    const next = newLines[i];
+    if (orig === undefined) diff.push(`+ ${next}`);
+    else if (next === undefined) diff.push(`- ${orig}`);
+    else if (orig !== next) { diff.push(`- ${orig}`); diff.push(`+ ${next}`); }
+  }
+  return diff.slice(0, 100).join("\n");
+}
+
+// ─── Execute improvement from a direct owner instruction ──────────────────────
+// This runs immediately when owner types "sv instruct: [text]"
+// It picks the most relevant file, asks Gemini to improve it, stores the
+// candidate, and returns the diff so the owner can deploy right away.
+async function executeInstruction(instruction: string): Promise<string> {
+  // Determine which file to target based on keywords in the instruction
+  const lower = instruction.toLowerCase();
+  let targetFile = "lib/ai/prompt.ts"; // default — most impactful for response quality
+
+  if (lower.includes("router") || lower.includes("routing") || lower.includes("question type") || lower.includes("detect")) {
+    targetFile = "lib/ai/router.ts";
+  } else if (lower.includes("chat engine") || lower.includes("response filter") || lower.includes("fallback") || lower.includes("generic")) {
+    targetFile = "lib/ai/chat-engine.ts";
+  } else if (lower.includes("memory") || lower.includes("context") || lower.includes("remember")) {
+    targetFile = "lib/ai/memory.ts";
+  } else if (lower.includes("cleanup") || lower.includes("clean") || lower.includes("sanitize")) {
+    targetFile = "lib/ai/cleanup.ts";
+  } else if (lower.includes("prompt") || lower.includes("system") || lower.includes("instruction") || lower.includes("tone") || lower.includes("personality")) {
+    targetFile = "lib/ai/prompt.ts";
+  }
+
+  // Safety check — never touch locked files
+  if (LOCKED_FILES.includes(targetFile)) {
+    return `Cannot modify ${targetFile} — it is locked for safety.`;
+  }
+
+  const originalCode = readSourceFile(targetFile);
+  if (!originalCode) {
+    return `Could not read ${targetFile} from disk. Check that the file exists.`;
+  }
+
+  // Ask Gemini to apply the instruction to the file
+  const prompt = `
+You are improving SVANSAI's source code based on a direct owner instruction.
+
+FILE: ${targetFile}
+
+CURRENT CODE:
+\`\`\`typescript
+${originalCode}
+\`\`\`
+
+OWNER INSTRUCTION:
+"${instruction}"
+
+Your task:
+1. Read the instruction carefully and understand exactly what the owner wants changed.
+2. Apply that change to the relevant section of code.
+3. Keep all other code completely identical — do not refactor unrelated parts.
+4. Do not add imports that don't already exist.
+5. Do not change function signatures.
+
+Return ONLY a JSON object with this exact structure:
+{
+  "improvedCode": "the complete file with your change applied",
+  "reason": "one sentence explaining exactly what you changed and why",
+  "confidence": 0.90
+}
+
+The confidence should reflect how certain you are this implements the instruction correctly.
+Return ONLY the JSON. No markdown. No explanation outside the JSON.
+`.trim();
+
+  try {
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-pro",
+      config: { temperature: 0.2, topP: 0.9 },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    });
+
+    const raw = (result?.text ?? "").trim().replace(/```json|```/gi, "").trim();
+    const parsed = JSON.parse(raw) as {
+      improvedCode?: string;
+      reason?: string;
+      confidence?: number;
+    };
+
+    if (!parsed.improvedCode || !parsed.reason || parsed.confidence === undefined) {
+      return "I generated a response but it wasn't in the expected format. Try rephrasing your instruction more specifically.";
+    }
+
+    if (parsed.improvedCode === originalCode) {
+      return `I analyzed ${targetFile} but the instruction didn't result in any code changes. Try being more specific about what you want changed — for example: "make SV responses shorter by default" or "add more personality to the system prompt".`;
+    }
+
+    // Store as a candidate
+    const diff = generateDiff(originalCode, parsed.improvedCode);
+    const { data, error } = await supabase
+      .from("sv_candidates")
+      .insert({
+        file_path: targetFile,
+        original_code: originalCode,
+        improved_code: parsed.improvedCode,
+        diff,
+        reason: parsed.reason,
+        confidence: parsed.confidence,
+        status: "pending",
+        owner_notified: true,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data) {
+      return "The improvement was generated but failed to save. Check Supabase logs.";
+    }
+
+    const candidateId = data.id as string;
+    const confidencePct = Math.round(parsed.confidence * 100);
+    const diffPreview = diff ? `\`\`\`diff\n${diff.slice(0, 600)}\n\`\`\`` : "No diff available.";
+
+    return `Got it. Here's what I'll change in **${targetFile}**:
+
+**Reason:** ${parsed.reason}
+**Confidence:** ${confidencePct}%
+**Candidate ID:** \`${candidateId.slice(0, 8)}\`
+
+${diffPreview}
+
+Say **sv deploy 1** to deploy this now, or **sv show candidates** to review all pending upgrades.`;
+
+  } catch (err) {
+    console.error("executeInstruction failed:", err);
+    return "Something went wrong while generating the improvement. Check the server logs.";
+  }
+}
+
 // ─── Handle a parsed sv command ───────────────────────────────────────────────
 export async function handleSVCommand(
   command: SVCommand,
@@ -148,7 +312,7 @@ export async function handleSVCommand(
 
     if (command.text === OWNER_PASSWORD) {
       unlockOwnerSession(sessionId);
-      return "Owner mode enabled. You now have full access to self-improvement commands.\n\nAvailable commands:\n• **sv analyze** — run full self-analysis\n• **sv improve** — generate improvement candidates\n• **sv show candidates** — review pending upgrades\n• **sv show [n]** — see diff for candidate #n\n• **sv deploy [n]** — deploy candidate #n\n• **sv deploy all** — deploy all candidates\n• **sv reject [n]** — reject candidate #n\n• **sv status** — view current system status\n• **sv instruct: [text]** — give me a direct instruction\n• **sv lock** — disable owner mode";
+      return "Owner mode enabled. You now have full access to self-improvement commands.\n\nAvailable commands:\n• **sv analyze** — run full self-analysis\n• **sv improve** — generate improvement candidates\n• **sv show candidates** — review pending upgrades\n• **sv show [n]** — see diff for candidate #n\n• **sv deploy [n]** — deploy candidate #n\n• **sv deploy all** — deploy all candidates\n• **sv reject [n]** — reject candidate #n\n• **sv status** — view current system status\n• **sv instruct: [text]** — give a direct improvement instruction and execute it immediately\n• **sv lock** — disable owner mode";
     }
 
     return "Incorrect password. Owner mode not enabled.";
@@ -247,9 +411,10 @@ export async function handleSVCommand(
     }
 
     // ── sv instruct: [text] ───────────────────────────────────────────────────
+    // Now executes the improvement immediately instead of just storing it
     case "instruct": {
       await storeInstruction(command.text);
-      return `Instruction saved: "${command.text}"\n\nI'll factor this into the next improvement cycle.`;
+      return await executeInstruction(command.text);
     }
 
     // ── sv status ─────────────────────────────────────────────────────────────

@@ -148,7 +148,7 @@ ${lastAssistantMessage}
 
   const response = await generateBestResponse(context);
 
-  // Phase 3: Silent scoring + threshold check — fire and forget
+  // Phase 3: Silent scoring + threshold — fire and forget
   void analyzeResponse({ input: latestUserMessage, output: response, questionType });
   void checkThresholdAndRun();
 
@@ -177,14 +177,10 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
   const retryPrompt = buildRetryPrompt(basePrompt);
 
   for (const model of MODELS) {
-    const firstAttempt = await tryGenerate({
-      model, context, contents, prompt: basePrompt, secondPass: false,
-    });
+    const firstAttempt = await tryGenerate({ model, context, contents, prompt: basePrompt, secondPass: false });
     if (firstAttempt) return firstAttempt;
 
-    const secondAttempt = await tryGenerate({
-      model, context, contents, prompt: retryPrompt, secondPass: true,
-    });
+    const secondAttempt = await tryGenerate({ model, context, contents, prompt: retryPrompt, secondPass: true });
     if (secondAttempt) return secondAttempt;
   }
 
@@ -229,10 +225,7 @@ async function tryGenerate(params: {
   secondPass: boolean;
 }): Promise<string | null> {
   try {
-    const systemInstruction = buildSystemInstruction(
-      params.context.questionType,
-      params.context.responseStyle
-    );
+    const systemInstruction = buildSystemInstruction(params.context.questionType, params.context.responseStyle);
     const lastUserParts = buildLastUserParts(params.prompt, params.context.attachedFile);
 
     const result = await withRetry(() =>
@@ -250,19 +243,11 @@ async function tryGenerate(params: {
     const text = cleanResponse(result?.text?.trim() || "");
     if (!text || text.length < 4) return null;
 
-    // Only reject if BOTH conditions are true: message is long AND response is suspiciously short
-    // This prevents filtering short but valid answers to simple questions
-    const inputIsLong = params.context.latestUserMessage.trim().length > 40;
-    const responseIsSuspiciouslyShort = text.trim().length < 30;
-    if (inputIsLong && responseIsSuspiciouslyShort) return null;
+    // Only reject exact duplicates of the last assistant message
+    if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
 
-    // Check for exact duplicate of last response
-    if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) {
-      return null;
-    }
-
-    // Only filter generic stall phrases — don't filter short valid answers
-    if (isHardGenericStall(text)) return null;
+    // Only block hard stall phrases — no length-based rejection
+    if (isHardStall(text)) return null;
 
     return text;
   } catch (error) {
@@ -271,11 +256,11 @@ async function tryGenerate(params: {
   }
 }
 
-// ─── Only block the hardest generic stall patterns ───────────────────────────
-// Removed the "response under 60 chars" rule — it was blocking valid short answers
-function isHardGenericStall(text: string): boolean {
+// ─── Only block confirmed stall phrases ──────────────────────────────────────
+// Removed the "short response = bad" rule — it was blocking valid answers
+// like "Yes.", "No, because...", or short factual replies.
+function isHardStall(text: string): boolean {
   const normalized = normalizeText(text);
-
   const hardStalls = [
     "what are you trying to figure out",
     "what have you tried already",
@@ -288,30 +273,21 @@ function isHardGenericStall(text: string): boolean {
     "let's start here",
     "lets start here",
   ];
-
   return hardStalls.some((p) => normalized.includes(p));
 }
 
 // ─── Final fallback ───────────────────────────────────────────────────────────
 function finalFallback(question: string, type: QuestionType, responseStyle: ResponseStyle): string {
   switch (type) {
-    case "coding":
-      return "Here's a simple coding example:\n\n```python\nprint(\"hello world\")\n```\n\nIf you want a different language or approach, just say so.";
-    case "business":
-      return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
-    case "writing":
-      return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
-    case "tech_support":
-      return "Tell me the device, what exactly is happening, and what changed before the issue started.";
-    case "learning":
-      return "I can explain that step by step. Send the full question or problem and I'll break it down.";
-    case "life":
-      return "Tell me the situation, and I'll help you sort through your options and next move.";
+    case "coding": return "Here's a simple coding example:\n\n```python\nprint(\"hello world\")\n```\n\nIf you want a different language or approach, just say so.";
+    case "business": return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
+    case "writing": return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
+    case "tech_support": return "Tell me the device, what exactly is happening, and what changed before the issue started.";
+    case "learning": return "I can explain that step by step. Send the full question or problem and I'll break it down.";
+    case "life": return "Tell me the situation, and I'll help you sort through your options and next move.";
     default:
       if (responseStyle === "brainstorm") return "Give me the topic or goal, and I'll generate ideas and directions to build from.";
       if (responseStyle === "guide") return "Tell me what you're trying to do, and I'll walk you through it step by step.";
-      return question.trim()
-        ? "I'm here and ready. Send the full question and I'll answer it directly."
-        : "I'm here and ready. Ask me anything.";
+      return question.trim() ? "I'm here and ready. Send the full question and I'll answer it directly." : "I'm here and ready. Ask me anything.";
   }
 }
