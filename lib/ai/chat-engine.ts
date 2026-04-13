@@ -24,11 +24,14 @@ import {
   buildRetryPrompt,
   getTemperature,
 } from "@/lib/ai/prompt";
-
-// ─── Phase 3 imports ──────────────────────────────────────────────────────────
 import { analyzeResponse } from "@/lib/ai/self-analysis";
 import { checkThresholdAndRun } from "@/lib/ai/self-monitor";
-import { parseSVCommand, handleSVCommand, checkAndSurfaceUpgrades } from "@/lib/ai/instruction-handler";
+import {
+  parseSVCommand,
+  handleSVCommand,
+  checkAndSurfaceUpgrades,
+  isAwaitingPassword,
+} from "@/lib/ai/instruction-handler";
 
 const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = new GoogleGenAI({ apiKey });
@@ -69,13 +72,14 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 400): P
 export async function generateChatResponse(
   rawMessages: unknown[],
   attachedFile?: AttachedFile,
-  userEmail?: string | null
+  sessionId?: string | null
 ): Promise<string> {
   if (!apiKey) {
     return "The AI service is not configured yet. Add GEMINI_API_KEY to your environment settings.";
   }
 
   const messages = sanitizeMessages(rawMessages);
+  const sid = sessionId || "anonymous";
 
   if (messages.length === 0) {
     return "I'm SVANSAI. Ask me anything, and I'll help as clearly and directly as I can.";
@@ -87,24 +91,19 @@ export async function generateChatResponse(
     return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
   }
 
-  // ─── Phase 3: Check for sv commands FIRST ────────────────────────────────
-  console.log("SV DEBUG → latestUserMessage:", latestUserMessage);
+  // ─── Phase 3: Handle sv commands and password flow ────────────────────────
+  // If session is awaiting password, treat ANY message as a password attempt
+  if (isAwaitingPassword(sid) || latestUserMessage.toLowerCase().trim().startsWith("sv ")) {
+    const command = parseSVCommand(latestUserMessage, sid);
+    if (command) {
+      const commandResponse = await handleSVCommand(command, sid);
+      if (commandResponse) return commandResponse;
+    }
+  }
 
-const svCommand = parseSVCommand(latestUserMessage);
-console.log("SV DEBUG → parsed command:", svCommand);
-console.log("SV DEBUG → userEmail:", userEmail);
-
-if (svCommand) {
-  const commandResponse = await handleSVCommand(svCommand, userEmail);
-  console.log("SV DEBUG → commandResponse:", commandResponse);
-
-  if (commandResponse) return commandResponse;
-}
-
-  // ─── Phase 3: Surface unnotified upgrades to owner at start of chat ───────
-  // Only triggers on the FIRST message of a session (messages.length === 1)
+  // ─── Phase 3: Surface unnotified upgrades on first message of session ──────
   if (messages.length === 1) {
-    const upgradeNotice = await checkAndSurfaceUpgrades(userEmail);
+    const upgradeNotice = await checkAndSurfaceUpgrades(sid);
     if (upgradeNotice) return upgradeNotice;
   }
 
@@ -150,16 +149,10 @@ ${lastAssistantMessage}
 
   const response = await generateBestResponse(context);
 
-  // ─── Phase 3: Silently score this response after generating it ────────────
-  // Fire and forget — don't await, don't block the response
-  void analyzeResponse({
-    input: latestUserMessage,
-    output: response,
-    questionType,
-  });
+  // ─── Phase 3: Silent response scoring — fire and forget ───────────────────
+  void analyzeResponse({ input: latestUserMessage, output: response, questionType });
 
-  // ─── Phase 3: Check if weakness threshold reached — trigger monitor ───────
-  // Also fire and forget
+  // ─── Phase 3: Threshold check — fire and forget ───────────────────────────
   void checkThresholdAndRun();
 
   return response;
@@ -206,7 +199,10 @@ function buildLastUserParts(
 
   const isImage = attachedFile.type.startsWith("image/");
   const isPdf = attachedFile.type === "application/pdf";
-  const isText = attachedFile.type.startsWith("text/") || attachedFile.type === "application/json" || attachedFile.type === "application/x-python";
+  const isText =
+    attachedFile.type.startsWith("text/") ||
+    attachedFile.type === "application/json" ||
+    attachedFile.type === "application/x-python";
 
   if (isImage || isPdf) {
     return [
@@ -285,7 +281,7 @@ function looksTooGeneric(text: string, latestUserMessage: string): boolean {
 // ─── Final fallback ───────────────────────────────────────────────────────────
 function finalFallback(question: string, type: QuestionType, responseStyle: ResponseStyle): string {
   switch (type) {
-    case "coding": return `Here's a simple coding example:\n\n\`\`\`python\nprint("hello world")\n\`\`\`\n\nIf you want a different language or approach, just say so.`;
+    case "coding": return "Here's a simple coding example:\n\n```python\nprint(\"hello world\")\n```\n\nIf you want a different language or approach, just say so.";
     case "business": return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
     case "writing": return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
     case "tech_support": return "Tell me the device, what exactly is happening, and what changed before the issue started.";

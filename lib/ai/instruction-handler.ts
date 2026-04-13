@@ -1,14 +1,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // instruction-handler.ts
-// Parses owner chat commands for the self-improvement system.
-// Called from chat-engine.ts BEFORE the normal Gemini call.
-// If a command is detected, returns a response directly without hitting Gemini.
+// Owner access via unlock/lock password session.
+// No dependency on userId or auth state.
+//
+// Flow:
+//   User: "sv unlock"
+//   SV:   "Enter owner password:"
+//   User: "mypassword"
+//   SV:   "Owner mode enabled."
+//   User: "sv analyze" / "sv deploy 1" / etc.
+//   User: "sv lock"
+//   SV:   "Owner mode disabled."
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@supabase/supabase-js";
 import { getPendingCandidates, getUnnotifiedCandidates, markCandidatesNotified } from "./self-improve";
 import { deployCandidate, rejectCandidate } from "./deployer";
-import { runMonitor } from "@/lib/ai/self-monitor";
+import { runMonitor } from "./self-monitor";
 import { getWeaknessSummary } from "./self-analysis";
 import {
   buildUpgradeNotification,
@@ -25,24 +33,31 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const OWNER_PASSWORD = process.env.SV_OWNER_PASSWORD;
 
-const OWNER_EMAIL = process.env.OWNER_EMAIL;
+// ─── In-memory owner session ──────────────────────────────────────────────────
+// Stored per-process. Resets on server restart (deploy).
+// sessionId is passed from the frontend per browser session.
+const ownerSessions = new Set<string>();
 
-
-export function isOwner(userEmail?: string | null): boolean {
-  console.log("SV DEBUG → OWNER_EMAIL:", OWNER_EMAIL);
-  console.log("SV DEBUG → incoming userEmail:", userEmail);
-  console.log(
-    "SV DEBUG → owner match:",
-    userEmail?.toLowerCase() === OWNER_EMAIL?.toLowerCase()
-  );
-
-  if (!OWNER_EMAIL) return false;
-  return userEmail?.toLowerCase() === OWNER_EMAIL.toLowerCase();
+// ─── Session helpers ──────────────────────────────────────────────────────────
+export function isOwnerSession(sessionId: string): boolean {
+  return ownerSessions.has(sessionId);
 }
 
-// ─── Parse a message for sv commands ─────────────────────────────────────────
+export function unlockOwnerSession(sessionId: string): void {
+  ownerSessions.add(sessionId);
+}
+
+export function lockOwnerSession(sessionId: string): void {
+  ownerSessions.delete(sessionId);
+}
+
+// ─── Command types ────────────────────────────────────────────────────────────
 type SVCommand =
+  | { type: "unlock" }
+  | { type: "lock" }
+  | { type: "password_attempt"; text: string }
   | { type: "analyze" }
   | { type: "improve" }
   | { type: "show_candidates" }
@@ -55,13 +70,31 @@ type SVCommand =
   | { type: "status" }
   | null;
 
-export function parseSVCommand(message: string): SVCommand {
-  const q = message.toLowerCase().trim();
+// ─── Awaiting password state per session ─────────────────────────────────────
+// Tracks which sessions are in the middle of the unlock flow
+const awaitingPassword = new Set<string>();
 
+export function isAwaitingPassword(sessionId: string): boolean {
+  return awaitingPassword.has(sessionId);
+}
+
+// ─── Parse sv commands ────────────────────────────────────────────────────────
+export function parseSVCommand(message: string, sessionId: string): SVCommand {
+  const q = message.toLowerCase().trim();
+  const raw = message.trim();
+
+  // If session is awaiting password — treat any message as a password attempt
+  if (awaitingPassword.has(sessionId)) {
+    return { type: "password_attempt", text: raw };
+  }
+
+  // Must start with "sv " or be exactly "sv"
   if (!q.startsWith("sv ") && q !== "sv") return null;
 
   const body = q.slice(3).trim();
 
+  if (body === "unlock") return { type: "unlock" };
+  if (body === "lock") return { type: "lock" };
   if (body === "analyze" || body === "analyse") return { type: "analyze" };
   if (body === "improve") return { type: "improve" };
   if (body === "show candidates" || body === "candidates" || body === "list") return { type: "show_candidates" };
@@ -89,17 +122,52 @@ async function storeInstruction(text: string): Promise<void> {
   await supabase.from("sv_instructions").insert({ instruction: text });
 }
 
-// ─── Handle a detected sv command ────────────────────────────────────────────
+// ─── Handle a parsed sv command ───────────────────────────────────────────────
 export async function handleSVCommand(
   command: SVCommand,
-  userEMAIL?: string | null
+  sessionId: string
 ): Promise<string | null> {
   if (!command) return null;
-  if (!isOwner(userEMAIL)) return "Self-improvement commands are only available to the owner account.";
+
+  // ── sv unlock ──────────────────────────────────────────────────────────────
+  if (command.type === "unlock") {
+    if (isOwnerSession(sessionId)) {
+      return "Owner mode is already enabled. Say **sv lock** to disable it.";
+    }
+    awaitingPassword.add(sessionId);
+    return "Enter owner password:";
+  }
+
+  // ── password attempt ───────────────────────────────────────────────────────
+  if (command.type === "password_attempt") {
+    awaitingPassword.delete(sessionId);
+
+    if (!OWNER_PASSWORD) {
+      return "SV_OWNER_PASSWORD is not set in environment variables. Add it to your Render dashboard.";
+    }
+
+    if (command.text === OWNER_PASSWORD) {
+      unlockOwnerSession(sessionId);
+      return "Owner mode enabled. You now have full access to self-improvement commands.\n\nAvailable commands:\n• **sv analyze** — run full self-analysis\n• **sv improve** — generate improvement candidates\n• **sv show candidates** — review pending upgrades\n• **sv show [n]** — see diff for candidate #n\n• **sv deploy [n]** — deploy candidate #n\n• **sv deploy all** — deploy all candidates\n• **sv reject [n]** — reject candidate #n\n• **sv status** — view current system status\n• **sv instruct: [text]** — give me a direct instruction\n• **sv lock** — disable owner mode";
+    }
+
+    return "Incorrect password. Owner mode not enabled.";
+  }
+
+  // ── sv lock ────────────────────────────────────────────────────────────────
+  if (command.type === "lock") {
+    lockOwnerSession(sessionId);
+    return "Owner mode disabled.";
+  }
+
+  // All commands below require owner session
+  if (!isOwnerSession(sessionId)) {
+    return "Owner mode is not enabled. Say **sv unlock** to authenticate.";
+  }
 
   switch (command.type) {
 
-    // ── sv analyze ──────────────────────────────────────────────────────────
+    // ── sv analyze ────────────────────────────────────────────────────────────
     case "analyze": {
       const monitorResult = await runMonitor("manual");
       const summary = await getWeaknessSummary();
@@ -111,18 +179,18 @@ export async function handleSVCommand(
       });
     }
 
-    // ── sv improve ──────────────────────────────────────────────────────────
+    // ── sv improve ────────────────────────────────────────────────────────────
     case "improve": {
       const result = await runMonitor("manual");
       if (result.candidatesGenerated === 0) {
-        return "I ran the improvement cycle but didn't generate any high-confidence candidates yet. More weakness data is needed. Keep chatting and I'll try again.";
+        return "I ran the improvement cycle but no high-confidence candidates were generated yet. More weakness data is needed — keep chatting and I'll try again.";
       }
       const candidates = await getPendingCandidates();
       await markCandidatesNotified(candidates.map((c) => c.id));
       return buildUpgradeNotification(candidates);
     }
 
-    // ── sv show candidates ───────────────────────────────────────────────────
+    // ── sv show candidates ────────────────────────────────────────────────────
     case "show_candidates": {
       const candidates = await getPendingCandidates();
       if (candidates.length === 0) return buildNoUpgradesMessage();
@@ -130,7 +198,7 @@ export async function handleSVCommand(
       return buildUpgradeNotification(candidates);
     }
 
-    // ── sv show [n] ──────────────────────────────────────────────────────────
+    // ── sv show [n] ───────────────────────────────────────────────────────────
     case "show_candidate": {
       const candidates = await getPendingCandidates();
       const candidate = candidates[command.index - 1];
@@ -138,7 +206,7 @@ export async function handleSVCommand(
       return buildCandidateDetail(candidate, command.index);
     }
 
-    // ── sv deploy [n] ────────────────────────────────────────────────────────
+    // ── sv deploy [n] ─────────────────────────────────────────────────────────
     case "deploy": {
       const candidates = await getPendingCandidates();
       const candidate = candidates[command.index - 1];
@@ -148,7 +216,7 @@ export async function handleSVCommand(
       return `${preview}\n\n${result.message}`;
     }
 
-    // ── sv deploy all ────────────────────────────────────────────────────────
+    // ── sv deploy all ─────────────────────────────────────────────────────────
     case "deploy_all": {
       const candidates = await getPendingCandidates();
       if (candidates.length === 0) return buildNoUpgradesMessage();
@@ -162,7 +230,7 @@ export async function handleSVCommand(
       return buildAllDeployedSummary(deployed, failed);
     }
 
-    // ── sv reject [n] ────────────────────────────────────────────────────────
+    // ── sv reject [n] ─────────────────────────────────────────────────────────
     case "reject": {
       const candidates = await getPendingCandidates();
       const candidate = candidates[command.index - 1];
@@ -171,20 +239,20 @@ export async function handleSVCommand(
       return buildRejectConfirmation(candidate);
     }
 
-    // ── sv skip ──────────────────────────────────────────────────────────────
+    // ── sv skip ───────────────────────────────────────────────────────────────
     case "skip": {
       const candidates = await getPendingCandidates();
       await markCandidatesNotified(candidates.map((c) => c.id));
-      return "Got it — I'll hold the upgrade list for now. You can check it anytime with \"sv show candidates\".";
+      return "Got it — holding the upgrade list for now. Say **sv show candidates** anytime to review.";
     }
 
-    // ── sv instruct: [text] ──────────────────────────────────────────────────
+    // ── sv instruct: [text] ───────────────────────────────────────────────────
     case "instruct": {
       await storeInstruction(command.text);
       return `Instruction saved: "${command.text}"\n\nI'll factor this into the next improvement cycle.`;
     }
 
-    // ── sv status ────────────────────────────────────────────────────────────
+    // ── sv status ─────────────────────────────────────────────────────────────
     case "status": {
       const summary = await getWeaknessSummary();
       const candidates = await getPendingCandidates();
@@ -198,7 +266,7 @@ export async function handleSVCommand(
         ? new Date(logs[0].created_at).toLocaleString()
         : "never";
 
-      return `**SVANSAI Self-Improvement Status**\n\nWeaknesses logged: ${summary.total}\nPending upgrades: ${candidates.length}\nLast analysis run: ${lastRun}\n\nTop weak areas: ${Object.entries(summary.byType).map(([t, c]) => `${t} (${c})`).join(", ") || "none"}\n\nSay "sv show candidates" to review upgrades, or "sv analyze" to run a fresh analysis.`;
+      return `**SVANSAI Self-Improvement Status**\n\nWeaknesses logged: ${summary.total}\nPending upgrades: ${candidates.length}\nLast analysis run: ${lastRun}\nOwner mode: enabled ✓\n\nTop weak areas: ${Object.entries(summary.byType).map(([t, c]) => `${t} (${c})`).join(", ") || "none"}\n\nSay **sv show candidates** to review upgrades or **sv analyze** for a fresh analysis.`;
     }
 
     default:
@@ -206,9 +274,9 @@ export async function handleSVCommand(
   }
 }
 
-// ─── Check for unnotified candidates and surface them to owner ────────────────
-export async function checkAndSurfaceUpgrades(userEMAIL?: string | null): Promise<string | null> {
-  if (!isOwner(userEMAIL)) return null;
+// ─── Check for unnotified candidates — only shown in owner sessions ───────────
+export async function checkAndSurfaceUpgrades(sessionId: string): Promise<string | null> {
+  if (!isOwnerSession(sessionId)) return null;
 
   const unnotified = await getUnnotifiedCandidates();
   if (unnotified.length === 0) return null;

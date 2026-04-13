@@ -10,33 +10,27 @@ export async function POST(req: Request) {
       ? (body.messages as ChatMessage[])
       : [];
 
+    // File attachment
     const attachedFile: AttachedFile | undefined =
       body?.file &&
       typeof body.file.name === "string" &&
       typeof body.file.type === "string" &&
       typeof body.file.base64 === "string"
-        ? {
-            name: body.file.name,
-            type: body.file.type,
-            base64: body.file.base64,
-          }
+        ? { name: body.file.name, type: body.file.type, base64: body.file.base64 }
         : undefined;
 
-    const userEmail: string | null =
-      typeof body?.userEmail === "string" ? body.userEmail : null;
+    // sessionId from frontend — used for owner unlock/lock flow
+    // This is a browser session ID, not a user ID
+    const sessionId: string | null =
+      typeof body?.sessionId === "string" ? body.sessionId : null;
 
-    console.log("CHAT ROUTE DEBUG → userEmail:", userEmail);
-
-    const text = await generateChatResponse(messages, attachedFile, userEmail);
+    const text = await generateChatResponse(messages, attachedFile, sessionId);
 
     return NextResponse.json({ text });
   } catch (error) {
     console.error("CHAT_ROUTE_ERROR:", error);
-
     return NextResponse.json(
-      {
-        text: "Something went wrong while generating that response. Please send it again.",
-      },
+      { text: "Something went wrong while generating that response. Please send it again." },
       { status: 500 }
     );
   }

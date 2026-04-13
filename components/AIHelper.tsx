@@ -14,6 +14,7 @@ export type ChatMessage = {
   filePreview?: string;
   fileName?: string;
   fileType?: string;
+  isPassword?: boolean; // marks this bubble as a blurred password entry
 };
 
 type AttachedFile = {
@@ -40,6 +41,13 @@ type AIHelperProps = {
 const GUEST_LIMIT = 5;
 const MAX_STORED_MESSAGES = 40;
 const MAX_FILE_MB = 10;
+
+// SV response that triggers password mode
+const PASSWORD_PROMPT = "enter owner password:";
+
+// SV responses that end password mode
+const PASSWORD_SUCCESS = "owner mode enabled";
+const PASSWORD_FAIL = "incorrect password";
 
 const ACCEPTED_TYPES = [
   "image/jpeg",
@@ -91,8 +99,25 @@ export default function AIHelper({
   >({});
   const [totalViews, setTotalViews] = useState(0);
 
+  // ─── Password mode — switches textarea to masked input ───────────────────────
+  const [isPasswordMode, setIsPasswordMode] = useState(false);
+
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const passwordInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // ─── Stable session ID ────────────────────────────────────────────────────────
+  const sessionId = useMemo(() => {
+    if (typeof window === "undefined") return "ssr";
+    const key = "svansai-session-id";
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  }, []);
 
   const storageKey = useMemo(() => {
     if (!user?.email) return "svansai-guest-chat";
@@ -107,8 +132,17 @@ export default function AIHelper({
   }, []);
 
   useEffect(() => {
-    if (initialMessages && initialMessages.length > 0) {
-      setMessages(initialMessages);
+    if (conversationId && initialMessages) {
+      setMessages(
+        initialMessages.length
+          ? initialMessages
+          : [
+              {
+                role: "assistant",
+                content: "What would you like help with today?",
+              },
+            ],
+      );
       return;
     }
 
@@ -120,7 +154,7 @@ export default function AIHelper({
           : "What would you like help with today? I can guide you step by step. You can also attach images, PDFs, or code files.",
       },
     ]);
-  }, [user, initialMessages]);
+  }, [user, initialMessages, conversationId]);
 
   useEffect(() => {
     onMessagesChange?.(messages);
@@ -135,7 +169,6 @@ export default function AIHelper({
       setFeedbackSummary({});
       return;
     }
-
     void (async () => {
       const summary = await getFeedbackSummary(conversationId);
       setFeedbackSummary(summary);
@@ -148,6 +181,26 @@ export default function AIHelper({
       setTotalViews(views);
     })();
   }, []);
+
+  // ─── Auto-focus password input when mode activates ────────────────────────────
+  useEffect(() => {
+    if (isPasswordMode) {
+      setTimeout(() => passwordInputRef.current?.focus(), 80);
+    } else {
+      setTimeout(() => textareaRef.current?.focus(), 80);
+    }
+  }, [isPasswordMode]);
+
+  // ─── Watch SV responses to toggle password mode ───────────────────────────────
+  const checkPasswordMode = (svResponse: string) => {
+    const lower = svResponse.toLowerCase();
+    if (lower.includes(PASSWORD_PROMPT)) {
+      setIsPasswordMode(true);
+    }
+    if (lower.includes(PASSWORD_SUCCESS) || lower.includes(PASSWORD_FAIL)) {
+      setIsPasswordMode(false);
+    }
+  };
 
   const notifyThinking = (thinking: boolean, msg?: string) => {
     window.dispatchEvent(
@@ -207,10 +260,7 @@ export default function AIHelper({
   const handleFeedback = async (messageIndex: number, vote: "up" | "down") => {
     if (!conversationId) return;
 
-    setFeedbackState((prev) => ({
-      ...prev,
-      [messageIndex]: vote,
-    }));
+    setFeedbackState((prev) => ({ ...prev, [messageIndex]: vote }));
 
     await submitMessageFeedback({
       conversationId,
@@ -249,6 +299,7 @@ export default function AIHelper({
       filePreview: attachedFile?.dataUrl,
       fileName: attachedFile?.name,
       fileType: attachedFile?.type,
+      isPassword: isPasswordMode, // mark this message as a password entry
     };
 
     const nextMessages = [...messages, userMessage];
@@ -269,7 +320,7 @@ export default function AIHelper({
           role: m.role,
           content: m.content,
         })),
-        userEmail: user?.email ?? null,
+        sessionId,
       };
 
       if (fileToSend) {
@@ -293,10 +344,14 @@ export default function AIHelper({
         data?.text?.trim() ||
         "I processed that but didn't generate a response. Try sending it again.";
 
+      // Check if SV's reply changes password mode
+      checkPasswordMode(reply);
+
       setMessages([...nextMessages, { role: "assistant", content: reply }]);
       notifyThinking(false, "Ready to help.");
     } catch (error) {
       console.error("SEND_ERROR:", error);
+      setIsPasswordMode(false); // reset on error
       setMessages([
         ...nextMessages,
         {
@@ -311,8 +366,18 @@ export default function AIHelper({
     }
   };
 
+  // ─── Shared send on Enter ─────────────────────────────────────────────────────
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────────────
   return (
     <div style={{ width: "100%" }}>
+      {/* Status bar */}
       <div
         style={{
           width: "100%",
@@ -337,12 +402,15 @@ export default function AIHelper({
         >
           {loading
             ? "SV IS THINKING..."
-            : user
-              ? `LOGGED IN AS ${user.email}`
-              : "GUEST MODE"}
+            : isPasswordMode
+              ? "OWNER AUTHENTICATION"
+              : user
+                ? `LOGGED IN AS ${user.email}`
+                : "GUEST MODE"}
         </p>
       </div>
 
+      {/* Chat window */}
       <div
         style={{
           width: "100%",
@@ -398,6 +466,7 @@ export default function AIHelper({
                   {msg.role === "user" ? "You" : "SV"}
                 </strong>
 
+                {/* Image preview */}
                 {msg.filePreview && isImageType(msg.fileType || "") && (
                   <img
                     src={msg.filePreview}
@@ -413,6 +482,7 @@ export default function AIHelper({
                   />
                 )}
 
+                {/* Non-image file badge */}
                 {msg.fileName && !isImageType(msg.fileType || "") && (
                   <div
                     style={{
@@ -435,16 +505,39 @@ export default function AIHelper({
                   </div>
                 )}
 
-                {msg.content && !msg.content.startsWith("[Attached:") && (
-                  <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                {/* Message content — blurred if it was a password entry */}
+                {msg.isPassword ? (
+                  <div
+                    style={{
+                      filter: "blur(6px)",
+                      userSelect: "none",
+                      WebkitUserSelect: "none",
+                      letterSpacing: "0.15em",
+                      fontSize: "1rem",
+                      color: "rgba(255,255,255,0.7)",
+                    }}
+                    title="Password hidden"
+                  >
+                    {msg.content.replace(/./g, "●")}
+                  </div>
+                ) : (
+                  <>
+                    {msg.content && !msg.content.startsWith("[Attached:") && (
+                      <div style={{ whiteSpace: "pre-wrap" }}>
+                        {msg.content}
+                      </div>
+                    )}
+                    {msg.content.startsWith("[Attached:") &&
+                      !msg.filePreview &&
+                      !msg.fileName && (
+                        <div style={{ whiteSpace: "pre-wrap" }}>
+                          {msg.content}
+                        </div>
+                      )}
+                  </>
                 )}
 
-                {msg.content.startsWith("[Attached:") &&
-                  !msg.filePreview &&
-                  !msg.fileName && (
-                    <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
-                  )}
-
+                {/* Feedback buttons */}
                 {msg.role === "assistant" && conversationId && (
                   <div
                     style={{
@@ -529,6 +622,7 @@ export default function AIHelper({
         <div ref={chatEndRef} />
       </div>
 
+      {/* File attachment preview */}
       {attachedFile && (
         <div
           style={{
@@ -621,42 +715,82 @@ export default function AIHelper({
         </p>
       )}
 
-      <div
-        style={{
-          width: "100%",
-          boxSizing: "border-box",
-        }}
-      >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
+      {/* Input area */}
+      <div style={{ width: "100%", boxSizing: "border-box" }}>
+        {/* PASSWORD MODE — single line masked input */}
+        {isPasswordMode ? (
+          <div style={{ position: "relative" }}>
+            <input
+              ref={passwordInputRef}
+              type="password"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Enter password..."
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              style={{
+                width: "100%",
+                padding: isMobile ? "18px 20px" : "22px 24px",
+                backgroundColor: "rgba(56, 189, 248, 0.06)",
+                border: "1px solid rgba(56, 189, 248, 0.35)",
+                borderRadius: "20px",
+                color: "white",
+                fontSize: isMobile ? "1.1rem" : "1.3rem",
+                letterSpacing: "0.25em",
+                outline: "none",
+                boxSizing: "border-box",
+                display: "block",
+                fontFamily: "monospace",
+              }}
+            />
+            {/* Lock icon hint */}
+            <div
+              style={{
+                position: "absolute",
+                right: "16px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "rgba(56,189,248,0.6)",
+                fontSize: "1rem",
+                pointerEvents: "none",
+              }}
+            >
+              🔒
+            </div>
+          </div>
+        ) : (
+          /* NORMAL MODE — textarea */
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              attachedFile
+                ? "Add a message about this file, or just hit Send..."
+                : "Ask anything or follow up on SV's last response..."
             }
-          }}
-          placeholder={
-            attachedFile
-              ? "Add a message about this file, or just hit Send..."
-              : "Ask anything or follow up on SV's last response..."
-          }
-          style={{
-            width: "100%",
-            minHeight: isMobile ? "100px" : "130px",
-            backgroundColor: "rgba(255, 255, 255, 0.04)",
-            border: "1px solid rgba(255, 255, 255, 0.14)",
-            borderRadius: "20px",
-            padding: isMobile ? "16px" : "22px",
-            color: "white",
-            fontSize: isMobile ? "0.95rem" : "1.05rem",
-            outline: "none",
-            resize: "none",
-            boxSizing: "border-box",
-            display: "block",
-          }}
-        />
+            style={{
+              width: "100%",
+              minHeight: isMobile ? "100px" : "130px",
+              backgroundColor: "rgba(255, 255, 255, 0.04)",
+              border: "1px solid rgba(255, 255, 255, 0.14)",
+              borderRadius: "20px",
+              padding: isMobile ? "16px" : "22px",
+              color: "white",
+              fontSize: isMobile ? "0.95rem" : "1.05rem",
+              outline: "none",
+              resize: "none",
+              boxSizing: "border-box",
+              display: "block",
+            }}
+          />
+        )}
 
+        {/* Bottom row: attach + send */}
         <div
           style={{
             display: "flex",
@@ -676,30 +810,33 @@ export default function AIHelper({
             style={{ display: "none" }}
           />
 
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-            title="Attach file"
-            style={{
-              padding: "14px 18px",
-              borderRadius: "16px",
-              backgroundColor: attachedFile
-                ? "rgba(56,189,248,0.2)"
-                : "rgba(255,255,255,0.06)",
-              border: attachedFile
-                ? "1px solid rgba(56,189,248,0.4)"
-                : "1px solid rgba(255,255,255,0.12)",
-              color: "white",
-              cursor: loading ? "not-allowed" : "pointer",
-              fontSize: "1.1rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            📎
-          </button>
+          {/* Hide attach button in password mode */}
+          {!isPasswordMode && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading}
+              title="Attach file"
+              style={{
+                padding: "14px 18px",
+                borderRadius: "16px",
+                backgroundColor: attachedFile
+                  ? "rgba(56,189,248,0.2)"
+                  : "rgba(255,255,255,0.06)",
+                border: attachedFile
+                  ? "1px solid rgba(56,189,248,0.4)"
+                  : "1px solid rgba(255,255,255,0.12)",
+                color: "white",
+                cursor: loading ? "not-allowed" : "pointer",
+                fontSize: "1.1rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              📎
+            </button>
+          )}
 
           <button
             onClick={handleSend}
@@ -708,7 +845,11 @@ export default function AIHelper({
               flex: 1,
               padding: "14px",
               borderRadius: "16px",
-              backgroundColor: loading ? "#7dd3fc" : "#38bdf8",
+              backgroundColor: isPasswordMode
+                ? "rgba(56,189,248,0.85)"
+                : loading
+                  ? "#7dd3fc"
+                  : "#38bdf8",
               color: "#020617",
               fontWeight: 900,
               border: "none",
@@ -717,7 +858,7 @@ export default function AIHelper({
               fontSize: "0.95rem",
             }}
           >
-            {loading ? "THINKING..." : "SEND"}
+            {loading ? "THINKING..." : isPasswordMode ? "SUBMIT" : "SEND"}
           </button>
         </div>
       </div>
