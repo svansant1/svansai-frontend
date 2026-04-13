@@ -36,7 +36,7 @@ import {
 const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = new GoogleGenAI({ apiKey });
 
-const MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"];
+const MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
 export type AttachedFile = {
   name: string;
@@ -92,7 +92,6 @@ export async function generateChatResponse(
   }
 
   // ─── Phase 3: Handle sv commands and password flow ────────────────────────
-  // If session is awaiting password, treat ANY message as a password attempt
   if (isAwaitingPassword(sid) || latestUserMessage.toLowerCase().trim().startsWith("sv ")) {
     const command = parseSVCommand(latestUserMessage, sid);
     if (command) {
@@ -149,10 +148,8 @@ ${lastAssistantMessage}
 
   const response = await generateBestResponse(context);
 
-  // ─── Phase 3: Silent response scoring — fire and forget ───────────────────
+  // Phase 3: Silent scoring + threshold check — fire and forget
   void analyzeResponse({ input: latestUserMessage, output: response, questionType });
-
-  // ─── Phase 3: Threshold check — fire and forget ───────────────────────────
   void checkThresholdAndRun();
 
   return response;
@@ -180,10 +177,14 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
   const retryPrompt = buildRetryPrompt(basePrompt);
 
   for (const model of MODELS) {
-    const firstAttempt = await tryGenerate({ model, context, contents, prompt: basePrompt, secondPass: false });
+    const firstAttempt = await tryGenerate({
+      model, context, contents, prompt: basePrompt, secondPass: false,
+    });
     if (firstAttempt) return firstAttempt;
 
-    const secondAttempt = await tryGenerate({ model, context, contents, prompt: retryPrompt, secondPass: true });
+    const secondAttempt = await tryGenerate({
+      model, context, contents, prompt: retryPrompt, secondPass: true,
+    });
     if (secondAttempt) return secondAttempt;
   }
 
@@ -228,7 +229,10 @@ async function tryGenerate(params: {
   secondPass: boolean;
 }): Promise<string | null> {
   try {
-    const systemInstruction = buildSystemInstruction(params.context.questionType, params.context.responseStyle);
+    const systemInstruction = buildSystemInstruction(
+      params.context.questionType,
+      params.context.responseStyle
+    );
     const lastUserParts = buildLastUserParts(params.prompt, params.context.attachedFile);
 
     const result = await withRetry(() =>
@@ -244,9 +248,21 @@ async function tryGenerate(params: {
     );
 
     const text = cleanResponse(result?.text?.trim() || "");
-    if (!text) return null;
-    if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
-    if (looksTooGeneric(text, params.context.latestUserMessage)) return null;
+    if (!text || text.length < 4) return null;
+
+    // Only reject if BOTH conditions are true: message is long AND response is suspiciously short
+    // This prevents filtering short but valid answers to simple questions
+    const inputIsLong = params.context.latestUserMessage.trim().length > 40;
+    const responseIsSuspiciouslyShort = text.trim().length < 30;
+    if (inputIsLong && responseIsSuspiciouslyShort) return null;
+
+    // Check for exact duplicate of last response
+    if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) {
+      return null;
+    }
+
+    // Only filter generic stall phrases — don't filter short valid answers
+    if (isHardGenericStall(text)) return null;
 
     return text;
   } catch (error) {
@@ -255,41 +271,47 @@ async function tryGenerate(params: {
   }
 }
 
-// ─── Generic response filter ──────────────────────────────────────────────────
-function looksTooGeneric(text: string, latestUserMessage: string): boolean {
+// ─── Only block the hardest generic stall patterns ───────────────────────────
+// Removed the "response under 60 chars" rule — it was blocking valid short answers
+function isHardGenericStall(text: string): boolean {
   const normalized = normalizeText(text);
-  const bannedPatterns = [
+
+  const hardStalls = [
     "what are you trying to figure out",
     "what have you tried already",
     "where exactly are you getting stuck",
     "where exactly are you stuck",
     "tell me more so i can help",
-    "give me more detail",
-    "i can help with that",
-    "could you rephrase",
     "i'm still here with you",
     "im still here with you",
     "even if my live model response is delayed",
     "let's start here",
     "lets start here",
   ];
-  if (bannedPatterns.some((p) => normalized.includes(p))) return true;
-  if (latestUserMessage.trim().length > 20 && text.trim().length < 60) return true;
-  return false;
+
+  return hardStalls.some((p) => normalized.includes(p));
 }
 
 // ─── Final fallback ───────────────────────────────────────────────────────────
 function finalFallback(question: string, type: QuestionType, responseStyle: ResponseStyle): string {
   switch (type) {
-    case "coding": return "Here's a simple coding example:\n\n```python\nprint(\"hello world\")\n```\n\nIf you want a different language or approach, just say so.";
-    case "business": return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
-    case "writing": return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
-    case "tech_support": return "Tell me the device, what exactly is happening, and what changed before the issue started.";
-    case "learning": return "I can explain that step by step. Send the full question or problem and I'll break it down.";
-    case "life": return "Tell me the situation, and I'll help you sort through your options and next move.";
+    case "coding":
+      return "Here's a simple coding example:\n\n```python\nprint(\"hello world\")\n```\n\nIf you want a different language or approach, just say so.";
+    case "business":
+      return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
+    case "writing":
+      return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
+    case "tech_support":
+      return "Tell me the device, what exactly is happening, and what changed before the issue started.";
+    case "learning":
+      return "I can explain that step by step. Send the full question or problem and I'll break it down.";
+    case "life":
+      return "Tell me the situation, and I'll help you sort through your options and next move.";
     default:
       if (responseStyle === "brainstorm") return "Give me the topic or goal, and I'll generate ideas and directions to build from.";
       if (responseStyle === "guide") return "Tell me what you're trying to do, and I'll walk you through it step by step.";
-      return question.trim() ? "I'm here and ready. Send the full question and I'll answer it directly." : "I'm here and ready. Ask me anything.";
+      return question.trim()
+        ? "I'm here and ready. Send the full question and I'll answer it directly."
+        : "I'm here and ready. Ask me anything.";
   }
 }

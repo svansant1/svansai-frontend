@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import type { User } from "@supabase/supabase-js";
@@ -8,7 +8,6 @@ import AIHelper, { type ChatMessage } from "../components/AIHelper";
 import { supabase } from "../lib/supabase";
 import svRobot from "../mascot/sv-robot.png";
 import {
-  buildConversationTitle,
   createConversation,
   deleteConversation,
   getConversationMessages,
@@ -16,13 +15,19 @@ import {
   replaceConversationMessages,
   type ConversationRecord,
 } from "@/lib/db/chat-history";
-import { logPageView, getTotalViews } from "@/lib/db/engagement";
+import {
+  logPageView,
+  getTotalViews,
+  hasVisitorBeenCounted,
+} from "@/lib/db/engagement";
 
 type AiUser = { id: string; email: string };
 type MascotPosition = { x: number; y: number };
 
 const SIDEBAR_KEY = "svansai-sidebar-collapsed";
 const MASCOT_KEY = "svansai-mascot-position";
+const ACTIVE_CONVERSATION_KEY = "svansai-active-conversation-id";
+const VISITOR_ID_KEY = "svansai-visitor-id";
 
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -43,8 +48,6 @@ export default function HomePage() {
   const [lastThought, setLastThought] = useState("Ready to help.");
 
   const [isMobile, setIsMobile] = useState(false);
-
-  // Desktop: collapsed/expanded. Mobile: drawer open/closed
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -55,7 +58,6 @@ export default function HomePage() {
   const [initialMessages, setInitialMessages] = useState<
     ChatMessage[] | undefined
   >(undefined);
-  const [currentMessages, setCurrentMessages] = useState<ChatMessage[]>([]);
 
   const [mascotPosition, setMascotPosition] = useState<MascotPosition>({
     x: 18,
@@ -64,12 +66,19 @@ export default function HomePage() {
   const [dragging, setDragging] = useState(false);
   const [totalViews, setTotalViews] = useState(0);
 
+  // ─── Ref tracks conversationId synchronously to prevent stale closures ────
+  const activeConversationIdRef = useRef<string | null>(null);
+  const creatingConversationRef = useRef(false);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
   const aiUser: AiUser | null = useMemo(() => {
     if (user?.id && user?.email) return { id: user.id, email: user.email };
     return null;
   }, [user]);
-
-  const ACTIVE_CONVERSATION_SESSION_KEY = "svansai-active-conversation-id";
 
   // ─── Mobile detection ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -79,11 +88,10 @@ export default function HomePage() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  // ─── Restore saved sidebar + mascot ───────────────────────────────────────
+  // ─── Restore sidebar + mascot ─────────────────────────────────────────────
   useEffect(() => {
     const collapsed = localStorage.getItem(SIDEBAR_KEY);
     setIsSidebarCollapsed(collapsed === "true");
-
     const saved = localStorage.getItem(MASCOT_KEY);
     if (saved) {
       try {
@@ -113,30 +121,34 @@ export default function HomePage() {
     };
   }, []);
 
-  // ─── Page view tracking ───────────────────────────────────────────────────
+  // ─── Unique visitor tracking ──────────────────────────────────────────────
   useEffect(() => {
-    const sessionKey = "svansai-view-session-id";
-    const alreadyLoggedKey = "svansai-view-logged";
-    let sessionId = sessionStorage.getItem(sessionKey);
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      sessionStorage.setItem(sessionKey, sessionId);
-    }
-    const alreadyLogged = sessionStorage.getItem(alreadyLoggedKey);
     void (async () => {
-      if (!alreadyLogged) {
+      let visitorId = localStorage.getItem(VISITOR_ID_KEY);
+      if (!visitorId) {
+        visitorId = crypto.randomUUID();
+        localStorage.setItem(VISITOR_ID_KEY, visitorId);
+      }
+      const sessionKey = "svansai-view-session-id";
+      let sessionId = sessionStorage.getItem(sessionKey);
+      if (!sessionId) {
+        sessionId = crypto.randomUUID();
+        sessionStorage.setItem(sessionKey, sessionId);
+      }
+      const alreadyCounted = await hasVisitorBeenCounted(visitorId);
+      if (!alreadyCounted) {
         await logPageView({
           path: "/",
+          visitorId,
           sessionId,
-          userId: user?.id ?? null,
+          userId: null,
           userAgent: navigator.userAgent,
         });
-        sessionStorage.setItem(alreadyLoggedKey, "true");
       }
       const count = await getTotalViews();
       setTotalViews(count);
     })();
-  }, [user?.id]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Robot thinking events ────────────────────────────────────────────────
   useEffect(() => {
@@ -160,34 +172,33 @@ export default function HomePage() {
     };
   }, []);
 
-  // ─── Conversations ────────────────────────────────────────────────────────
+  // ─── Load conversations on login ──────────────────────────────────────────
   useEffect(() => {
     if (!user?.id) {
       setConversations([]);
       setActiveConversationId(null);
+      activeConversationIdRef.current = null;
       setInitialMessages(undefined);
-      sessionStorage.removeItem(ACTIVE_CONVERSATION_SESSION_KEY);
       return;
     }
 
     void (async () => {
-      await loadConversationList(user.id);
+      const rows = await listConversations(user.id);
+      setConversations(rows);
 
-      const sessionConversationId = sessionStorage.getItem(
-        ACTIVE_CONVERSATION_SESSION_KEY,
-      );
-
-      if (sessionConversationId) {
-        const msgs = await getConversationMessages(sessionConversationId);
-
+      const savedId = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+      if (savedId) {
+        const msgs = await getConversationMessages(savedId);
         if (msgs.length > 0) {
-          setActiveConversationId(sessionConversationId);
+          setActiveConversationId(savedId);
+          activeConversationIdRef.current = savedId;
           setInitialMessages(msgs);
           return;
         }
       }
 
       setActiveConversationId(null);
+      activeConversationIdRef.current = null;
       setInitialMessages(undefined);
     })();
   }, [user?.id]);
@@ -199,11 +210,6 @@ export default function HomePage() {
   useEffect(() => {
     localStorage.setItem(MASCOT_KEY, JSON.stringify(mascotPosition));
   }, [mascotPosition]);
-
-  const loadConversationList = async (userId: string) => {
-    const rows = await listConversations(userId);
-    setConversations(rows);
-  };
 
   // ─── Auth handlers ────────────────────────────────────────────────────────
   const handleEmailAuth = async () => {
@@ -256,6 +262,8 @@ export default function HomePage() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+    activeConversationIdRef.current = null;
   };
 
   const handleSubmitFeedback = async () => {
@@ -285,82 +293,89 @@ export default function HomePage() {
     setFeedbackBusy(false);
   };
 
-  // ─── Conversation handlers ────────────────────────────────────────────────
-  const handleMessagesChange = async (messages: ChatMessage[]) => {
-    setCurrentMessages(messages);
+  // ─── Conversation save — called ONCE per send from AIHelper ───────────────
+  // useCallback so it doesn't get recreated on every render
+  // (a recreated function reference causes AIHelper's ref to go stale)
+  const handleMessagesChange = useCallback(
+    async (messages: ChatMessage[]) => {
+      if (!aiUser) return;
 
-    if (!aiUser) return;
+      const firstUserMessage = messages.find(
+        (m) => m.role === "user" && m.content.trim(),
+      )?.content;
+      if (!firstUserMessage) return;
 
-    const firstUserMessage = messages.find(
-      (m) => m.role === "user" && m.content.trim(),
-    )?.content;
+      // Read ref synchronously — state would be stale here
+      let conversationId = activeConversationIdRef.current;
 
-    // Do not create/save a conversation until the user actually says something
-    if (!firstUserMessage) return;
+      if (!conversationId) {
+        // Prevent concurrent creation
+        if (creatingConversationRef.current) return;
+        creatingConversationRef.current = true;
 
-    let conversationId = activeConversationId;
+        try {
+          const created = await createConversation(aiUser.id, firstUserMessage);
+          if (!created) return;
+          conversationId = created.id;
+          activeConversationIdRef.current = created.id;
+          setActiveConversationId(created.id);
+          localStorage.setItem(ACTIVE_CONVERSATION_KEY, created.id);
+        } finally {
+          creatingConversationRef.current = false;
+        }
+      }
 
-    if (!conversationId) {
-      const created = await createConversation(aiUser.id, firstUserMessage);
-      if (!created) return;
+      await replaceConversationMessages(conversationId, messages);
 
-      conversationId = created.id;
-      setActiveConversationId(created.id);
-
-      sessionStorage.setItem(ACTIVE_CONVERSATION_SESSION_KEY, created.id);
-    }
-
-    await replaceConversationMessages(conversationId, messages);
-
-    const rows = await listConversations(aiUser.id);
-    setConversations(rows);
-  };
+      // Refresh sidebar list
+      const rows = await listConversations(aiUser.id);
+      setConversations(rows);
+    },
+    [aiUser],
+  ); // aiUser is stable — only changes on login/logout
 
   const handleLoadConversation = async (conversationId: string) => {
     const msgs = await getConversationMessages(conversationId);
     setActiveConversationId(conversationId);
+    activeConversationIdRef.current = conversationId;
     setInitialMessages(msgs);
-    sessionStorage.setItem(ACTIVE_CONVERSATION_SESSION_KEY, conversationId);
+    localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId);
+    if (isMobile) setMobileSidebarOpen(false);
   };
 
   const handleNewChat = () => {
     setActiveConversationId(null);
+    activeConversationIdRef.current = null;
     setInitialMessages([
-      {
-        role: "assistant",
-        content: "What would you like help with today?",
-      },
+      { role: "assistant", content: "What would you like help with today?" },
     ]);
-    sessionStorage.removeItem(ACTIVE_CONVERSATION_SESSION_KEY);
+    localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+    if (isMobile) setMobileSidebarOpen(false);
   };
 
   const handleDeleteConversation = async (conversationId: string) => {
     await deleteConversation(conversationId);
     setConversations((prev) => prev.filter((c) => c.id !== conversationId));
-    if (activeConversationId === conversationId) handleNewChat();
+    if (activeConversationIdRef.current === conversationId) handleNewChat();
   };
 
-  // ─── Mascot drag — single finger on mobile ────────────────────────────────
+  // ─── Mascot drag ──────────────────────────────────────────────────────────
   const beginDrag = (clientX: number, clientY: number) => {
     setDragging(true);
     const startX = clientX - mascotPosition.x;
     const startY = clientY - mascotPosition.y;
-
     const move = (moveX: number, moveY: number) => {
       const size = isMobile ? 96 : 230;
-      const maxX = window.innerWidth - size;
-      const maxY = window.innerHeight - size;
       setMascotPosition({
-        x: Math.max(0, Math.min(maxX, moveX - startX)),
-        y: Math.max(0, Math.min(maxY, moveY - startY)),
+        x: Math.max(0, Math.min(window.innerWidth - size, moveX - startX)),
+        y: Math.max(0, Math.min(window.innerHeight - size, moveY - startY)),
       });
     };
-
     const onMouseMove = (e: MouseEvent) => move(e.clientX, e.clientY);
     const onTouchMove = (e: TouchEvent) => {
-      e.preventDefault(); // prevents page scroll while dragging
-      const touch = e.touches[0];
-      if (touch) move(touch.clientX, touch.clientY);
+      e.preventDefault();
+      const t = e.touches[0];
+      if (t) move(t.clientX, t.clientY);
     };
     const end = () => {
       setDragging(false);
@@ -369,14 +384,12 @@ export default function HomePage() {
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", end);
     };
-
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", end);
     window.addEventListener("touchmove", onTouchMove, { passive: false });
     window.addEventListener("touchend", end);
   };
 
-  // ─── Robot mascot component ───────────────────────────────────────────────
   const robotSize = isMobile ? 96 : 230;
   const bubbleBottom = isMobile ? robotSize + 10 : robotSize + 18;
 
@@ -388,7 +401,7 @@ export default function HomePage() {
         height: size,
         cursor: dragging ? "grabbing" : "grab",
         pointerEvents: "auto",
-        touchAction: "none", // critical: allows single-finger drag without scroll interference
+        touchAction: "none",
         userSelect: "none",
         WebkitUserSelect: "none",
       }}
@@ -397,12 +410,10 @@ export default function HomePage() {
         beginDrag(e.clientX, e.clientY);
       }}
       onTouchStart={(e) => {
-        // Single touch only — no multi-finger requirement
-        const touch = e.touches[0];
-        if (touch) beginDrag(touch.clientX, touch.clientY);
+        const t = e.touches[0];
+        if (t) beginDrag(t.clientX, t.clientY);
       }}
     >
-      {/* Thought bubble */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -427,8 +438,6 @@ export default function HomePage() {
       >
         {lastThought}
       </motion.div>
-
-      {/* Glow */}
       <div
         style={{
           position: "absolute",
@@ -438,7 +447,6 @@ export default function HomePage() {
           borderRadius: "999px",
         }}
       />
-
       <Image
         src={svRobot}
         alt="SV Robot"
@@ -452,8 +460,6 @@ export default function HomePage() {
           pointerEvents: "none",
         }}
       />
-
-      {/* Thinking dots */}
       <AnimatePresence>
         {isThinking &&
           [0, 1, 2].map((i) => (
@@ -490,7 +496,6 @@ export default function HomePage() {
     </div>
   );
 
-  // ─── Sidebar content (shared between desktop + mobile drawer) ─────────────
   const SidebarContent = () => (
     <>
       <div
@@ -518,7 +523,6 @@ export default function HomePage() {
           </button>
         )}
       </div>
-
       <button
         onClick={handleNewChat}
         style={{
@@ -536,7 +540,6 @@ export default function HomePage() {
       >
         + New Chat
       </button>
-
       <div
         style={{
           display: "flex",
@@ -597,7 +600,6 @@ export default function HomePage() {
     </>
   );
 
-  // ─── Desktop sidebar width ────────────────────────────────────────────────
   const desktopSidebarWidth = isSidebarCollapsed ? 72 : 300;
 
   return (
@@ -614,7 +616,6 @@ export default function HomePage() {
         color: "white",
       }}
     >
-      {/* Background orbs */}
       <div
         style={{
           position: "absolute",
@@ -625,7 +626,7 @@ export default function HomePage() {
         }}
       />
 
-      {/* ── MOBILE: floating tab to open sidebar ── */}
+      {/* Mobile sidebar tab */}
       {isMobile && user && (
         <button
           onClick={() => setMobileSidebarOpen(true)}
@@ -649,17 +650,15 @@ export default function HomePage() {
             backdropFilter: "blur(12px)",
             boxShadow: "2px 0 12px rgba(0,0,0,0.3)",
           }}
-          title="Open chat history"
         >
           ›
         </button>
       )}
 
-      {/* ── MOBILE: full-screen drawer overlay ── */}
+      {/* Mobile drawer */}
       <AnimatePresence>
         {isMobile && mobileSidebarOpen && (
           <>
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -673,7 +672,6 @@ export default function HomePage() {
                 backdropFilter: "blur(4px)",
               }}
             />
-            {/* Drawer */}
             <motion.div
               initial={{ x: -280 }}
               animate={{ x: 0 }}
@@ -700,7 +698,7 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* ── DESKTOP: sidebar ── */}
+      {/* Desktop sidebar */}
       {!isMobile && user && (
         <aside
           style={{
@@ -742,16 +740,11 @@ export default function HomePage() {
                 alignItems: "center",
                 justifyContent: "center",
               }}
-              title={
-                isSidebarCollapsed
-                  ? "Open chat history"
-                  : "Collapse chat history"
-              }
+              title={isSidebarCollapsed ? "Open" : "Collapse"}
             >
               {isSidebarCollapsed ? "›" : "‹"}
             </button>
           </div>
-
           <button
             onClick={handleNewChat}
             style={{
@@ -770,7 +763,6 @@ export default function HomePage() {
           >
             {isSidebarCollapsed ? "+" : "New Chat"}
           </button>
-
           {!isSidebarCollapsed && (
             <div
               style={{
@@ -828,7 +820,6 @@ export default function HomePage() {
               ))}
             </div>
           )}
-
           {isSidebarCollapsed && (
             <div
               style={{
@@ -870,7 +861,7 @@ export default function HomePage() {
         </aside>
       )}
 
-      {/* ── Main content ── */}
+      {/* Main content */}
       <div
         style={{
           flex: 1,
@@ -882,7 +873,7 @@ export default function HomePage() {
           overflowY: "auto",
         }}
       >
-        {/* Modals */}
+        {/* Login modal */}
         <AnimatePresence>
           {showLogin && (
             <motion.div
@@ -1050,6 +1041,7 @@ export default function HomePage() {
           )}
         </AnimatePresence>
 
+        {/* Feedback modal */}
         <AnimatePresence>
           {showFeedback && (
             <motion.div
@@ -1167,7 +1159,7 @@ export default function HomePage() {
           )}
         </AnimatePresence>
 
-        {/* Mascot — fixed, draggable */}
+        {/* Mascot */}
         <div
           style={{
             position: "fixed",
@@ -1202,13 +1194,31 @@ export default function HomePage() {
               top: isMobile ? undefined : "20px",
               right: isMobile ? undefined : "25px",
               display: "flex",
-              gap: "10px",
+              gap: "8px",
               alignItems: "center",
               justifyContent: isMobile ? "center" : "flex-end",
               marginBottom: isMobile ? "14px" : 0,
               flexWrap: "wrap",
             }}
           >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "7px 12px",
+                borderRadius: "999px",
+                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.65)",
+                fontSize: "11px",
+                fontWeight: 600,
+                letterSpacing: "0.06em",
+              }}
+            >
+              <span>👁</span>
+              <span>{totalViews.toLocaleString()}</span>
+            </div>
             <button
               onClick={() => {
                 if (!user) {
@@ -1234,7 +1244,6 @@ export default function HomePage() {
               </button>
             )}
           </div>
-
           <p
             style={{
               letterSpacing: "0.45em",
@@ -1268,22 +1277,6 @@ export default function HomePage() {
           </p>
         </div>
 
-        {/* Views counter */}
-        <div
-          style={{
-            marginTop: "10px",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: "8px",
-            color: "rgba(255,255,255,0.72)",
-            fontSize: isMobile ? "0.82rem" : "0.9rem",
-          }}
-        >
-          <span>👁</span>
-          <span>{totalViews.toLocaleString()} views</span>
-        </div>
-
         {/* Chat card */}
         <div
           style={{
@@ -1309,7 +1302,6 @@ export default function HomePage() {
           />
         </div>
 
-        {/* Footer */}
         <div
           style={{
             marginTop: "16px",
@@ -1342,7 +1334,6 @@ function inputStyle(extra?: React.CSSProperties): React.CSSProperties {
     ...extra,
   };
 }
-
 function oauthButtonStyle(extra?: React.CSSProperties): React.CSSProperties {
   return {
     width: "100%",
@@ -1355,7 +1346,6 @@ function oauthButtonStyle(extra?: React.CSSProperties): React.CSSProperties {
     ...extra,
   };
 }
-
 function pillButtonStyle(extra?: React.CSSProperties): React.CSSProperties {
   return {
     padding: "8px 18px",

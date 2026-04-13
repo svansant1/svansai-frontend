@@ -40,12 +40,7 @@ export async function createConversation(
 
   const { data, error } = await supabase
     .from("conversations")
-    .insert([
-      {
-        user_id: userId,
-        title,
-      },
-    ])
+    .insert([{ user_id: userId, title }])
     .select("id,user_id,title,created_at,updated_at")
     .single();
 
@@ -86,7 +81,7 @@ export async function getConversationMessages(
   conversationId: string
 ): Promise<ChatMessage[]> {
   const { data, error } = await supabase
-    .from("messages")
+    .from("conversation_messages")
     .select("role,content,created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
@@ -114,7 +109,7 @@ export async function appendMessages(
     content: m.content,
   }));
 
-  const { error } = await supabase.from("messages").insert(rows);
+  const { error } = await supabase.from("conversation_messages").insert(rows);
 
   if (error) {
     console.error("APPEND_MESSAGES_ERROR:", error);
@@ -129,7 +124,7 @@ export async function replaceConversationMessages(
   messages: ChatMessage[]
 ): Promise<void> {
   const { error: deleteError } = await supabase
-    .from("messages")
+    .from("conversation_messages")
     .delete()
     .eq("conversation_id", conversationId);
 
@@ -155,7 +150,6 @@ export async function deleteConversation(conversationId: string): Promise<void> 
 export function buildConversationTitle(firstMessage?: string): string {
   const fallback = "New Chat";
   if (!firstMessage?.trim()) return fallback;
-
   const clean = firstMessage.replace(/\s+/g, " ").trim();
   return clean.length > 48 ? `${clean.slice(0, 48)}...` : clean;
 }

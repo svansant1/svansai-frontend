@@ -2,11 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  submitMessageFeedback,
-  getFeedbackSummary,
-  getTotalViews,
-} from "@/lib/db/engagement";
+import { submitMessageFeedback, getFeedbackSummary } from "@/lib/db/engagement";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -14,7 +10,7 @@ export type ChatMessage = {
   filePreview?: string;
   fileName?: string;
   fileType?: string;
-  isPassword?: boolean; // marks this bubble as a blurred password entry
+  isPassword?: boolean;
 };
 
 type AttachedFile = {
@@ -39,13 +35,9 @@ type AIHelperProps = {
 };
 
 const GUEST_LIMIT = 5;
-const MAX_STORED_MESSAGES = 40;
 const MAX_FILE_MB = 10;
 
-// SV response that triggers password mode
 const PASSWORD_PROMPT = "enter owner password:";
-
-// SV responses that end password mode
 const PASSWORD_SUCCESS = "owner mode enabled";
 const PASSWORD_FAIL = "incorrect password";
 
@@ -72,7 +64,6 @@ const ACCEPTED_TYPES = [
 function isImageType(type: string) {
   return type.startsWith("image/");
 }
-
 function isPdfType(type: string) {
   return type === "application/pdf";
 }
@@ -97,9 +88,6 @@ export default function AIHelper({
   const [feedbackSummary, setFeedbackSummary] = useState<
     Record<number, { up: number; down: number }>
   >({});
-  const [totalViews, setTotalViews] = useState(0);
-
-  // ─── Password mode — switches textarea to masked input ───────────────────────
   const [isPasswordMode, setIsPasswordMode] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -107,7 +95,14 @@ export default function AIHelper({
   const passwordInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // ─── Stable session ID ────────────────────────────────────────────────────────
+  // Keep a stable ref to onMessagesChange so handleSend can call it
+  // without it being a stale closure or causing effect re-runs
+  const onMessagesChangeRef = useRef(onMessagesChange);
+  useEffect(() => {
+    onMessagesChangeRef.current = onMessagesChange;
+  }, [onMessagesChange]);
+
+  // ─── Session ID ───────────────────────────────────────────────────────────
   const sessionId = useMemo(() => {
     if (typeof window === "undefined") return "ssr";
     const key = "svansai-session-id";
@@ -119,11 +114,7 @@ export default function AIHelper({
     return id;
   }, []);
 
-  const storageKey = useMemo(() => {
-    if (!user?.email) return "svansai-guest-chat";
-    return `svansai-chat-${user.email.trim().toLowerCase()}`;
-  }, [user]);
-
+  // ─── Mobile detection ─────────────────────────────────────────────────────
   useEffect(() => {
     const update = () => setIsMobile(window.innerWidth <= 768);
     update();
@@ -131,6 +122,9 @@ export default function AIHelper({
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // ─── Load messages when conversation or initialMessages changes ───────────
+  // NOTE: We do NOT call onMessagesChange here — loading a conversation
+  // should never trigger a save back to the database
   useEffect(() => {
     if (conversationId && initialMessages) {
       setMessages(
@@ -156,14 +150,12 @@ export default function AIHelper({
     ]);
   }, [user, initialMessages, conversationId]);
 
-  useEffect(() => {
-    onMessagesChange?.(messages);
-  }, [messages, onMessagesChange]);
+  // ─── NO onMessagesChange useEffect — that was the root cause ─────────────
+  // Previously: useEffect(() => { onMessagesChange?.(messages); }, [messages])
+  // This fired on EVERY setMessages call including loads, causing wipes and duplicates.
+  // Now onMessagesChange is called ONLY inside handleSend after assistant replies.
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
-
+  // ─── Feedback summary load ────────────────────────────────────────────────
   useEffect(() => {
     if (!conversationId) {
       setFeedbackSummary({});
@@ -175,14 +167,12 @@ export default function AIHelper({
     })();
   }, [conversationId, messages.length]);
 
+  // ─── Auto-scroll ──────────────────────────────────────────────────────────
   useEffect(() => {
-    void (async () => {
-      const views = await getTotalViews();
-      setTotalViews(views);
-    })();
-  }, []);
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
-  // ─── Auto-focus password input when mode activates ────────────────────────────
+  // ─── Auto-focus password input ────────────────────────────────────────────
   useEffect(() => {
     if (isPasswordMode) {
       setTimeout(() => passwordInputRef.current?.focus(), 80);
@@ -191,15 +181,12 @@ export default function AIHelper({
     }
   }, [isPasswordMode]);
 
-  // ─── Watch SV responses to toggle password mode ───────────────────────────────
+  // ─── Password mode detection ──────────────────────────────────────────────
   const checkPasswordMode = (svResponse: string) => {
     const lower = svResponse.toLowerCase();
-    if (lower.includes(PASSWORD_PROMPT)) {
-      setIsPasswordMode(true);
-    }
-    if (lower.includes(PASSWORD_SUCCESS) || lower.includes(PASSWORD_FAIL)) {
+    if (lower.includes(PASSWORD_PROMPT)) setIsPasswordMode(true);
+    if (lower.includes(PASSWORD_SUCCESS) || lower.includes(PASSWORD_FAIL))
       setIsPasswordMode(false);
-    }
   };
 
   const notifyThinking = (thinking: boolean, msg?: string) => {
@@ -213,11 +200,11 @@ export default function AIHelper({
     );
   };
 
+  // ─── File handling ────────────────────────────────────────────────────────
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError("");
     const file = e.target.files?.[0];
     if (!file) return;
-
     e.target.value = "";
 
     if (
@@ -231,7 +218,6 @@ export default function AIHelper({
       );
       return;
     }
-
     if (file.size > MAX_FILE_MB * 1024 * 1024) {
       setFileError(`File is too large. Max size is ${MAX_FILE_MB}MB.`);
       return;
@@ -240,11 +226,10 @@ export default function AIHelper({
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(",")[1];
       setAttachedFile({
         name: file.name,
         type: file.type || "text/plain",
-        base64,
+        base64: dataUrl.split(",")[1],
         dataUrl,
         size: file.size,
       });
@@ -257,6 +242,7 @@ export default function AIHelper({
     setFileError("");
   };
 
+  // ─── Feedback ─────────────────────────────────────────────────────────────
   const handleFeedback = async (messageIndex: number, vote: "up" | "down") => {
     if (!conversationId) return;
 
@@ -281,11 +267,11 @@ export default function AIHelper({
     });
   };
 
+  // ─── Send message ─────────────────────────────────────────────────────────
   const handleSend = async () => {
     if ((!input.trim() && !attachedFile) || loading) return;
 
     const userCount = messages.filter((m) => m.role === "user").length;
-
     if (!user && userCount >= GUEST_LIMIT && !loginDismissed) {
       setLoginDismissed(true);
       onRequestLogin();
@@ -299,7 +285,7 @@ export default function AIHelper({
       filePreview: attachedFile?.dataUrl,
       fileName: attachedFile?.name,
       fileType: attachedFile?.type,
-      isPassword: isPasswordMode, // mark this message as a password entry
+      isPassword: isPasswordMode,
     };
 
     const nextMessages = [...messages, userMessage];
@@ -344,29 +330,38 @@ export default function AIHelper({
         data?.text?.trim() ||
         "I processed that but didn't generate a response. Try sending it again.";
 
-      // Check if SV's reply changes password mode
       checkPasswordMode(reply);
 
-      setMessages([...nextMessages, { role: "assistant", content: reply }]);
+      const finalMessages = [
+        ...nextMessages,
+        { role: "assistant" as const, content: reply },
+      ];
+      setMessages(finalMessages);
       notifyThinking(false, "Ready to help.");
+
+      // ── Save to database ONCE, here, after assistant replies ──────────────
+      // This is the ONLY place onMessagesChange is called.
+      // It is never called from a useEffect, preventing all duplicate/wipe bugs.
+      onMessagesChangeRef.current?.(finalMessages);
     } catch (error) {
       console.error("SEND_ERROR:", error);
-      setIsPasswordMode(false); // reset on error
-      setMessages([
+      setIsPasswordMode(false);
+      const errorMessages = [
         ...nextMessages,
         {
-          role: "assistant",
+          role: "assistant" as const,
           content:
             "Something interrupted my response. Please send it again and I'll pick right back up.",
         },
-      ]);
+      ];
+      setMessages(errorMessages);
       notifyThinking(false, "Still here.");
+      // Don't call onMessagesChange on error — don't save error states
     } finally {
       setLoading(false);
     }
   };
 
-  // ─── Shared send on Enter ─────────────────────────────────────────────────────
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -374,7 +369,7 @@ export default function AIHelper({
     }
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ width: "100%" }}>
       {/* Status bar */}
@@ -505,7 +500,7 @@ export default function AIHelper({
                   </div>
                 )}
 
-                {/* Message content — blurred if it was a password entry */}
+                {/* Message content — blurred if password */}
                 {msg.isPassword ? (
                   <div
                     style={{
@@ -537,7 +532,7 @@ export default function AIHelper({
                   </>
                 )}
 
-                {/* Feedback buttons */}
+                {/* Per-message thumbs */}
                 {msg.role === "assistant" && conversationId && (
                   <div
                     style={{
@@ -565,7 +560,6 @@ export default function AIHelper({
                     >
                       👍 {feedbackSummary[i]?.up ?? 0}
                     </button>
-
                     <button
                       onClick={() => handleFeedback(i, "down")}
                       style={{
@@ -582,23 +576,6 @@ export default function AIHelper({
                     >
                       👎 {feedbackSummary[i]?.down ?? 0}
                     </button>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        padding: "6px 10px",
-                        borderRadius: "10px",
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        background: "rgba(255,255,255,0.04)",
-                        fontSize: "0.85rem",
-                        color: "white",
-                      }}
-                    >
-                      <span>👁</span>
-                      <span>{totalViews.toLocaleString()}</span>
-                    </div>
                   </div>
                 )}
               </div>
@@ -618,7 +595,6 @@ export default function AIHelper({
             SV is thinking...
           </div>
         )}
-
         <div ref={chatEndRef} />
       </div>
 
@@ -654,7 +630,6 @@ export default function AIHelper({
               {isPdfType(attachedFile.type) ? "📄" : "📎"}
             </span>
           )}
-
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
               style={{
@@ -679,7 +654,6 @@ export default function AIHelper({
               {(attachedFile.size / 1024).toFixed(0)} KB
             </p>
           </div>
-
           <button
             onClick={removeAttachment}
             style={{
@@ -717,7 +691,6 @@ export default function AIHelper({
 
       {/* Input area */}
       <div style={{ width: "100%", boxSizing: "border-box" }}>
-        {/* PASSWORD MODE — single line masked input */}
         {isPasswordMode ? (
           <div style={{ position: "relative" }}>
             <input
@@ -746,7 +719,6 @@ export default function AIHelper({
                 fontFamily: "monospace",
               }}
             />
-            {/* Lock icon hint */}
             <div
               style={{
                 position: "absolute",
@@ -762,7 +734,6 @@ export default function AIHelper({
             </div>
           </div>
         ) : (
-          /* NORMAL MODE — textarea */
           <textarea
             ref={textareaRef}
             value={input}
@@ -790,7 +761,6 @@ export default function AIHelper({
           />
         )}
 
-        {/* Bottom row: attach + send */}
         <div
           style={{
             display: "flex",
@@ -810,7 +780,6 @@ export default function AIHelper({
             style={{ display: "none" }}
           />
 
-          {/* Hide attach button in password mode */}
           {!isPasswordMode && (
             <button
               onClick={() => fileInputRef.current?.click()}
