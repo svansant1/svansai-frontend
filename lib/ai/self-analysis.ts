@@ -13,7 +13,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const WEAKNESS_THRESHOLD = 0.35; // below this = logged as weak
+const WEAKNESS_THRESHOLD = 0.30; // below this = logged as weak
 
 export type ResponseScore = {
   relevance: number;   // 0-1: did it answer the actual question?
@@ -64,11 +64,11 @@ export function scoreResponse(
   const expectedMinLength: Record<QuestionType, number> = {
     coding: 120,
     business: 80,
-    writing: 100,
+    writing: 60,
     tech_support: 80,
-    learning: 120,
-    life: 100,
-    general: 80,
+    learning: 80,
+    life: 50,
+    general: 40,
   };
   const minLen = expectedMinLength[questionType] || 80;
   const depth = Math.min(1, outputLen / minLen);

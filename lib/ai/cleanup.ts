@@ -2,13 +2,15 @@ import type { ChatMessage } from "@/lib/ai/types";
 
 const MAX_HISTORY = 20;
 const MAX_CHARS_PER_MESSAGE = 4000;
-const MIN_RESPONSE_LENGTH = 20;
 
 export function sanitizeMessages(messages: unknown[]): ChatMessage[] {
   if (!Array.isArray(messages)) return [];
 
   return messages
-    .filter((m): m is { role?: unknown; content?: unknown } => !!m && typeof m === "object")
+    .filter(
+      (m): m is { role?: unknown; content?: unknown } =>
+        !!m && typeof m === "object"
+    )
     .map(
       (m): ChatMessage => ({
         role: m.role === "assistant" ? "assistant" : "user",
@@ -26,11 +28,18 @@ export function sanitizeMessages(messages: unknown[]): ChatMessage[] {
 }
 
 export function getLatestUserMessage(messages: ChatMessage[]): string {
-  return [...messages].reverse().find((m) => m.role === "user")?.content?.trim() || "";
+  return (
+    [...messages].reverse().find((m) => m.role === "user")?.content?.trim() || ""
+  );
 }
 
 export function getLastAssistantMessage(messages: ChatMessage[]): string {
-  return [...messages].reverse().find((m) => m.role === "assistant")?.content?.trim() || "";
+  return (
+    [...messages]
+      .reverse()
+      .find((m) => m.role === "assistant")
+      ?.content?.trim() || ""
+  );
 }
 
 export function normalizeText(text: string): string {
@@ -50,13 +59,16 @@ export function cleanResponse(text: string): string {
   const deduped: string[] = [];
 
   for (const paragraph of paragraphs) {
-    if (!deduped.some((existing) => normalizeText(existing) === normalizeText(paragraph))) {
+    if (
+      !deduped.some(
+        (existing) => normalizeText(existing) === normalizeText(paragraph)
+      )
+    ) {
       deduped.push(paragraph);
     }
   }
 
   cleaned = deduped.join("\n\n").trim();
-
   return cleaned;
 }
 
@@ -70,27 +82,58 @@ export function isWeakResponse(text: string): boolean {
     "what are you trying to figure out",
     "what have you tried already",
     "where exactly are you getting stuck",
-    "tell me more",
+    "where exactly are you stuck",
+    "tell me more so i can help",
     "give me more detail",
   ];
 
   return weakPatterns.some((pattern) => normalized.includes(pattern));
 }
+
 export function isUsableResponse(
   text: string,
   messages: ChatMessage[],
   latestUserMessage: string
 ): boolean {
-  if (!text) return false;
+  if (!text || !text.trim()) return false;
 
-  if (text.length < 8) return false;
+  const normalized = normalizeText(text);
+
+  // Block obvious weak/generic stall responses
+  if (isWeakResponse(text)) return false;
+
+  // Allow short factual answers for short factual questions
+  const normalizedQuestion = normalizeText(latestUserMessage);
+  const shortQuestion =
+    normalizedQuestion.length <= 30 ||
+    /^(what is|who is|where is|when is|2\+2|hi|hello|yes|no)/.test(
+      normalizedQuestion
+    );
+
+  if (shortQuestion && normalized.length >= 1) {
+    const lastAssistantMessage =
+      [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
+
+    if (
+      lastAssistantMessage &&
+      normalizeText(lastAssistantMessage) === normalized
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  // For normal questions, only reject extremely tiny empty-like outputs
+  if (normalized.length < 2) return false;
 
   const lastAssistantMessage =
     [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
 
+  // Only reject exact duplicate of last assistant answer
   if (
     lastAssistantMessage &&
-    normalizeText(lastAssistantMessage) === normalizeText(text)
+    normalizeText(lastAssistantMessage) === normalized
   ) {
     return false;
   }
