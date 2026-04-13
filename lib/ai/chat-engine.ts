@@ -53,18 +53,27 @@ type ExtendedChatContext = ChatContext & {
 };
 
 // ─── Retry with exponential backoff ──────────────────────────────────────────
-async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 400): Promise<T> {
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 2,
+  delayMs = 400
+): Promise<T> {
   let lastError: unknown;
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastError = err;
+
       if (attempt < retries) {
-        await new Promise((res) => setTimeout(res, delayMs * Math.pow(2, attempt)));
+        await new Promise((res) =>
+          setTimeout(res, delayMs * Math.pow(2, attempt))
+        );
       }
     }
   }
+
   throw lastError;
 }
 
@@ -91,8 +100,24 @@ export async function generateChatResponse(
     return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
   }
 
+  // ─── Simple self-identity shortcut ─────────────────────────────────────────
+  const normalizedLatest = latestUserMessage.toLowerCase().trim();
+  if (
+    normalizedLatest === "what are you" ||
+    normalizedLatest === "what are you?" ||
+    normalizedLatest === "who are you" ||
+    normalizedLatest === "who are you?" ||
+    normalizedLatest.includes("what is svansai") ||
+    normalizedLatest.includes("who is svansai")
+  ) {
+    return "I'm SVANSAI, your AI assistant. I’m built to help with learning, coding, troubleshooting, writing, strategy, and conversation, and I’m designed to improve over time through memory, retrieval, and self-analysis.";
+  }
+
   // ─── Phase 3: Handle sv commands and password flow ────────────────────────
-  if (isAwaitingPassword(sid) || latestUserMessage.toLowerCase().trim().startsWith("sv ")) {
+  if (
+    isAwaitingPassword(sid) ||
+    latestUserMessage.toLowerCase().trim().startsWith("sv ")
+  ) {
     const command = parseSVCommand(latestUserMessage, sid);
     if (command) {
       const commandResponse = await handleSVCommand(command, sid);
@@ -100,13 +125,13 @@ export async function generateChatResponse(
     }
   }
 
-  // ─── Phase 3: Surface unnotified upgrades on first message of session ──────
+  // ─── Phase 3: Surface unnotified upgrades on first message of session ─────
   if (messages.length === 1) {
     const upgradeNotice = await checkAndSurfaceUpgrades(sid);
     if (upgradeNotice) return upgradeNotice;
   }
 
-  // ─── Normal chat flow ─────────────────────────────────────────────────────
+  // ─── Normal chat flow ──────────────────────────────────────────────────────
   const lastAssistantMessage = getLastAssistantMessage(messages);
   const followUpIntent = detectFollowUpIntent(latestUserMessage);
 
@@ -126,7 +151,10 @@ ${latestUserMessage}
 Previous assistant response:
 ${lastAssistantMessage}
 `.trim();
-    questionType = await detectQuestionType(lastAssistantMessage || latestUserMessage);
+
+    questionType = await detectQuestionType(
+      lastAssistantMessage || latestUserMessage
+    );
   }
 
   const responseStyle = detectResponseStyle(effectiveMessage, questionType);
@@ -149,14 +177,20 @@ ${lastAssistantMessage}
   const response = await generateBestResponse(context);
 
   // Phase 3: Silent scoring + threshold — fire and forget
-  void analyzeResponse({ input: latestUserMessage, output: response, questionType });
+  void analyzeResponse({
+    input: latestUserMessage,
+    output: response,
+    questionType,
+  });
   void checkThresholdAndRun();
 
   return response;
 }
 
-// ─── Generation loop ──────────────────────────────────────────────────────────
-async function generateBestResponse(context: ExtendedChatContext): Promise<string> {
+// ─── Generation loop ─────────────────────────────────────────────────────────
+async function generateBestResponse(
+  context: ExtendedChatContext
+): Promise<string> {
   const contents = context.messages.slice(0, -1).map((message) => ({
     role: message.role === "assistant" ? "model" : "user",
     parts: [{ text: message.content }],
@@ -177,17 +211,33 @@ async function generateBestResponse(context: ExtendedChatContext): Promise<strin
   const retryPrompt = buildRetryPrompt(basePrompt);
 
   for (const model of MODELS) {
-    const firstAttempt = await tryGenerate({ model, context, contents, prompt: basePrompt, secondPass: false });
+    const firstAttempt = await tryGenerate({
+      model,
+      context,
+      contents,
+      prompt: basePrompt,
+      secondPass: false,
+    });
     if (firstAttempt) return firstAttempt;
 
-    const secondAttempt = await tryGenerate({ model, context, contents, prompt: retryPrompt, secondPass: true });
+    const secondAttempt = await tryGenerate({
+      model,
+      context,
+      contents,
+      prompt: retryPrompt,
+      secondPass: true,
+    });
     if (secondAttempt) return secondAttempt;
   }
 
-  return finalFallback(context.latestUserMessage, context.questionType, context.responseStyle);
+  return finalFallback(
+    context.latestUserMessage,
+    context.questionType,
+    context.responseStyle
+  );
 }
 
-// ─── Build last user turn with optional file parts ────────────────────────────
+// ─── Build last user turn with optional file parts ───────────────────────────
 function buildLastUserParts(
   prompt: string,
   attachedFile?: AttachedFile
@@ -203,20 +253,36 @@ function buildLastUserParts(
 
   if (isImage || isPdf) {
     return [
-      { inlineData: { mimeType: attachedFile.type, data: attachedFile.base64 } },
+      {
+        inlineData: {
+          mimeType: attachedFile.type,
+          data: attachedFile.base64,
+        },
+      },
       { text: prompt },
     ];
   }
 
   if (isText) {
-    const decoded = Buffer.from(attachedFile.base64, "base64").toString("utf-8");
-    return [{ text: `The user attached a file named "${attachedFile.name}".\n\nFile contents:\n\`\`\`\n${decoded}\n\`\`\`\n\n${prompt}` }];
+    const decoded = Buffer.from(attachedFile.base64, "base64").toString(
+      "utf-8"
+    );
+
+    return [
+      {
+        text: `The user attached a file named "${attachedFile.name}".\n\nFile contents:\n\`\`\`\n${decoded}\n\`\`\`\n\n${prompt}`,
+      },
+    ];
   }
 
-  return [{ text: `The user attached a file named "${attachedFile.name}" (type: ${attachedFile.type}).\n\n${prompt}` }];
+  return [
+    {
+      text: `The user attached a file named "${attachedFile.name}" (type: ${attachedFile.type}).\n\n${prompt}`,
+    },
+  ];
 }
 
-// ─── Single generation attempt ────────────────────────────────────────────────
+// ─── Single generation attempt ───────────────────────────────────────────────
 async function tryGenerate(params: {
   model: string;
   context: ExtendedChatContext;
@@ -225,40 +291,73 @@ async function tryGenerate(params: {
   secondPass: boolean;
 }): Promise<string | null> {
   try {
-    const systemInstruction = buildSystemInstruction(params.context.questionType, params.context.responseStyle);
-    const lastUserParts = buildLastUserParts(params.prompt, params.context.attachedFile);
+    const systemInstruction = buildSystemInstruction(
+      params.context.questionType,
+      params.context.responseStyle
+    );
+    const lastUserParts = buildLastUserParts(
+      params.prompt,
+      params.context.attachedFile
+    );
+
+    console.log("SVANSAI_CALLING_MODEL:", params.model);
 
     const result = await withRetry(() =>
       ai.models.generateContent({
         model: params.model,
-        contents: [...params.contents, { role: "user", parts: lastUserParts }],
+        contents: [
+          ...params.contents,
+          { role: "user", parts: lastUserParts },
+        ],
         config: {
           systemInstruction,
-          temperature: getTemperature(params.context.questionType, params.context.responseStyle),
+          temperature: getTemperature(
+            params.context.questionType,
+            params.context.responseStyle
+          ),
           topP: 0.9,
         },
       })
     );
 
-    const text = cleanResponse(result?.text?.trim() || "");
-    if (!text || text.trim().length === 0) return null;
+    const rawText =
+      typeof result?.text === "string"
+        ? result.text
+        : typeof (result as { response?: { text?: string } })?.response?.text ===
+          "string"
+        ? (result as { response?: { text?: string } }).response!.text!
+        : "";
 
-    // Only reject exact duplicates of the last assistant message
-    if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
+    const text = cleanResponse(rawText.trim());
 
-    // Only block hard stall phrases — no length-based rejection
+    console.log("SVANSAI_MODEL_TEXT:", text);
+
+    if (!text || text.trim().length === 0) {
+      console.error(
+        `EMPTY_MODEL_TEXT_${params.model}_${
+          params.secondPass ? "SECOND" : "FIRST"
+        }`
+      );
+      return null;
+    }
+
+    // TEMP: allow non-empty responses through while stabilizing live answers
+    // Re-enable stricter filtering later if needed.
+    // if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
+
     if (isHardStall(text)) return null;
 
     return text;
   } catch (error) {
-    console.error(`MODEL_FAILED_${params.model}_${params.secondPass ? "SECOND" : "FIRST"}:`, error);
+    console.error(
+      `MODEL_FAILED_${params.model}_${params.secondPass ? "SECOND" : "FIRST"}:`,
+      error
+    );
     return null;
   }
 }
 
 // ─── Only block confirmed stall phrases ──────────────────────────────────────
-// Removed the "short response = bad" rule — it was blocking valid answers
-// like "Yes.", "No, because...", or short factual replies.
 function isHardStall(text: string): boolean {
   const normalized = normalizeText(text);
   const hardStalls = [
@@ -273,21 +372,38 @@ function isHardStall(text: string): boolean {
     "let's start here",
     "lets start here",
   ];
+
   return hardStalls.some((p) => normalized.includes(p));
 }
 
-// ─── Final fallback ───────────────────────────────────────────────────────────
-function finalFallback(question: string, type: QuestionType, responseStyle: ResponseStyle): string {
+// ─── Final fallback ──────────────────────────────────────────────────────────
+function finalFallback(
+  question: string,
+  type: QuestionType,
+  responseStyle: ResponseStyle
+): string {
   switch (type) {
-    case "coding": return "Here's a simple coding example:\n\n```python\nprint(\"hello world\")\n```\n\nIf you want a different language or approach, just say so.";
-    case "business": return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
-    case "writing": return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
-    case "tech_support": return "Tell me the device, what exactly is happening, and what changed before the issue started.";
-    case "learning": return "I can explain that step by step. Send the full question or problem and I'll break it down.";
-    case "life": return "Tell me the situation, and I'll help you sort through your options and next move.";
+    case "coding":
+      return 'Here\'s a simple coding example:\n\n```python\nprint("hello world")\n```\n\nIf you want a different language or approach, just say so.';
+    case "business":
+      return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
+    case "writing":
+      return "Paste the writing, and I'll rewrite it or make it stronger based on the tone you want.";
+    case "tech_support":
+      return "Tell me the device, what exactly is happening, and what changed before the issue started.";
+    case "learning":
+      return "I can explain that step by step. Send the full question or problem and I'll break it down.";
+    case "life":
+      return "Tell me the situation, and I'll help you sort through your options and next move.";
     default:
-      if (responseStyle === "brainstorm") return "Give me the topic or goal, and I'll generate ideas and directions to build from.";
-      if (responseStyle === "guide") return "Tell me what you're trying to do, and I'll walk you through it step by step.";
-      return question.trim() ? "I'm here and ready. Send the full question and I'll answer it directly." : "I'm here and ready. Ask me anything.";
+      if (responseStyle === "brainstorm") {
+        return "Give me the topic or goal, and I'll generate ideas and directions to build from.";
+      }
+      if (responseStyle === "guide") {
+        return "Tell me what you're trying to do, and I'll walk you through it step by step.";
+      }
+      return question.trim()
+        ? "I'm here and ready. Send the full question and I'll answer it directly."
+        : "I'm here and ready. Ask me anything.";
   }
 }
