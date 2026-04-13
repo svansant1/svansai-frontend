@@ -241,7 +241,7 @@ async function tryGenerate(params: {
     );
 
     const text = cleanResponse(result?.text?.trim() || "");
-    if (!text || text.length < 4) return null;
+    if (!text || text.trim().length === 0) return null;
 
     // Only reject exact duplicates of the last assistant message
     if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
