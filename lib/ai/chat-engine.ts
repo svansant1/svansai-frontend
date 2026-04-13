@@ -320,15 +320,7 @@ async function tryGenerate(params: {
       })
     );
 
-    const rawText =
-      typeof result?.text === "string"
-        ? result.text
-        : typeof (result as { response?: { text?: string } })?.response?.text ===
-          "string"
-        ? (result as { response?: { text?: string } }).response!.text!
-        : "";
-
-    const text = cleanResponse(rawText.trim());
+    const text = cleanResponse(result?.text?.trim() || "");
 
     console.log("SVANSAI_MODEL_TEXT:", text);
 
@@ -340,6 +332,21 @@ async function tryGenerate(params: {
       );
       return null;
     }
+
+    // TEMP: allow non-empty responses through while stabilizing live answers
+    // if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
+
+    if (isHardStall(text)) return null;
+
+    return text;
+  } catch (error) {
+    console.error(
+      `MODEL_FAILED_${params.model}_${params.secondPass ? "SECOND" : "FIRST"}:`,
+      error
+    );
+    return null;
+  }
+}
 
     // TEMP: allow non-empty responses through while stabilizing live answers
     // Re-enable stricter filtering later if needed.
