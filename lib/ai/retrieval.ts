@@ -1,4 +1,14 @@
 import type { RetrievalItem } from "@/lib/ai/types";
+import { supabase } from "@/lib/supabase";
+
+type KnowledgeRow = {
+  id: string;
+  title: string | null;
+  source: string | null;
+  snippet: string | null;
+  tags: string[] | null;
+  created_at?: string | null;
+};
 
 const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
   {
@@ -6,49 +16,217 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "SVANSAI Architecture",
     source: "system",
     snippet:
-      "SVANSAI uses multi-provider routing with OpenAI, Gemini, and Anthropic. It includes self-analysis, self-improvement, retrieval, and memory systems.",
-    score: 0.9,
-    tags: ["system", "architecture"],
+      "SVANSAI uses a chat engine, routing logic, memory, retrieval, response cleanup, question detection, self-analysis, self-monitoring, self-improvement, and provider-based AI responses.",
+    score: 0.92,
+    tags: ["system", "architecture", "chat-engine", "memory", "retrieval"],
   },
   {
     id: "sv-fallback",
     title: "Fallback Behavior",
     source: "system",
     snippet:
-      "Fallback occurs when providers fail, retrieval returns empty, or response scoring determines output quality is too low.",
-    score: 0.9,
-    tags: ["fallback", "logic"],
+      "Fallback happens when retrieval returns weak context, providers fail, responses are filtered as too generic or too weak, or the question cannot be confidently answered.",
+    score: 0.91,
+    tags: ["fallback", "responses", "quality", "generic"],
   },
   {
     id: "sv-providers",
     title: "AI Providers",
     source: "system",
     snippet:
-      "SVANSAI uses OpenAI, Gemini, and Anthropic. Router selects provider based on question type.",
-    score: 0.9,
-    tags: ["providers", "ai"],
+      "SVANSAI can use Gemini, OpenAI, and Anthropic providers. Routing can prioritize different models depending on coding, learning, tech support, business, or general questions.",
+    score: 0.93,
+    tags: ["providers", "gemini", "openai", "anthropic", "routing"],
   },
   {
-    id: "sv-learning",
-    title: "Self Learning System",
+    id: "sv-self-improvement",
+    title: "Self Improvement",
     source: "system",
     snippet:
-      "SVANSAI logs weak responses, analyzes failures, generates improvements, and deploys updates with owner approval.",
+      "SVANSAI logs weak responses, analyzes failure patterns, creates improvement candidates, and can deploy approved upgrades through owner commands.",
+    score: 0.94,
+    tags: ["self-analysis", "self-monitor", "self-improve", "upgrade"],
+  },
+  {
+    id: "sv-chat-history",
+    title: "Chat Persistence",
+    source: "system",
+    snippet:
+      "SVANSAI stores conversations and conversation_messages in Supabase. The active chat should persist through refresh and saved chats should remain available in the sidebar.",
     score: 0.9,
-    tags: ["learning", "self-improve"],
+    tags: ["chat", "history", "sidebar", "supabase", "conversations"],
+  },
+  {
+    id: "sv-owner-mode",
+    title: "Owner Commands",
+    source: "system",
+    snippet:
+      "SVANSAI supports owner commands like sv unlock, sv lock, sv analyze, sv improve, sv show candidates, sv deploy, and sv instruct for guided self-improvement.",
+    score: 0.9,
+    tags: ["owner", "sv unlock", "sv lock", "sv analyze", "sv instruct"],
   },
 ];
 
-export async function getRetrievedKnowledge(
-  query: string
-): Promise<RetrievalItem[]> {
-  const normalized = query.toLowerCase();
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s_\-]/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 1);
+}
 
-  const results = SYSTEM_KNOWLEDGE.filter((item) =>
-    item.snippet.toLowerCase().includes(normalized) ||
-    item.title.toLowerCase().includes(normalized) ||
-    item.tags?.some((tag) => normalized.includes(tag))
-  );
+function unique<T>(arr: T[]): T[] {
+  return [...new Set(arr)];
+}
 
-  return results.slice(0, 5);
+function scoreTextMatch(query: string, text: string, tags: string[] = []): number {
+  const qTokens = unique(tokenize(query));
+  const textBlob = `${text} ${tags.join(" ")}`.toLowerCase();
+  const textTokens = new Set(tokenize(textBlob));
+
+  if (qTokens.length === 0) return 0;
+
+  let overlap = 0;
+  for (const token of qTokens) {
+    if (textTokens.has(token)) overlap++;
+  }
+
+  const phraseBoost =
+    textBlob.includes(query.toLowerCase().trim()) && query.trim().length > 4 ? 0.25 : 0;
+
+  return Math.min(1, overlap / Math.max(qTokens.length, 1) + phraseBoost);
+}
+
+function boostSelfKnowledge(query: string, item: RetrievalItem): number {
+  const q = query.toLowerCase();
+
+  const selfTerms = [
+    "yourself",
+    "your code",
+    "how do you work",
+    "how you work",
+    "what do you use",
+    "what models",
+    "what provider",
+    "fallback",
+    "why did you fail",
+    "why fallback",
+    "svansai",
+    "architecture",
+    "chat engine",
+    "memory",
+    "retrieval",
+    "self improvement",
+    "self-improve",
+    "self analysis",
+    "self-analysis",
+    "owner mode",
+  ];
+
+  const isSelfQuery = selfTerms.some((term) => q.includes(term));
+  const itemTags = (item.tags ?? []).join(" ").toLowerCase();
+  const itemText = `${item.title} ${item.snippet} ${itemTags}`.toLowerCase();
+
+  if (!isSelfQuery) return 0;
+  if (item.source !== "system") return 0.05;
+
+  if (
+    itemText.includes("architecture") ||
+    itemText.includes("provider") ||
+    itemText.includes("fallback") ||
+    itemText.includes("self") ||
+    itemText.includes("owner")
+  ) {
+    return 0.2;
+  }
+
+  return 0.1;
+}
+
+function toRetrievalItem(row: KnowledgeRow, query: string): RetrievalItem | null {
+  const title = row.title?.trim() || "Knowledge Entry";
+  const source = row.source?.trim() || "knowledge";
+  const snippet = row.snippet?.trim() || "";
+  const tags = row.tags ?? [];
+
+  if (!snippet) return null;
+
+  const score = scoreTextMatch(query, `${title} ${snippet}`, tags);
+
+  return {
+    id: row.id,
+    title,
+    source,
+    snippet,
+    score,
+    tags,
+  };
+}
+
+function rankItems(query: string, items: RetrievalItem[]): RetrievalItem[] {
+  return items
+    .map((item) => {
+      const baseScore = scoreTextMatch(
+        query,
+        `${item.title} ${item.snippet}`,
+        item.tags ?? []
+      );
+      const boosted = Math.min(1, Math.max(item.score ?? 0, baseScore) + boostSelfKnowledge(query, item));
+      return { ...item, score: boosted };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+async function getSystemKnowledge(query: string): Promise<RetrievalItem[]> {
+  return rankItems(query, SYSTEM_KNOWLEDGE).filter((item) => item.score >= 0.18);
+}
+
+async function getSupabaseKnowledge(query: string): Promise<RetrievalItem[]> {
+  try {
+    const { data, error } = await supabase
+      .from("knowledge")
+      .select("id,title,source,snippet,tags,created_at")
+      .limit(200);
+
+    if (error || !data) {
+      return [];
+    }
+
+    const mapped = (data as KnowledgeRow[])
+      .map((row) => toRetrievalItem(row, query))
+      .filter(Boolean) as RetrievalItem[];
+
+    return rankItems(query, mapped).filter((item) => item.score >= 0.18);
+  } catch {
+    return [];
+  }
+}
+
+function dedupeItems(items: RetrievalItem[]): RetrievalItem[] {
+  const seen = new Set<string>();
+  const result: RetrievalItem[] = [];
+
+  for (const item of items) {
+    const key = `${item.title.toLowerCase()}|${item.snippet.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}
+
+export async function getRetrievedKnowledge(query: string): Promise<RetrievalItem[]> {
+  const cleanedQuery = query.trim();
+  if (!cleanedQuery) return [];
+
+  const [systemItems, dbItems] = await Promise.all([
+    getSystemKnowledge(cleanedQuery),
+    getSupabaseKnowledge(cleanedQuery),
+  ]);
+
+  const combined = dedupeItems([...dbItems, ...systemItems]);
+
+  return combined.slice(0, 6);
 }
