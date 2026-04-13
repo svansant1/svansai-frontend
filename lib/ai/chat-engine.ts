@@ -348,23 +348,7 @@ async function tryGenerate(params: {
   }
 }
 
-    // TEMP: allow non-empty responses through while stabilizing live answers
-    // Re-enable stricter filtering later if needed.
-    // if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
-
-    if (isHardStall(text)) return null;
-
-    return text;
-  } catch (error) {
-    console.error(
-      `MODEL_FAILED_${params.model}_${params.secondPass ? "SECOND" : "FIRST"}:`,
-      error
-    );
-    return null;
-  }
-}
-
-// ─── Only block confirmed stall phrases ──────────────────────────────────────
+  // ─── Only block confirmed stall phrases ──────────────────────────────────────
 function isHardStall(text: string): boolean {
   const normalized = normalizeText(text);
   const hardStalls = [
