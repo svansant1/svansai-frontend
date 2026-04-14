@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import type { ChatMessage, ChatContext, QuestionType } from "@/lib/ai/types";
+import type { ChatContext, QuestionType } from "@/lib/ai/types";
 import {
   sanitizeMessages,
   getLatestUserMessage,
@@ -31,8 +31,6 @@ import {
   checkAndSurfaceUpgrades,
   isAwaitingPassword,
 } from "@/lib/ai/instruction-handler";
-
-// New learning + fallback imports
 import {
   queueLearningNeed,
   storeLearnedFallback,
@@ -45,7 +43,7 @@ import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
 const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = new GoogleGenAI({ apiKey });
 
-// Keep file-aware Gemini path light to avoid rate limits
+// Keep attachment path minimal to reduce quota pressure
 const FILE_MODELS = ["gemini-2.5-flash"];
 
 export type AttachedFile = {
@@ -62,7 +60,6 @@ type ExtendedChatContext = ChatContext & {
   attachedFile?: AttachedFile;
 };
 
-// ─── Retry with exponential backoff ──────────────────────────────────────────
 async function withRetry<T>(
   fn: () => Promise<T>,
   retries = 1,
@@ -91,19 +88,23 @@ async function callProvider(
   provider: ProviderName,
   args: { prompt: string; systemInstruction: string; temperature: number }
 ): Promise<string | null> {
-  switch (provider) {
-    case "gemini":
-      return generateWithGemini(args);
-    case "openai":
-      return generateWithOpenAI(args);
-    case "anthropic":
-      return generateWithAnthropic(args);
-    default:
-      return null;
+  try {
+    switch (provider) {
+      case "gemini":
+        return generateWithGemini(args);
+      case "openai":
+        return generateWithOpenAI(args);
+      case "anthropic":
+        return generateWithAnthropic(args);
+      default:
+        return null;
+    }
+  } catch (error) {
+    console.error("SVANSAI_PROVIDER_CALL_ERROR:", provider, error);
+    return null;
   }
 }
 
-// ─── Main entry ───────────────────────────────────────────────────────────────
 export async function generateChatResponse(
   rawMessages: unknown[],
   attachedFile?: AttachedFile,
@@ -126,7 +127,6 @@ export async function generateChatResponse(
     return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
   }
 
-  // ─── Simple self-identity shortcut ─────────────────────────────────────────
   const normalizedLatest = latestUserMessage.toLowerCase().trim();
   if (
     normalizedLatest === "what are you" ||
@@ -134,12 +134,14 @@ export async function generateChatResponse(
     normalizedLatest === "who are you" ||
     normalizedLatest === "who are you?" ||
     normalizedLatest.includes("what is svansai") ||
-    normalizedLatest.includes("who is svansai")
+    normalizedLatest.includes("who is svansai") ||
+    normalizedLatest.includes("tell me about yourself") ||
+    normalizedLatest.includes("what do you do") ||
+    normalizedLatest.includes("do you know who you are")
   ) {
-    return "I'm SVANSAI, your AI assistant. I’m built to help with learning, coding, troubleshooting, writing, strategy, and conversation, and I’m designed to improve over time through memory, retrieval, and self-analysis.";
+    return "I'm SVANSAI, your AI assistant. I help with learning, coding, troubleshooting, writing, strategy, and conversation, and I improve over time through memory, retrieval, and self-analysis.";
   }
 
-  // ─── Phase 3: Handle sv commands and password flow ────────────────────────
   if (
     isAwaitingPassword(sid) ||
     latestUserMessage.toLowerCase().trim().startsWith("sv ")
@@ -151,13 +153,11 @@ export async function generateChatResponse(
     }
   }
 
-  // ─── Phase 3: Surface unnotified upgrades on first message of session ─────
   if (messages.length === 1) {
     const upgradeNotice = await checkAndSurfaceUpgrades(sid);
     if (upgradeNotice) return upgradeNotice;
   }
 
-  // ─── Normal chat flow ──────────────────────────────────────────────────────
   const lastAssistantMessage = getLastAssistantMessage(messages);
   const followUpIntent = detectFollowUpIntent(latestUserMessage);
 
@@ -187,14 +187,15 @@ ${lastAssistantMessage}
   const memory = await getMemoryContext(latestUserMessage, messages);
   const retrieval = await getRetrievedKnowledge(latestUserMessage);
 
-  // Queue unknown topics so the system can learn them later
-  void queueLearningNeed({
-    question: latestUserMessage,
-    questionType,
-    reason: "No strong internal answer found before provider fallback.",
-    priority: 2,
-    source: "chat-runtime",
-  });
+  if (retrieval.length === 0 || (retrieval[0]?.score ?? 0) < 0.5) {
+    void queueLearningNeed({
+      question: latestUserMessage,
+      questionType,
+      reason: "Retrieved context was weak or missing.",
+      priority: 2,
+      source: "chat-runtime",
+    });
+  }
 
   const context: ExtendedChatContext = {
     messages,
@@ -211,23 +212,22 @@ ${lastAssistantMessage}
 
   const response = await generateBestResponse(context);
 
-  // Save strong answers back into learned knowledge
   if (
     response &&
-    !response.toLowerCase().includes("i'm here and ready") &&
-    !response.toLowerCase().includes("i’m here and ready")
+    !isHardStall(response) &&
+    !response.toLowerCase().includes("i couldn't generate a strong answer") &&
+    response.trim().length > 40
   ) {
     void storeLearnedFallback({
       question: latestUserMessage,
       answer: response,
       questionType,
-      source: "runtime_fallback_or_model",
-      confidence: 0.72,
-      tags: [questionType, "runtime-learned"],
+      source: "sv-runtime-optimizer",
+      confidence: 0.78,
+      tags: [questionType, "ai-learned"],
     });
   }
 
-  // Phase 3: Silent scoring + threshold — fire and forget
   void analyzeResponse({
     input: latestUserMessage,
     output: response,
@@ -238,7 +238,6 @@ ${lastAssistantMessage}
   return response;
 }
 
-// ─── Generation loop ─────────────────────────────────────────────────────────
 async function generateBestResponse(
   context: ExtendedChatContext
 ): Promise<string> {
@@ -256,23 +255,22 @@ async function generateBestResponse(
 
   const retryPrompt = buildRetryPrompt(basePrompt);
 
-  // Preserve current file-aware flow using direct Gemini call for inlineData
+  // Only allow direct local knowledge answer on very high confidence.
+  // This avoids dumping raw knowledge for medium-confidence retrieval.
+  if (!context.attachedFile) {
+    const topResult = context.retrieval[0];
+    if (topResult && topResult.score >= 0.9) {
+      console.log("[SVANSAI] Serving from local knowledge:", topResult.id);
+      return topResult.snippet;
+    }
+  }
+
   if (context.attachedFile) {
     for (const model of FILE_MODELS) {
-      const firstAttempt = await tryGenerate({
-        model,
-        context,
-        prompt: basePrompt,
-        secondPass: false,
-      });
+      const firstAttempt = await tryFileGeneration(model, context, basePrompt);
       if (firstAttempt) return firstAttempt;
 
-      const secondAttempt = await tryGenerate({
-        model,
-        context,
-        prompt: retryPrompt,
-        secondPass: true,
-      });
+      const secondAttempt = await tryFileGeneration(model, context, retryPrompt);
       if (secondAttempt) return secondAttempt;
     }
 
@@ -283,7 +281,6 @@ async function generateBestResponse(
     );
   }
 
-  // New provider fallback chain for normal chat
   const systemInstruction = buildSystemInstruction(
     context.questionType,
     context.responseStyle
@@ -294,43 +291,65 @@ async function generateBestResponse(
   );
   const plan = getProviderPlan(context.questionType);
 
+  console.log("[SVANSAI] Provider plan:", plan);
+
   for (const provider of plan) {
-  console.log("SVANSAI_PROVIDER_ATTEMPT:", provider);
+    console.log("[SVANSAI] Trying provider:", provider);
 
-  const first = await callProvider(provider, {
-    prompt: basePrompt,
-    systemInstruction,
-    temperature,
-  });
+    try {
+      const first = await callProvider(provider, {
+        prompt: basePrompt,
+        systemInstruction,
+        temperature,
+      });
 
-  console.log(
-    "SVANSAI_PROVIDER_FIRST_RESULT:",
-    provider,
-    typeof first === "string" ? first.slice(0, 200) : "[empty]"
-  );
+      const cleanFirst = cleanResponse(first || "");
+      console.log(
+        "[SVANSAI] Provider result:",
+        provider,
+        cleanFirst ? cleanFirst.slice(0, 200) : "[empty]"
+      );
 
-  const cleanFirst = cleanResponse(first || "");
-  if (cleanFirst && !isHardStall(cleanFirst)) {
-    return cleanFirst;
+      if (
+        cleanFirst &&
+        !isHardStall(cleanFirst) &&
+        cleanFirst.trim().length > 20
+      ) {
+        return cleanFirst;
+      }
+
+      const second = await callProvider(provider, {
+        prompt: retryPrompt,
+        systemInstruction,
+        temperature,
+      });
+
+      const cleanSecond = cleanResponse(second || "");
+      console.log(
+        "[SVANSAI] Provider retry result:",
+        provider,
+        cleanSecond ? cleanSecond.slice(0, 200) : "[empty]"
+      );
+
+      if (
+        cleanSecond &&
+        !isHardStall(cleanSecond) &&
+        cleanSecond.trim().length > 20
+      ) {
+        return cleanSecond;
+      }
+    } catch (error) {
+      console.error("[SVANSAI] Provider loop error:", provider, error);
+    }
   }
 
-  const second = await callProvider(provider, {
-    prompt: retryPrompt,
-    systemInstruction,
-    temperature,
+  void queueLearningNeed({
+    question: context.latestUserMessage,
+    questionType: context.questionType,
+    reason: "All providers failed to generate a usable response.",
+    priority: 3,
+    source: "hard-fallback",
   });
-
-  console.log(
-    "SVANSAI_PROVIDER_RETRY_RESULT:",
-    provider,
-    typeof second === "string" ? second.slice(0, 200) : "[empty]"
-  );
-
-  const cleanSecond = cleanResponse(second || "");
-  if (cleanSecond && !isHardStall(cleanSecond)) {
-    return cleanSecond;
-  }
-}
 
   return finalFallback(
     context.latestUserMessage,
@@ -339,7 +358,6 @@ async function generateBestResponse(
   );
 }
 
-// ─── Build last user turn with optional file parts ───────────────────────────
 function buildLastUserParts(
   prompt: string,
   attachedFile?: AttachedFile
@@ -366,55 +384,48 @@ function buildLastUserParts(
   }
 
   if (isText) {
-    const decoded = Buffer.from(attachedFile.base64, "base64").toString(
-      "utf-8"
-    );
-
-    return [
-      {
-        text: `The user attached a file named "${attachedFile.name}".\n\nFile contents:\n\`\`\`\n${decoded}\n\`\`\`\n\n${prompt}`,
-      },
-    ];
+    try {
+      const decoded = Buffer.from(attachedFile.base64, "base64").toString(
+        "utf-8"
+      );
+      return [
+        {
+          text: `File: ${attachedFile.name}\n\n\`\`\`\n${decoded}\n\`\`\`\n\n${prompt}`,
+        },
+      ];
+    } catch {
+      return [{ text: prompt }];
+    }
   }
 
-  return [
-    {
-      text: `The user attached a file named "${attachedFile.name}" (type: ${attachedFile.type}).\n\n${prompt}`,
-    },
-  ];
+  return [{ text: prompt }];
 }
 
-// ─── Single generation attempt for file-aware Gemini path ────────────────────
-async function tryGenerate(params: {
-  model: string;
-  context: ExtendedChatContext;
-  prompt: string;
-  secondPass: boolean;
-}): Promise<string | null> {
+async function tryFileGeneration(
+  model: string,
+  context: ExtendedChatContext,
+  prompt: string
+): Promise<string | null> {
   try {
     const systemInstruction = buildSystemInstruction(
-      params.context.questionType,
-      params.context.responseStyle
+      context.questionType,
+      context.responseStyle
     );
-    const lastUserParts = buildLastUserParts(
-      params.prompt,
-      params.context.attachedFile
-    );
-
-    const contents = params.context.messages.slice(0, -1).map((message) => ({
-      role: message.role === "assistant" ? "model" : "user",
-      parts: [{ text: message.content }],
+    const parts = buildLastUserParts(prompt, context.attachedFile);
+    const contents = context.messages.slice(0, -1).map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
     }));
 
     const result = await withRetry(() =>
       ai.models.generateContent({
-        model: params.model,
-        contents: [...contents, { role: "user", parts: lastUserParts }],
+        model,
+        contents: [...contents, { role: "user", parts }],
         config: {
           systemInstruction,
           temperature: getTemperature(
-            params.context.questionType,
-            params.context.responseStyle
+            context.questionType,
+            context.responseStyle
           ),
           topP: 0.9,
         },
@@ -422,24 +433,13 @@ async function tryGenerate(params: {
     );
 
     const text = cleanResponse(result?.text?.trim() || "");
-
-    if (!text || text.trim().length === 0) {
-      return null;
-    }
-
-    if (isHardStall(text)) return null;
-
-    return text;
+    return text && !isHardStall(text) ? text : null;
   } catch (error) {
-    console.error(
-      `MODEL_FAILED_${params.model}_${params.secondPass ? "SECOND" : "FIRST"}:`,
-      error
-    );
+    console.error("[SVANSAI] File generation error:", model, error);
     return null;
   }
 }
 
-// ─── Only block confirmed stall phrases ──────────────────────────────────────
 function isHardStall(text: string): boolean {
   const normalized = normalizeText(text);
   const hardStalls = [
@@ -458,7 +458,6 @@ function isHardStall(text: string): boolean {
   return hardStalls.some((p) => normalized.includes(p));
 }
 
-// ─── Final fallback ──────────────────────────────────────────────────────────
 function finalFallback(
   question: string,
   type: QuestionType,
@@ -478,12 +477,6 @@ function finalFallback(
     case "life":
       return "Tell me the situation, and I'll help you sort through your options and next move.";
     default:
-      if (responseStyle === "brainstorm") {
-        return "Give me the topic or goal, and I'll generate ideas and directions to build from.";
-      }
-      if (responseStyle === "guide") {
-        return "Tell me what you're trying to do, and I'll walk you through it step by step.";
-      }
       return question.trim()
         ? "I couldn't generate a strong answer just now. My provider fallback chain may not be responding correctly yet."
         : "I couldn't generate a strong answer just now.";
