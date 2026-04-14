@@ -1,15 +1,21 @@
 import type { QuestionType } from "@/lib/ai/types";
 
-export function getProviderPlan(questionType: QuestionType): string[] {
+export type ProviderName = "gemini" | "openai" | "anthropic";
+
+export function getProviderPlan(questionType: QuestionType): ProviderName[] {
   switch (questionType) {
     case "coding":
-      return ["anthropic", "openai", "gemini"];
+      return ["gemini", "anthropic", "openai"];
     case "tech_support":
-      return ["openai", "gemini", "anthropic"];
-    case "learning":
       return ["gemini", "openai", "anthropic"];
     case "business":
-      return ["openai", "gemini", "anthropic"];
+      return ["gemini", "openai", "anthropic"];
+    case "writing":
+      return ["gemini", "openai", "anthropic"];
+    case "learning":
+      return ["gemini", "openai", "anthropic"];
+    case "life":
+      return ["gemini", "openai", "anthropic"];
     default:
       return ["gemini", "openai", "anthropic"];
   }

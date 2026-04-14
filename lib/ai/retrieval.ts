@@ -1,5 +1,6 @@
 import type { RetrievalItem } from "@/lib/ai/types";
 import { supabase } from "@/lib/supabase";
+import { getLearnedKnowledge } from "@/lib/ai/knowledge-learning";
 
 type KnowledgeRow = {
   id: string;
@@ -172,7 +173,17 @@ function rankItems(query: string, items: RetrievalItem[]): RetrievalItem[] {
         `${item.title} ${item.snippet}`,
         item.tags ?? []
       );
-      const boosted = Math.min(1, Math.max(item.score ?? 0, baseScore) + boostSelfKnowledge(query, item));
+
+      let boosted = Math.min(
+        1,
+        Math.max(item.score ?? 0, baseScore) + boostSelfKnowledge(query, item)
+      );
+
+      // Give learned knowledge a small boost for repeated future use
+      if (item.source === "learned_knowledge") {
+        boosted = Math.min(1, boosted + 0.08);
+      }
+
       return { ...item, score: boosted };
     })
     .sort((a, b) => b.score - a.score);
@@ -221,12 +232,12 @@ export async function getRetrievedKnowledge(query: string): Promise<RetrievalIte
   const cleanedQuery = query.trim();
   if (!cleanedQuery) return [];
 
-  const [systemItems, dbItems] = await Promise.all([
+  const [systemItems, dbItems, learnedItems] = await Promise.all([
     getSystemKnowledge(cleanedQuery),
     getSupabaseKnowledge(cleanedQuery),
+    getLearnedKnowledge(cleanedQuery),
   ]);
 
-  const combined = dedupeItems([...dbItems, ...systemItems]);
-
-  return combined.slice(0, 6);
+  const combined = dedupeItems([...learnedItems, ...dbItems, ...systemItems]);
+  return rankItems(cleanedQuery, combined).slice(0, 6);
 }

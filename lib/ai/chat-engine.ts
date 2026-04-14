@@ -5,7 +5,6 @@ import {
   getLatestUserMessage,
   getLastAssistantMessage,
   cleanResponse,
-  isUsableResponse,
   normalizeText,
 } from "@/lib/ai/cleanup";
 import {
@@ -33,10 +32,21 @@ import {
   isAwaitingPassword,
 } from "@/lib/ai/instruction-handler";
 
+// New learning + fallback imports
+import {
+  queueLearningNeed,
+  storeLearnedFallback,
+} from "@/lib/ai/knowledge-learning";
+import { getProviderPlan, type ProviderName } from "@/lib/ai/providers/router";
+import { generateWithGemini } from "@/lib/ai/providers/gemini";
+import { generateWithOpenAI } from "@/lib/ai/providers/openai";
+import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
+
 const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = new GoogleGenAI({ apiKey });
 
-const MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
+// Keep file-aware Gemini path light to avoid rate limits
+const FILE_MODELS = ["gemini-2.5-flash"];
 
 export type AttachedFile = {
   name: string;
@@ -55,7 +65,7 @@ type ExtendedChatContext = ChatContext & {
 // ─── Retry with exponential backoff ──────────────────────────────────────────
 async function withRetry<T>(
   fn: () => Promise<T>,
-  retries = 2,
+  retries = 1,
   delayMs = 400
 ): Promise<T> {
   let lastError: unknown;
@@ -75,6 +85,22 @@ async function withRetry<T>(
   }
 
   throw lastError;
+}
+
+async function callProvider(
+  provider: ProviderName,
+  args: { prompt: string; systemInstruction: string; temperature: number }
+): Promise<string | null> {
+  switch (provider) {
+    case "gemini":
+      return generateWithGemini(args);
+    case "openai":
+      return generateWithOpenAI(args);
+    case "anthropic":
+      return generateWithAnthropic(args);
+    default:
+      return null;
+  }
 }
 
 // ─── Main entry ───────────────────────────────────────────────────────────────
@@ -161,6 +187,31 @@ ${lastAssistantMessage}
   const memory = await getMemoryContext(latestUserMessage, messages);
   const retrieval = await getRetrievedKnowledge(latestUserMessage);
 
+  // Knowledge-first answering
+  const strongRetrieved =
+    retrieval.length > 0 && (retrieval[0]?.score ?? 0) >= 0.72;
+
+  if (strongRetrieved) {
+    const learnedAnswer = retrieval
+      .slice(0, 3)
+      .map((item, index) => {
+        const sourceLine = item.source ? `Source: ${item.source}` : "";
+        return `[${index + 1}] ${item.title}\n${sourceLine}\n${item.snippet}`.trim();
+      })
+      .join("\n\n");
+
+    return learnedAnswer;
+  }
+
+  // Queue unknown topics so the system can learn them later
+  void queueLearningNeed({
+    question: latestUserMessage,
+    questionType,
+    reason: "No strong internal answer found before provider fallback.",
+    priority: 2,
+    source: "chat-runtime",
+  });
+
   const context: ExtendedChatContext = {
     messages,
     latestUserMessage,
@@ -175,6 +226,22 @@ ${lastAssistantMessage}
   };
 
   const response = await generateBestResponse(context);
+
+  // Save strong answers back into learned knowledge
+  if (
+    response &&
+    !response.toLowerCase().includes("i'm here and ready") &&
+    !response.toLowerCase().includes("i’m here and ready")
+  ) {
+    void storeLearnedFallback({
+      question: latestUserMessage,
+      answer: response,
+      questionType,
+      source: "runtime_fallback_or_model",
+      confidence: 0.72,
+      tags: [questionType, "runtime-learned"],
+    });
+  }
 
   // Phase 3: Silent scoring + threshold — fire and forget
   void analyzeResponse({
@@ -191,11 +258,6 @@ ${lastAssistantMessage}
 async function generateBestResponse(
   context: ExtendedChatContext
 ): Promise<string> {
-  const contents = context.messages.slice(0, -1).map((message) => ({
-    role: message.role === "assistant" ? "model" : "user",
-    parts: [{ text: message.content }],
-  }));
-
   const basePrompt = buildUserPrompt({
     latestUserMessage: context.latestUserMessage,
     effectiveMessage: context.effectiveMessage,
@@ -210,24 +272,66 @@ async function generateBestResponse(
 
   const retryPrompt = buildRetryPrompt(basePrompt);
 
-  for (const model of MODELS) {
-    const firstAttempt = await tryGenerate({
-      model,
-      context,
-      contents,
-      prompt: basePrompt,
-      secondPass: false,
-    });
-    if (firstAttempt) return firstAttempt;
+  // Preserve current file-aware flow using direct Gemini call for inlineData
+  if (context.attachedFile) {
+    for (const model of FILE_MODELS) {
+      const firstAttempt = await tryGenerate({
+        model,
+        context,
+        prompt: basePrompt,
+        secondPass: false,
+      });
+      if (firstAttempt) return firstAttempt;
 
-    const secondAttempt = await tryGenerate({
-      model,
-      context,
-      contents,
-      prompt: retryPrompt,
-      secondPass: true,
+      const secondAttempt = await tryGenerate({
+        model,
+        context,
+        prompt: retryPrompt,
+        secondPass: true,
+      });
+      if (secondAttempt) return secondAttempt;
+    }
+
+    return finalFallback(
+      context.latestUserMessage,
+      context.questionType,
+      context.responseStyle
+    );
+  }
+
+  // New provider fallback chain for normal chat
+  const systemInstruction = buildSystemInstruction(
+    context.questionType,
+    context.responseStyle
+  );
+  const temperature = getTemperature(
+    context.questionType,
+    context.responseStyle
+  );
+  const plan = getProviderPlan(context.questionType);
+
+  for (const provider of plan) {
+    const first = await callProvider(provider, {
+      prompt: basePrompt,
+      systemInstruction,
+      temperature,
     });
-    if (secondAttempt) return secondAttempt;
+
+    const cleanFirst = cleanResponse(first || "");
+    if (cleanFirst && !isHardStall(cleanFirst)) {
+      return cleanFirst;
+    }
+
+    const second = await callProvider(provider, {
+      prompt: retryPrompt,
+      systemInstruction,
+      temperature,
+    });
+
+    const cleanSecond = cleanResponse(second || "");
+    if (cleanSecond && !isHardStall(cleanSecond)) {
+      return cleanSecond;
+    }
   }
 
   return finalFallback(
@@ -282,11 +386,10 @@ function buildLastUserParts(
   ];
 }
 
-// ─── Single generation attempt ───────────────────────────────────────────────
+// ─── Single generation attempt for file-aware Gemini path ────────────────────
 async function tryGenerate(params: {
   model: string;
   context: ExtendedChatContext;
-  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
   prompt: string;
   secondPass: boolean;
 }): Promise<string | null> {
@@ -300,15 +403,15 @@ async function tryGenerate(params: {
       params.context.attachedFile
     );
 
-    console.log("SVANSAI_CALLING_MODEL:", params.model);
+    const contents = params.context.messages.slice(0, -1).map((message) => ({
+      role: message.role === "assistant" ? "model" : "user",
+      parts: [{ text: message.content }],
+    }));
 
     const result = await withRetry(() =>
       ai.models.generateContent({
         model: params.model,
-        contents: [
-          ...params.contents,
-          { role: "user", parts: lastUserParts },
-        ],
+        contents: [...contents, { role: "user", parts: lastUserParts }],
         config: {
           systemInstruction,
           temperature: getTemperature(
@@ -322,19 +425,9 @@ async function tryGenerate(params: {
 
     const text = cleanResponse(result?.text?.trim() || "");
 
-    console.log("SVANSAI_MODEL_TEXT:", text);
-
     if (!text || text.trim().length === 0) {
-      console.error(
-        `EMPTY_MODEL_TEXT_${params.model}_${
-          params.secondPass ? "SECOND" : "FIRST"
-        }`
-      );
       return null;
     }
-
-    // TEMP: allow non-empty responses through while stabilizing live answers
-    // if (!isUsableResponse(text, params.context.messages, params.context.latestUserMessage)) return null;
 
     if (isHardStall(text)) return null;
 
@@ -348,7 +441,7 @@ async function tryGenerate(params: {
   }
 }
 
-  // ─── Only block confirmed stall phrases ──────────────────────────────────────
+// ─── Only block confirmed stall phrases ──────────────────────────────────────
 function isHardStall(text: string): boolean {
   const normalized = normalizeText(text);
   const hardStalls = [
