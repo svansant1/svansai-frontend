@@ -291,57 +291,58 @@ async function generateBestResponse(
   );
   const plan = getProviderPlan(context.questionType);
 
-  console.log("[SVANSAI] Provider plan:", plan);
+ console.log("[SVANSAI] Provider plan:", plan);
 
-  for (const provider of plan) {
-    console.log("[SVANSAI] Trying provider:", provider);
+for (const provider of plan) {
+  console.log("[SVANSAI] Trying provider:", provider);
 
-    try {
-      const first = await callProvider(provider, {
-        prompt: basePrompt,
-        systemInstruction,
-        temperature,
-      });
+  try {
+    const first = await callProvider(provider, {
+      prompt: basePrompt,
+      systemInstruction,
+      temperature,
+    });
 
-      const cleanFirst = cleanResponse(first || "");
-      console.log(
-        "[SVANSAI] Provider result:",
-        provider,
-        cleanFirst ? cleanFirst.slice(0, 200) : "[empty]"
-      );
+    const cleanFirst = cleanResponse(first || "");
+    console.log(
+      "[SVANSAI] Provider result:",
+      provider,
+      cleanFirst ? cleanFirst.slice(0, 200) : "[empty]"
+    );
 
-      if (
-        cleanFirst &&
-        !isHardStall(cleanFirst) &&
-        cleanFirst.trim().length > 20
-      ) {
-        return cleanFirst;
-      }
-
-      const second = await callProvider(provider, {
-        prompt: retryPrompt,
-        systemInstruction,
-        temperature,
-      });
-
-      const cleanSecond = cleanResponse(second || "");
-      console.log(
-        "[SVANSAI] Provider retry result:",
-        provider,
-        cleanSecond ? cleanSecond.slice(0, 200) : "[empty]"
-      );
-
-      if (
-        cleanSecond &&
-        !isHardStall(cleanSecond) &&
-        cleanSecond.trim().length > 20
-      ) {
-        return cleanSecond;
-      }
-    } catch (error) {
-      console.error("[SVANSAI] Provider loop error:", provider, error);
+    if (
+      cleanFirst &&
+      !isHardStall(cleanFirst) &&
+      cleanFirst.trim().length > 20
+    ) {
+      return cleanFirst;
     }
+
+    const second = await callProvider(provider, {
+      prompt: retryPrompt,
+      systemInstruction,
+      temperature,
+    });
+
+    const cleanSecond = cleanResponse(second || "");
+    console.log(
+      "[SVANSAI] Provider retry result:",
+      provider,
+      cleanSecond ? cleanSecond.slice(0, 200) : "[empty]"
+    );
+
+    if (
+      cleanSecond &&
+      !isHardStall(cleanSecond) &&
+      cleanSecond.trim().length > 20
+    ) {
+      return cleanSecond;
+    }
+
+  } catch (error) {
+    console.error("[SVANSAI] Provider error:", provider, error);
   }
+}
 
   void queueLearningNeed({
     question: context.latestUserMessage,
