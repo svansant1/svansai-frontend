@@ -209,10 +209,17 @@ async function generateBestResponse(
   const retryPrompt = buildRetryPrompt(basePrompt);
 
   const topResult = context.retrieval[0];
-  if (!context.attachedFile && topResult && topResult.score >= 0.9) {
-    console.log("[SVANSAI] Serving from local knowledge:", topResult.id);
-    return topResult.snippet;
-  }
+
+if (
+  !context.attachedFile &&
+  topResult &&
+  topResult.score >= 0.95 &&
+  topResult.snippet.length > 40 &&
+  topResult.id !== "sv-self-improvement"
+) {
+  console.log("[SVANSAI] Serving from local knowledge:", topResult.id);
+  return topResult.snippet;
+}
 
   if (context.attachedFile) {
     return "Attachment answering is temporarily disabled while I stabilize the core response engine.";
