@@ -208,7 +208,7 @@ async function generateBestResponse(
 
   const retryPrompt = buildRetryPrompt(basePrompt);
 
-  const topResult = context.retrieval[0];
+const topResult = context.retrieval[0];
 
 if (
   !context.attachedFile &&
@@ -217,8 +217,8 @@ if (
   topResult.snippet.length > 40 &&
   topResult.id !== "sv-self-improvement"
 ) {
-  console.log("[SVANSAI] Serving from local knowledge:", topResult.id);
-  return topResult.snippet;
+  console.log("[SVANSAI] Strong local knowledge found:", topResult.id);
+  // DO NOT return — allow AI providers to still run
 }
 
   if (context.attachedFile) {
