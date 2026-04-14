@@ -295,28 +295,42 @@ async function generateBestResponse(
   const plan = getProviderPlan(context.questionType);
 
   for (const provider of plan) {
-    const first = await callProvider(provider, {
-      prompt: basePrompt,
-      systemInstruction,
-      temperature,
-    });
+  console.log("SVANSAI_PROVIDER_ATTEMPT:", provider);
 
-    const cleanFirst = cleanResponse(first || "");
-    if (cleanFirst && !isHardStall(cleanFirst)) {
-      return cleanFirst;
-    }
+  const first = await callProvider(provider, {
+    prompt: basePrompt,
+    systemInstruction,
+    temperature,
+  });
 
-    const second = await callProvider(provider, {
-      prompt: retryPrompt,
-      systemInstruction,
-      temperature,
-    });
+  console.log(
+    "SVANSAI_PROVIDER_FIRST_RESULT:",
+    provider,
+    typeof first === "string" ? first.slice(0, 200) : "[empty]"
+  );
 
-    const cleanSecond = cleanResponse(second || "");
-    if (cleanSecond && !isHardStall(cleanSecond)) {
-      return cleanSecond;
-    }
+  const cleanFirst = cleanResponse(first || "");
+  if (cleanFirst && !isHardStall(cleanFirst)) {
+    return cleanFirst;
   }
+
+  const second = await callProvider(provider, {
+    prompt: retryPrompt,
+    systemInstruction,
+    temperature,
+  });
+
+  console.log(
+    "SVANSAI_PROVIDER_RETRY_RESULT:",
+    provider,
+    typeof second === "string" ? second.slice(0, 200) : "[empty]"
+  );
+
+  const cleanSecond = cleanResponse(second || "");
+  if (cleanSecond && !isHardStall(cleanSecond)) {
+    return cleanSecond;
+  }
+}
 
   return finalFallback(
     context.latestUserMessage,
@@ -471,7 +485,7 @@ function finalFallback(
         return "Tell me what you're trying to do, and I'll walk you through it step by step.";
       }
       return question.trim()
-        ? "I'm here and ready. Send the full question and I'll answer it directly."
-        : "I'm here and ready. Ask me anything.";
+        ? "I couldn't generate a strong answer just now. My provider fallback chain may not be responding correctly yet."
+        : "I couldn't generate a strong answer just now.";
   }
 }
