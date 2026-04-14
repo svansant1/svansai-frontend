@@ -187,9 +187,6 @@ ${lastAssistantMessage}
   const memory = await getMemoryContext(latestUserMessage, messages);
   const retrieval = await getRetrievedKnowledge(latestUserMessage);
 
-  // Knowledge-first answering
-  const retrieval = await getRetrievedKnowledge(latestUserMessage);
-
   // Queue unknown topics so the system can learn them later
   void queueLearningNeed({
     question: latestUserMessage,
