@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { User } from "@supabase/supabase-js";
 import AIHelper, { type ChatMessage } from "../components/AIHelper";
 import { supabase } from "../lib/supabase";
-import svRobot from "../mascot/sv-robot.png";
 import {
   createConversation,
   deleteConversation,
@@ -448,7 +447,7 @@ export default function HomePage() {
         }}
       />
       <Image
-        src={svRobot}
+        src="/mascot/sv-robot.png"
         alt="SV Robot"
         width={size}
         height={size}
