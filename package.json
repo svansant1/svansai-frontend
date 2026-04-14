@@ -12,10 +12,16 @@
     "@google/genai": "^1.49.0",
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.103.0",
+    "axios": "^1.7.7",
+    "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
-    "next": "16.2.2",
+    "lucide-react": "^0.460.0",
+    "next": "^16.2.3",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "recharts": "^2.12.7",
+    "socket.io-client": "^4.7.5",
+    "uuid": "^11.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
