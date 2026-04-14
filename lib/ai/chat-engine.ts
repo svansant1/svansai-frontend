@@ -188,20 +188,7 @@ ${lastAssistantMessage}
   const retrieval = await getRetrievedKnowledge(latestUserMessage);
 
   // Knowledge-first answering
-  const strongRetrieved =
-    retrieval.length > 0 && (retrieval[0]?.score ?? 0) >= 0.72;
-
-  if (strongRetrieved) {
-    const learnedAnswer = retrieval
-      .slice(0, 3)
-      .map((item, index) => {
-        const sourceLine = item.source ? `Source: ${item.source}` : "";
-        return `[${index + 1}] ${item.title}\n${sourceLine}\n${item.snippet}`.trim();
-      })
-      .join("\n\n");
-
-    return learnedAnswer;
-  }
+  const retrieval = await getRetrievedKnowledge(latestUserMessage);
 
   // Queue unknown topics so the system can learn them later
   void queueLearningNeed({
