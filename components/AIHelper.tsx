@@ -343,6 +343,8 @@ export default function AIHelper({
         };
       }
 
+      console.log("🔥 NEW BUILD CONFIRMED 0415 🔥");
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
