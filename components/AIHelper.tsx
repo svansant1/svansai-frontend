@@ -352,8 +352,13 @@ export default function AIHelper({
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
+      console.log("SVANSAI /api/chat response:", data);
+
       const reply: string =
         data?.text?.trim() ||
+        data?.response?.trim() ||
+        data?.answer?.trim() ||
+        data?.message?.trim() ||
         "I processed that but didn't generate a response. Try sending it again.";
 
       // Check if SV's reply changes password mode
