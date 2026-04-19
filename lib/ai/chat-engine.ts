@@ -35,12 +35,7 @@ import {
 import { type ProviderName } from "@/lib/ai/providers/router";
 import { generateWithOpenAI } from "@/lib/ai/providers/openai";
 import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
-
-export type AttachedFile = {
-  name: string;
-  type: string;
-  base64: string;
-};
+import type { AttachedFile } from "@/lib/ai/file-types";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
@@ -58,9 +53,42 @@ function isPdfAttachment(file?: AttachedFile) {
   return !!file && file.type === "application/pdf";
 }
 
+function isTextLikeAttachment(file?: AttachedFile) {
+  if (!file) return false;
+
+  if (
+    file.type.startsWith("text/") ||
+    file.type === "application/json" ||
+    file.type === "text/x-python" ||
+    file.type === "application/x-python" ||
+    file.type === "text/x-java-source" ||
+    file.type === "text/x-c" ||
+    file.type === "text/x-cpp"
+  ) {
+    return true;
+  }
+
+  return /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|json|txt|html|css)$/i.test(
+    file.name
+  );
+}
+
+function decodeBase64ToText(base64: string): string {
+  try {
+    return Buffer.from(base64, "base64").toString("utf-8");
+  } catch {
+    return "";
+  }
+}
+
 async function callProvider(
   provider: ProviderName,
-  args: { prompt: string; systemInstruction: string; temperature: number; attachedFile?: AttachedFile; }
+  args: {
+    prompt: string;
+    systemInstruction: string;
+    temperature: number;
+    attachedFile?: AttachedFile;
+  }
 ): Promise<string | null> {
   try {
     switch (provider) {
@@ -132,9 +160,22 @@ export async function generateChatResponse(
   let effectiveMessage = latestUserMessage;
   let questionType = await detectQuestionType(latestUserMessage || "general");
 
+  let fileContext = "";
   if (attachedFile) {
-    const fileContext = `User attached a file named "${attachedFile.name}" (${attachedFile.type}). ${latestUserMessage}`;
-    questionType = await detectQuestionType(fileContext);
+    if (isImageAttachment(attachedFile)) {
+      fileContext = `User attached an image named "${attachedFile.name}" (${attachedFile.type}).`;
+    } else if (isPdfAttachment(attachedFile)) {
+      fileContext = `User attached a PDF named "${attachedFile.name}".`;
+    } else if (isTextLikeAttachment(attachedFile)) {
+      const extractedText = decodeBase64ToText(attachedFile.base64).slice(0, 12000);
+      fileContext = `User attached a text/code file named "${attachedFile.name}" (${attachedFile.type}). File contents:\n\n${extractedText}`;
+    } else {
+      fileContext = `User attached a file named "${attachedFile.name}" (${attachedFile.type}).`;
+    }
+
+    questionType = await detectQuestionType(
+      `${fileContext}\n\nUser question: ${latestUserMessage}`
+    );
   }
 
   if (isContextDependentFollowUp(latestUserMessage) && lastAssistantMessage) {
@@ -172,7 +213,9 @@ ${lastAssistantMessage}
     responseStyle,
     followUpIntent,
     lastAssistantMessage,
-    effectiveMessage,
+    effectiveMessage: fileContext
+      ? `${effectiveMessage}\n\n${fileContext}`.trim()
+      : effectiveMessage,
     memory,
     retrieval,
     attachedFile,
@@ -192,7 +235,11 @@ ${lastAssistantMessage}
       questionType,
       source: "sv-runtime-optimizer",
       confidence: 0.82,
-      tags: [questionType, "ai-learned", attachedFile ? "file-assisted" : "text"],
+      tags: [
+        questionType,
+        "ai-learned",
+        attachedFile ? "file-assisted" : "text",
+      ],
     });
   }
 
@@ -214,7 +261,6 @@ async function generateBestResponse(
     hasFile: !!context.attachedFile,
   });
 
-  // Add cleaner response rules and file guidance
   basePrompt = `
 Answer cleanly and directly.
 - Lead with the answer.
@@ -222,25 +268,24 @@ Answer cleanly and directly.
 - Use the user's project context when relevant.
 - If coding is requested, prefer practical production-style code.
 - If an image is attached, analyze the image and answer what is visible.
-- If a PDF or document is attached, answer based on its content as best you can.
+- If a screenshot contains code or an error, explain what it means and give the answer directly.
+- If a text/code file is attached, use its content directly in your answer.
 - Keep answers fast and useful.
 
 ${basePrompt}
 `.trim();
 
   const retryPrompt = buildRetryPrompt(basePrompt);
-
   const topResult = context.retrieval[0];
 
-  // Use strong local knowledge immediately for speed
   if (
     !context.attachedFile &&
     topResult &&
-    topResult.score >= 0.95 &&
+    topResult.score >= 0.75 &&
     topResult.snippet.length > 40 &&
     topResult.id !== "sv-self-improvement"
   ) {
-    console.log("[SVANSAI] Serving strong local knowledge:", topResult.id);
+    console.log("[SVANSAI] Using learned knowledge:", topResult.id);
     return topResult.snippet.trim();
   }
 
@@ -248,9 +293,10 @@ ${basePrompt}
     context.questionType,
     context.responseStyle
   );
+
   const temperature = Math.min(
     getTemperature(context.questionType, context.responseStyle),
-    0.45
+    0.4
   );
 
   const plan: ProviderName[] = ["openai", "anthropic"];
@@ -286,7 +332,7 @@ ${basePrompt}
         prompt: retryPrompt,
         systemInstruction,
         temperature,
-        attachedFile: context.attachedFile, 
+        attachedFile: context.attachedFile,
       });
 
       const cleanSecond = normalizeProviderText(cleanResponse(second || ""));
@@ -357,9 +403,18 @@ function finalFallback(
   attachedFile?: AttachedFile
 ): string {
   if (attachedFile) {
-    if (isPdfAttachment(attachedFile)) {
-      return "I received your file, but I couldn't confidently read it just now. Try sending it again or tell me exactly what you want extracted.";
+    if (isImageAttachment(attachedFile)) {
+      return "I received your image, but I couldn't confidently analyze it just now. Try sending it again with a short note about what you want identified.";
     }
+
+    if (isPdfAttachment(attachedFile)) {
+      return "I received your PDF, but I couldn't confidently read it just now. Try sending it again or tell me what you want extracted.";
+    }
+
+    if (isTextLikeAttachment(attachedFile)) {
+      return "I received your file, but I couldn't confidently analyze its contents just now. Try sending it again with a short note about what you want.";
+    }
+
     return "I received your file, but I couldn't confidently process it just now. Try sending it again with a short note about what you want.";
   }
 

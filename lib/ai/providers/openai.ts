@@ -18,40 +18,46 @@ export async function generateWithOpenAI(
 
   try {
     const isImage = input.attachedFile?.type?.startsWith("image/");
-    console.log("OPENAI IMAGE MODE:", {
-      hasFile: !!input.attachedFile,
-      type: input.attachedFile?.type,
-      isImage,
-      name: input.attachedFile?.name,
-    });
 
     if (isImage && input.attachedFile?.base64) {
-  // Extract just the base64 data in case the prefix is already there
-  const rawBase64 = input.attachedFile.base64.includes(',') 
-    ? input.attachedFile.base64.split(',')[1] 
-    : input.attachedFile.base64;
+      console.log("OPENAI IMAGE MODE:", {
+        hasFile: !!input.attachedFile,
+        type: input.attachedFile?.type,
+        name: input.attachedFile?.name,
+      });
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    // ... existing headers
-    body: JSON.stringify({
-      model: input.model || "gpt-4o-mini",
-      messages: [
-        { role: "system", content: input.systemInstruction },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: input.prompt || "Analyze this image." },
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: input.model || "gpt-4o-mini",
+          temperature: input.temperature,
+          messages: [
             {
-              type: "image_url",
-              image_url: {
-                url: `data:${input.attachedFile.type};base64,${rawBase64}`,
-              },
+              role: "system",
+              content: input.systemInstruction,
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: input.prompt,
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${input.attachedFile.type};base64,${input.attachedFile.base64}`,
+                  },
+                },
+              ],
             },
           ],
-        },
-      ],
-    }),
-  });
+        }),
+      });
 
       if (!res.ok) {
         console.error("OPENAI_IMAGE_HTTP_ERROR:", res.status, await res.text());

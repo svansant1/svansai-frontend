@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { generateChatResponse, type AttachedFile } from "@/lib/ai/chat-engine";
+import { generateChatResponse} from "@/lib/ai/chat-engine";
+import { AttachedFile } from "@/lib/ai/file-types";
 import type { ChatMessage } from "@/lib/ai/types";
 
 export async function POST(req: Request) {
@@ -10,17 +11,18 @@ export async function POST(req: Request) {
       ? (body.messages as ChatMessage[])
       : [];
 
-    // File attachment
     const attachedFile: AttachedFile | undefined =
       body?.file &&
       typeof body.file.name === "string" &&
       typeof body.file.type === "string" &&
       typeof body.file.base64 === "string"
-        ? { name: body.file.name, type: body.file.type, base64: body.file.base64 }
+        ? {
+            name: body.file.name,
+            type: body.file.type,
+            base64: body.file.base64,
+          }
         : undefined;
 
-    // sessionId from frontend — used for owner unlock/lock flow
-    // This is a browser session ID, not a user ID
     const sessionId: string | null =
       typeof body?.sessionId === "string" ? body.sessionId : null;
 
@@ -30,7 +32,9 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("CHAT_ROUTE_ERROR:", error);
     return NextResponse.json(
-      { text: "Something went wrong while generating that response. Please send it again." },
+      {
+        text: "Something went wrong while generating that response. Please send it again.",
+      },
       { status: 500 }
     );
   }
