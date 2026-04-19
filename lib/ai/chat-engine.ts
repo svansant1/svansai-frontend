@@ -50,9 +50,17 @@ type ExtendedChatContext = ChatContext & {
   attachedFile?: AttachedFile;
 };
 
+function isImageAttachment(file?: AttachedFile) {
+  return !!file && file.type.startsWith("image/");
+}
+
+function isPdfAttachment(file?: AttachedFile) {
+  return !!file && file.type === "application/pdf";
+}
+
 async function callProvider(
   provider: ProviderName,
-  args: { prompt: string; systemInstruction: string; temperature: number }
+  args: { prompt: string; systemInstruction: string; temperature: number; attachedFile?: AttachedFile; }
 ): Promise<string | null> {
   try {
     switch (provider) {
@@ -183,8 +191,8 @@ ${lastAssistantMessage}
       answer: response,
       questionType,
       source: "sv-runtime-optimizer",
-      confidence: 0.78,
-      tags: [questionType, "ai-learned"],
+      confidence: 0.82,
+      tags: [questionType, "ai-learned", attachedFile ? "file-assisted" : "text"],
     });
   }
 
@@ -194,7 +202,7 @@ ${lastAssistantMessage}
 async function generateBestResponse(
   context: ExtendedChatContext
 ): Promise<string> {
-  const basePrompt = buildUserPrompt({
+  let basePrompt = buildUserPrompt({
     latestUserMessage: context.latestUserMessage,
     effectiveMessage: context.effectiveMessage,
     questionType: context.questionType,
@@ -206,32 +214,43 @@ async function generateBestResponse(
     hasFile: !!context.attachedFile,
   });
 
+  // Add cleaner response rules and file guidance
+  basePrompt = `
+Answer cleanly and directly.
+- Lead with the answer.
+- Avoid filler and generic disclaimers.
+- Use the user's project context when relevant.
+- If coding is requested, prefer practical production-style code.
+- If an image is attached, analyze the image and answer what is visible.
+- If a PDF or document is attached, answer based on its content as best you can.
+- Keep answers fast and useful.
+
+${basePrompt}
+`.trim();
+
   const retryPrompt = buildRetryPrompt(basePrompt);
 
-const topResult = context.retrieval[0];
+  const topResult = context.retrieval[0];
 
-if (
-  !context.attachedFile &&
-  topResult &&
-  topResult.score >= 0.95 &&
-  topResult.snippet.length > 40 &&
-  topResult.id !== "sv-self-improvement"
-) {
-  console.log("[SVANSAI] Strong local knowledge found:", topResult.id);
-  // DO NOT return — allow AI providers to still run
-}
-
-  if (context.attachedFile) {
-    return "Attachment answering is temporarily disabled while I stabilize the core response engine.";
+  // Use strong local knowledge immediately for speed
+  if (
+    !context.attachedFile &&
+    topResult &&
+    topResult.score >= 0.95 &&
+    topResult.snippet.length > 40 &&
+    topResult.id !== "sv-self-improvement"
+  ) {
+    console.log("[SVANSAI] Serving strong local knowledge:", topResult.id);
+    return topResult.snippet.trim();
   }
 
   const systemInstruction = buildSystemInstruction(
     context.questionType,
     context.responseStyle
   );
-  const temperature = getTemperature(
-    context.questionType,
-    context.responseStyle
+  const temperature = Math.min(
+    getTemperature(context.questionType, context.responseStyle),
+    0.45
   );
 
   const plan: ProviderName[] = ["openai", "anthropic"];
@@ -245,9 +264,10 @@ if (
         prompt: basePrompt,
         systemInstruction,
         temperature,
+        attachedFile: context.attachedFile,
       });
 
-      const cleanFirst = cleanResponse(first || "");
+      const cleanFirst = normalizeProviderText(cleanResponse(first || ""));
       console.log(
         "[SVANSAI] Provider result:",
         provider,
@@ -257,7 +277,7 @@ if (
       if (
         cleanFirst &&
         !isHardStall(cleanFirst) &&
-        cleanFirst.trim().length > 8
+        cleanFirst.trim().length > 20
       ) {
         return cleanFirst;
       }
@@ -266,9 +286,10 @@ if (
         prompt: retryPrompt,
         systemInstruction,
         temperature,
+        attachedFile: context.attachedFile, 
       });
 
-      const cleanSecond = cleanResponse(second || "");
+      const cleanSecond = normalizeProviderText(cleanResponse(second || ""));
       console.log(
         "[SVANSAI] Provider retry result:",
         provider,
@@ -278,7 +299,7 @@ if (
       if (
         cleanSecond &&
         !isHardStall(cleanSecond) &&
-        cleanSecond.trim().length > 8
+        cleanSecond.trim().length > 20
       ) {
         return cleanSecond;
       }
@@ -298,8 +319,17 @@ if (
   return finalFallback(
     context.latestUserMessage,
     context.questionType,
-    context.responseStyle
+    context.responseStyle,
+    context.attachedFile
   );
+}
+
+function normalizeProviderText(text: string): string {
+  return text
+    .replace(/^here'?s a basic outline of.*$/im, "")
+    .replace(/^here'?s a simple example.*$/im, "")
+    .replace(/^feel free to modify.*$/im, "")
+    .trim();
 }
 
 function isHardStall(text: string): boolean {
@@ -323,19 +353,27 @@ function isHardStall(text: string): boolean {
 function finalFallback(
   question: string,
   type: QuestionType,
-  _responseStyle: ResponseStyle
+  _responseStyle: ResponseStyle,
+  attachedFile?: AttachedFile
 ): string {
+  if (attachedFile) {
+    if (isPdfAttachment(attachedFile)) {
+      return "I received your file, but I couldn't confidently read it just now. Try sending it again or tell me exactly what you want extracted.";
+    }
+    return "I received your file, but I couldn't confidently process it just now. Try sending it again with a short note about what you want.";
+  }
+
   switch (type) {
     case "coding":
-      return 'Here\'s a simple coding example:\n\n```python\nprint("hello world")\n```\n\nIf you want a different language or approach, just say so.';
+      return "I couldn't generate the full coding answer I wanted just now. Send the language, file name, or goal, and I'll answer more directly.";
     case "business":
-      return "Tell me the business goal, audience, or offer, and I'll help you shape a clearer strategy.";
+      return "Tell me the business goal, audience, or offer, and I'll help shape a sharper answer.";
     case "writing":
-      return "Paste the writing and I'll rewrite it or strengthen it.";
+      return "Paste the writing and tell me the tone you want, and I'll clean it up.";
     case "tech_support":
-      return "Tell me the device, the exact problem, and what changed before it started.";
+      return "Tell me the device, exact issue, and what changed right before it started.";
     case "learning":
-      return "I can break that down. Send the specific topic or question and I'll explain it clearly.";
+      return "Send the specific topic or question and I'll break it down clearly.";
     case "life":
       return "Tell me the situation and I'll help you think through the next move.";
     default:

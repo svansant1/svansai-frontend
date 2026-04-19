@@ -323,7 +323,13 @@ export default function AIHelper({
     setLoading(true);
     notifyThinking(
       true,
-      fileToSend ? "Reading your file..." : "Thinking it through...",
+      fileToSend
+        ? isImageType(fileToSend.type)
+          ? "Analyzing your image..."
+          : isPdfType(fileToSend.type)
+            ? "Reading your PDF..."
+            : "Reading your file..."
+        : "Thinking it through...",
     );
 
     try {
@@ -343,8 +349,6 @@ export default function AIHelper({
         };
       }
 
-      console.log("🔥 NEW BUILD CONFIRMED 0415 🔥");
-
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -356,12 +360,13 @@ export default function AIHelper({
       const data = await response.json();
       console.log("SVANSAI /api/chat response:", data);
 
-      const reply: string =
-        data?.text?.trim() ||
-        data?.response?.trim() ||
-        data?.answer?.trim() ||
-        data?.message?.trim() ||
-        "I processed that but didn't generate a response. Try sending it again.";
+      const replySource =
+        data?.text ?? data?.response ?? data?.answer ?? data?.message ?? "";
+
+      const reply =
+        typeof replySource === "string" && replySource.trim()
+          ? replySource.trim()
+          : "I processed that but didn't generate a response. Try sending it again.";
 
       // Check if SV's reply changes password mode
       checkPasswordMode(reply);
@@ -394,7 +399,24 @@ export default function AIHelper({
   };
 
   // ─── Shared send on Enter ─────────────────────────────────────────────────
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>,
+  ) => {
+    if (isPasswordMode) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleSend();
+      }
+      return;
+    }
+
+    // On mobile, Enter should create a new line.
+    // Only the SEND button should submit.
+    if (isMobile) {
+      return;
+    }
+
+    // Desktop: Enter sends, Shift+Enter makes a new line.
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -732,8 +754,10 @@ export default function AIHelper({
             onKeyDown={handleKeyDown}
             placeholder={
               attachedFile
-                ? "Add a message about this file, or just hit Send..."
-                : "Ask anything or follow up on SV's last response..."
+                ? "Add a message about this file, or use SEND to ask about it..."
+                : isMobile
+                  ? "Ask anything... tap SEND when ready."
+                  : "Ask anything... Enter to send, Shift+Enter for a new line."
             }
             style={{
               width: "100%",
