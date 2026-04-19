@@ -398,6 +398,34 @@ export default function AIHelper({
     }
   };
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData.items;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.includes("image")) {
+        const file = items[i].getAsFile();
+        if (!file) continue;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result;
+          if (typeof dataUrl !== "string") return;
+
+          setAttachedFile({
+            name: "pasted-image.png",
+            type: file.type,
+            base64: dataUrl.split(",")[1] || "",
+            dataUrl,
+            size: file.size,
+          });
+        };
+
+        reader.readAsDataURL(file);
+        break;
+      }
+    }
+  };
+
   // ─── Shared send on Enter ─────────────────────────────────────────────────
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>,
@@ -752,6 +780,7 @@ export default function AIHelper({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               attachedFile
                 ? "Add a message about this file, or use SEND to ask about it..."
