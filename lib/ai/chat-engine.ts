@@ -43,6 +43,7 @@ import { type ProviderName } from "@/lib/ai/providers/router";
 import { generateWithOpenAI } from "@/lib/ai/providers/openai";
 import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
 import type { AttachedFile } from "@/lib/ai/file-types";
+import { searchLiveWeb } from "@/lib/ai/live-search";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
@@ -151,6 +152,30 @@ const HARMFUL_TECHNICAL_OUTPUT_PATTERNS = [
   /\bmalware skeleton\b/i,
   /\bshellcode\b/i,
 ];
+
+const LIVE_INFO_PATTERNS = [
+  "today",
+  "latest",
+  "current",
+  "right now",
+  "news",
+  "recent",
+  "this week",
+  "stock",
+  "weather",
+  "score",
+  "price",
+  "live",
+  "breaking",
+];
+
+function needsLiveSearch(message: string): boolean {
+  const lower = message.toLowerCase();
+
+  return LIVE_INFO_PATTERNS.some((pattern) =>
+    lower.includes(pattern),
+  );
+}
 
 const CONVERSATION_STYLE_RULES = `
 You are SVANSAI, a clear, conversational AI assistant.
@@ -519,11 +544,41 @@ export async function generateChatResponse(
     return "I'm SVANSAI. Ask me anything, and I'll answer as clearly and directly as I can.";
   }
 
-  const latestUserMessage = getLatestUserMessage(messages);
+ const latestUserMessage = getLatestUserMessage(messages);
 
-  if (!latestUserMessage && !attachedFile) {
-    return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
+if (!latestUserMessage && !attachedFile) {
+  return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
+}
+
+let liveSearchContext = "";
+
+const shouldSearchLive = needsLiveSearch(latestUserMessage);
+
+if (shouldSearchLive) {
+  console.log("[SVANSAI] Running live web search...");
+
+  const liveResults = await searchLiveWeb(latestUserMessage);
+
+  if (liveResults.length > 0) {
+    liveSearchContext = `
+LIVE WEB RESULTS:
+${liveResults
+  .map(
+    (r, i) => `
+Result ${i + 1}
+Title: ${r.title}
+URL: ${r.url}
+Content: ${r.content}
+`,
+  )
+  .join("\n")}
+`;
+  } else {
+    liveSearchContext = `
+Live search was attempted but no reliable current information could be verified.
+`;
   }
+}
 
   const normalizedLatest = latestUserMessage.toLowerCase().trim();
 
@@ -705,9 +760,14 @@ ${lastAssistantMessage}
     responseStyle,
     followUpIntent,
     lastAssistantMessage,
-    effectiveMessage: fileContext
-      ? `${effectiveMessage}\n\n${fileContext}`.trim()
-      : effectiveMessage,
+    effectiveMessage: [
+  effectiveMessage,
+  fileContext,
+  liveSearchContext,
+]
+  .filter(Boolean)
+  .join("\n\n")
+  .trim(),
     memory,
     retrieval,
     attachedFile,
