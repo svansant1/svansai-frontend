@@ -18,6 +18,17 @@ export type FollowUpIntent =
   | "example"
   | "none";
 
+export type ConversationIntent =
+  | "normal_conversation"
+  | "project_identity"
+  | "comparison"
+  | "quiz"
+  | "glossary_cleanup"
+  | "correction_recovery"
+  | "cyber_safe_education"
+  | "cyber_risky"
+  | "file_or_code_analysis";
+
 function hasAny(text: string, terms: string[]): boolean {
   return terms.some((term) => text.includes(term));
 }
@@ -140,6 +151,77 @@ export function detectResponseStyle(
   ) return "direct_answer";
 
   return "conversation";
+}
+
+export function detectConversationIntent(input: string): ConversationIntent {
+  const q = input.toLowerCase().trim();
+
+  if (
+    hasAny(q, [
+      "wrong", "incorrect", "nah", "nope", "not right", "look deeper",
+      "try again", "you misunderstood", "not what i asked",
+    ])
+  ) return "correction_recovery";
+
+  if (
+    hasAny(q, [
+      "break into", "bypass login", "steal password", "steal credentials",
+      "phishing", "keylogger", "malware", "ransomware", "credential stuffing",
+      "exploit this site", "hack this account", "unauthorized access",
+      "script to break", "script for breaking", "dump passwords",
+      "reverse shell", "shellcode", "payload", "wipe logs", "log wiping",
+      "disable logging", "phishing template", "phishing email",
+      "credential harvester", "malware skeleton", "weaponized",
+    ])
+  ) return "cyber_risky";
+
+  if (
+    hasAny(q, [
+      "sql injection", "xss", "csrf", "ssrf", "buffer overflow",
+      "cybersecurity", "firewall", "threat model", "defensively",
+      "defensive", "secure", "protect", "mitigate", "sanitize",
+      "vulnerability", "penetration test", "pentest",
+    ])
+  ) return "cyber_safe_education";
+
+  if (
+    hasAny(q, [
+      "shield", "debugger", "sandbox", "svansai", "what are you",
+      "what is svansai", "who are you", "how should sandbox",
+      "project", "module", "platform",
+    ])
+  ) return "project_identity";
+
+  if (
+    hasAny(q, [
+      "better than", "different from", "compare", "versus", "vs ",
+      "top ai companies", "other ai assistants",
+    ])
+  ) return "comparison";
+
+  if (
+    hasAny(q, [
+      "correct answer", "multiple choice", "quiz", "checkboxes",
+      "unknown destination mac", "answer choices", "which option",
+    ])
+  ) return "quiz";
+
+  if (
+    hasAny(q, [
+      "glossary", "terms", "definitions", "clean this up",
+      "study guide", "vocabulary",
+    ])
+  ) return "glossary_cleanup";
+
+  if (
+    hasAny(q, [
+      "file", "attached", "code", "script", "function", "class",
+      "error", "stack trace", "log line",
+    ]) ||
+    /^[a-z_$][\w$]*\s*=\s*.+$/i.test(q)
+  ) return "file_or_code_analysis";
+
+  return "normal_conversation";
 }
 
 // ─── Follow-up intent — partial matching so natural language works ────────────

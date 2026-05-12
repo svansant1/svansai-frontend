@@ -66,6 +66,42 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     score: 0.9,
     tags: ["owner", "sv unlock", "sv lock", "sv analyze", "sv instruct"],
   },
+  {
+    id: "sv-shield",
+    title: "Shield Module",
+    source: "system",
+    snippet:
+      "Shield is SVANSAI's protection layer. It should detect risky prompts, enforce safe behavior, protect user data, and guide cybersecurity requests toward defensive education.",
+    score: 0.92,
+    tags: ["shield", "safety", "security", "protection", "cybersecurity"],
+  },
+  {
+    id: "sv-debugger",
+    title: "Debugger Module",
+    source: "system",
+    snippet:
+      "Debugger is SVANSAI's diagnosis layer. It should inspect errors, trace failures, explain likely causes, and suggest the smallest practical fix.",
+    score: 0.92,
+    tags: ["debugger", "debugging", "errors", "diagnosis", "fixes"],
+  },
+  {
+    id: "sv-sandbox",
+    title: "Sandbox Module",
+    source: "system",
+    snippet:
+      "Sandbox is SVANSAI's isolated experiment layer. It should support safe simulations, prompt tests, and code-like reasoning without treating experiments as production actions.",
+    score: 0.92,
+    tags: ["sandbox", "simulation", "testing", "experiments", "isolation"],
+  },
+  {
+    id: "sv-module-collaboration",
+    title: "SVANSAI Module Collaboration",
+    source: "system",
+    snippet:
+      "Sandbox runs isolated experiments, Debugger diagnoses failures, Shield enforces safety and risk boundaries, and SVANSAI coordinates the assistant experience across them.",
+    score: 0.94,
+    tags: ["sandbox", "debugger", "shield", "svansai", "modules"],
+  },
 ];
 
 function tokenize(text: string): string[] {
@@ -123,6 +159,9 @@ function boostSelfKnowledge(query: string, item: RetrievalItem): number {
     "self analysis",
     "self-analysis",
     "owner mode",
+    "shield",
+    "debugger",
+    "sandbox",
   ];
 
   const isSelfQuery = selfTerms.some((term) => q.includes(term));
