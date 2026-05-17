@@ -779,7 +779,7 @@ export default function HomePage() {
         padding: 0,
         position: "relative",
         overflowX: "hidden",
-        overflowY: "auto",
+        overflowY: "visible",
         color: "white",
         boxSizing: "border-box",
       }}
@@ -958,7 +958,7 @@ export default function HomePage() {
                 padding: "20px 16px",
                 boxSizing: "border-box",
                 zIndex: 60,
-                overflowY: "auto",
+                overflowY: "hidden",
                 overflowX: "hidden",
                 boxShadow: "18px 0 70px rgba(0,0,0,0.42)",
               }}
@@ -1221,7 +1221,7 @@ export default function HomePage() {
           boxSizing: "border-box",
           position: "relative",
           zIndex: 10,
-          overflowY: "auto",
+          overflowY: "visible",
           overflowX: "hidden",
         }}
       >
