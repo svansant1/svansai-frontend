@@ -97,6 +97,12 @@ export default function HomePage() {
 
   // ─── Mobile detection ─────────────────────────────────────────────────────
   useEffect(() => {
+    const previousBodyOverflowY = document.body.style.overflowY;
+    const previousHtmlOverflowY = document.documentElement.style.overflowY;
+
+    document.body.style.overflowY = "hidden";
+    document.documentElement.style.overflowY = "hidden";
+
     const updateLayout = () => {
       const mobile = window.innerWidth <= 768;
       const size = mobile ? 96 : 230;
@@ -111,6 +117,8 @@ export default function HomePage() {
     window.addEventListener("orientationchange", updateLayout);
 
     return () => {
+      document.body.style.overflowY = previousBodyOverflowY;
+      document.documentElement.style.overflowY = previousHtmlOverflowY;
       window.removeEventListener("resize", updateLayout);
       window.removeEventListener("orientationchange", updateLayout);
     };
@@ -771,7 +779,8 @@ export default function HomePage() {
       style={{
         background:
           "radial-gradient(circle at top, rgba(14,165,233,0.22), transparent 34%), radial-gradient(circle at bottom left, rgba(168,85,247,0.18), transparent 34%), linear-gradient(135deg, #020617 0%, #07111f 42%, #111827 100%)",
-        minHeight: "100vh",
+        height: "100dvh",
+        minHeight: "100dvh",
         width: "100%",
         maxWidth: "100vw",
         display: "flex",
@@ -779,7 +788,7 @@ export default function HomePage() {
         padding: 0,
         position: "relative",
         overflowX: "hidden",
-        overflowY: "visible",
+        overflowY: "hidden",
         color: "white",
         boxSizing: "border-box",
       }}
@@ -1221,7 +1230,7 @@ export default function HomePage() {
           boxSizing: "border-box",
           position: "relative",
           zIndex: 10,
-          overflowY: "visible",
+          overflowY: "hidden",
           overflowX: "hidden",
         }}
       >
@@ -1806,10 +1815,10 @@ export default function HomePage() {
             width: "100%",
             maxWidth: "min(1180px, calc(100vw - 32px))",
             margin: isMobile ? "12px auto 0" : "12px auto 0",
-            minHeight: isMobile
-              ? "calc(100vh - 140px)"
-              : "clamp(780px, 88vh, 1040px)",
-            height: isMobile ? "auto" : "clamp(780px, 88vh, 1040px)",
+            minHeight: isMobile ? 0 : "clamp(560px, 72vh, 820px)",
+            height: isMobile
+              ? "calc(100dvh - 318px)"
+              : "calc(100dvh - 376px)",
             position: "relative",
             zIndex: 10,
             boxShadow:
