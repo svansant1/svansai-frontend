@@ -1216,7 +1216,7 @@ export default function HomePage() {
           width: "100%",
           maxWidth: "100%",
           padding: isMobile
-            ? "18px 14px 128px"
+            ? "18px 14px calc(176px + env(safe-area-inset-bottom))"
             : "28px clamp(20px, 4vw, 56px) 24px",
           boxSizing: "border-box",
           position: "relative",
@@ -1809,12 +1809,12 @@ export default function HomePage() {
             minHeight: isMobile
               ? "calc(100vh - 140px)"
               : "clamp(780px, 88vh, 1040px)",
-            height: isMobile ? "auto" : "clamp(780px, 88vh, 1040px)",
+            height: "auto",
             position: "relative",
             zIndex: 10,
             boxShadow:
               "0 24px 90px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.07)",
-            overflow: "hidden",
+            overflow: "visible",
             boxSizing: "border-box",
           }}
         >
@@ -1848,7 +1848,7 @@ export default function HomePage() {
               position: "relative",
               zIndex: 2,
               minWidth: 0,
-              height: "100%",
+              height: "auto",
             }}
           >
             <AIHelper

@@ -688,7 +688,7 @@ export default function AIHelper({
     <div
       style={{
         width: "100%",
-        height: "100%",
+        height: "auto",
         minHeight: isMobile ? "560px" : "720px",
         display: "flex",
         flexDirection: "column",
@@ -733,14 +733,15 @@ export default function AIHelper({
           width: "100%",
           flex: "1 1 auto",
           minHeight: isMobile ? "300px" : "430px",
-          maxHeight: isMobile ? "52vh" : "none",
-          overflowY: "auto",
+          maxHeight: isMobile ? "58dvh" : "none",
+          overflowY: isMobile ? "auto" : "visible",
           overflowX: "hidden",
           marginBottom: isMobile ? "14px" : "18px",
-          padding: isMobile ? "2px 4px 2px 0" : "4px 10px 4px 0",
+          padding: isMobile ? "2px 4px 18px 0" : "4px 10px 4px 0",
           borderRadius: "18px",
           scrollBehavior: "smooth",
           boxSizing: "border-box",
+          WebkitOverflowScrolling: "touch",
         }}
       >
         <AnimatePresence initial={false}>
