@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import type { QuestionType, RetrievalItem } from "@/lib/ai/types";
+import type { ChatMessage, QuestionType, RetrievalItem } from "@/lib/ai/types";
 
 type LearnedKnowledgeRow = {
   id: string;
@@ -178,5 +178,197 @@ export async function storeLearnedFallback(params: {
       .eq("question", question);
   } catch {
     // Never break chat flow if saving learned knowledge fails.
+  }
+}
+
+function hasSensitiveData(text: string): boolean {
+  const lower = text.toLowerCase();
+
+  return (
+    /\b(api[_ -]?key|secret|password|passwd|token|bearer|private[_ -]?key|supabase[_ -]?key|anthropic[_ -]?key|openai[_ -]?key)\b/i.test(text) ||
+    /\b\d{3}-\d{2}-\d{4}\b/.test(text) ||
+    /\b(?:\d[ -]*?){13,16}\b/.test(text) ||
+    lower.includes("-----begin") ||
+    lower.includes("-----end")
+  );
+}
+
+function compactText(text: string, maxLength: number): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function buildLearnedTitle(prefix: string, value: string): string {
+  const compact = compactText(value, 76);
+  return compact.length >= 76 ? `${prefix}: ${compact}...` : `${prefix}: ${compact}`;
+}
+
+function extractPreferenceLesson(question: string): string | null {
+  const lower = question.toLowerCase();
+  const preferenceSignals = [
+    "i want",
+    "i need",
+    "make sure",
+    "don't",
+    "dont",
+    "i like",
+    "i don't like",
+    "i dont like",
+    "it should",
+    "it needs",
+    "can you make",
+  ];
+
+  if (!preferenceSignals.some((signal) => lower.includes(signal))) return null;
+
+  return `User preference or requirement: ${compactText(question, 700)}`;
+}
+
+function extractCorrectionLesson(
+  question: string,
+  previousAssistantMessage?: string,
+): string | null {
+  if (!/\b(wrong|incorrect|nah|nope|not right|look deeper|double check|recheck)\b/i.test(question)) {
+    return null;
+  }
+
+  const previous = previousAssistantMessage
+    ? ` Previous assistant answer to re-check: ${compactText(previousAssistantMessage, 500)}`
+    : "";
+
+  return `Correction behavior learned: when the user challenges an answer, re-check the previous question and answer instead of blindly switching. User challenge: ${compactText(question, 500)}${previous}`;
+}
+
+function extractProjectLesson(question: string, answer: string): string | null {
+  if (!/\b(svansai|svans-ai|shield|debugger|sandbox|vansant|mascot|chat|sidebar|supabase|render|github)\b/i.test(`${question} ${answer}`)) {
+    return null;
+  }
+
+  return `Project context learned: ${compactText(question, 520)} Answer pattern that helped: ${compactText(answer, 700)}`;
+}
+
+async function upsertLearnedKnowledge(params: {
+  title: string;
+  category: QuestionType;
+  summary: string;
+  confidence: number;
+  tags: string[];
+  source: string;
+  learnedFrom: string;
+}): Promise<void> {
+  const { data } = await supabase
+    .from("learned_knowledge")
+    .select("id,usage_count")
+    .eq("title", params.title)
+    .eq("category", params.category)
+    .limit(1);
+
+  if ((data?.length ?? 0) > 0) {
+    const existing = data![0] as { id: string; usage_count?: number | null };
+
+    await supabase
+      .from("learned_knowledge")
+      .update({
+        summary: params.summary,
+        source: params.source,
+        confidence: params.confidence,
+        tags: params.tags,
+        learned_from: params.learnedFrom,
+        usage_count: (existing.usage_count ?? 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+
+    return;
+  }
+
+  await supabase.from("learned_knowledge").insert({
+    title: params.title,
+    category: params.category,
+    summary: params.summary,
+    source: params.source,
+    confidence: params.confidence,
+    tags: params.tags,
+    learned_from: params.learnedFrom,
+    usage_count: 1,
+    verified: false,
+  });
+}
+
+export async function storeConversationLearning(params: {
+  messages: ChatMessage[];
+  question: string;
+  answer: string;
+  questionType: QuestionType;
+  conversationIntent: string;
+  responseStyle: string;
+  source?: string;
+}): Promise<void> {
+  const question = params.question.trim();
+  const answer = params.answer.trim();
+
+  if (question.length < 4 || answer.length < 20) return;
+  if (hasSensitiveData(`${question}\n${answer}`)) return;
+
+  const previousAssistantMessage = [...params.messages]
+    .reverse()
+    .find((message) => message.role === "assistant")?.content;
+
+  const baseTags = Array.from(
+    new Set([
+      "conversation-learned",
+      params.questionType,
+      params.conversationIntent,
+      params.responseStyle,
+    ].filter(Boolean)),
+  );
+
+  const lessons = [
+    {
+      title: buildLearnedTitle("Conversation turn", question),
+      summary: `User asked or said: ${compactText(question, 900)}\n\nSVANSAI answered: ${compactText(answer, 1200)}`,
+      confidence: 0.62,
+      tags: [...baseTags, "turn-memory"],
+    },
+    {
+      title: buildLearnedTitle("Preference", question),
+      summary: extractPreferenceLesson(question),
+      confidence: 0.78,
+      tags: [...baseTags, "preference"],
+    },
+    {
+      title: buildLearnedTitle("Correction", question),
+      summary: extractCorrectionLesson(question, previousAssistantMessage),
+      confidence: 0.8,
+      tags: [...baseTags, "correction"],
+    },
+    {
+      title: buildLearnedTitle("Project context", question),
+      summary: extractProjectLesson(question, answer),
+      confidence: 0.74,
+      tags: [...baseTags, "project-context"],
+    },
+  ].filter((lesson): lesson is {
+    title: string;
+    summary: string;
+    confidence: number;
+    tags: string[];
+  } => Boolean(lesson.summary));
+
+  try {
+    await Promise.all(
+      lessons.slice(0, 4).map((lesson) =>
+        upsertLearnedKnowledge({
+          title: lesson.title,
+          category: params.questionType,
+          summary: lesson.summary,
+          confidence: lesson.confidence,
+          tags: lesson.tags,
+          source: params.source ?? "conversation-learning",
+          learnedFrom: "conversation",
+        }),
+      ),
+    );
+  } catch {
+    // Learning should never break the chat response.
   }
 }

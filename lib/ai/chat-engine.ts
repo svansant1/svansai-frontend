@@ -32,6 +32,7 @@ import {
 } from "@/lib/ai/instruction-handler";
 import {
   queueLearningNeed,
+  storeConversationLearning,
   storeLearnedFallback,
 } from "@/lib/ai/knowledge-learning";
 import {
@@ -798,6 +799,18 @@ ${lastAssistantMessage}
         attachedFile ? "file-assisted" : "text",
       ],
     });
+
+    if (!roleplaySimulation && !containsHarmfulTechnicalOutput(response)) {
+      void storeConversationLearning({
+        messages,
+        question: latestUserMessage,
+        answer: response,
+        questionType,
+        conversationIntent,
+        responseStyle,
+        source: "svansai-every-turn",
+      });
+    }
   }
 
   return response;
