@@ -201,6 +201,7 @@ export function buildUserPrompt(params: {
   responseStyle: ResponseStyle;
   followUpIntent: FollowUpIntent;
   conversationIntent: ConversationIntent;
+  responseMode?: string;
   lastAssistantMessage: string;
   memory: MemoryItem[];
   retrieval: RetrievalItem[];
@@ -239,6 +240,9 @@ ${params.followUpIntent}
 
 Detected conversation intent:
 ${params.conversationIntent}
+
+Selected answer mode:
+${params.responseMode ?? "auto"}
 
 Previous assistant response:
 ${params.lastAssistantMessage || "None"}

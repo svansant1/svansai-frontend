@@ -1,4 +1,4 @@
-import type { ChatContext, QuestionType } from "@/lib/ai/types";
+import type { ChatContext, QuestionType, ResponseMode } from "@/lib/ai/types";
 import {
   sanitizeMessages,
   getLatestUserMessage,
@@ -56,6 +56,7 @@ type ExtendedChatContext = ChatContext & {
   previousUserMessage: string;
   isCodeFragment: boolean;
   conversationIntent: ConversationIntent;
+  responseMode: Exclude<ResponseMode, "auto">;
 };
 
 type MessageIntent =
@@ -533,10 +534,81 @@ async function callProvider(
   }
 }
 
+function resolveResponseMode(
+  requestedMode: ResponseMode,
+  message: string,
+  questionType: QuestionType,
+  conversationIntent: ConversationIntent,
+): Exclude<ResponseMode, "auto"> {
+  const lower = message.toLowerCase();
+
+  if (/\b(just answer|direct answer|give me the answer|answer directly|quick answer)\b/i.test(lower)) {
+    return "direct";
+  }
+
+  if (/\b(walk me through|guide me|show the steps|step by step|how do i get|how to get)\b/i.test(lower)) {
+    return "guide";
+  }
+
+  if (/\b(tutor me|quiz me|don't tell me|dont tell me|give me hints|hint first|help me figure)\b/i.test(lower)) {
+    return "tutor";
+  }
+
+  if (requestedMode !== "auto") return requestedMode;
+
+  if (
+    conversationIntent === "quiz" ||
+    /\b(quiz|homework|practice problem|test question|study question)\b/i.test(lower)
+  ) {
+    return "tutor";
+  }
+
+  if (
+    questionType === "learning" ||
+    /\b(explain|teach|learn|why|how does|how do)\b/i.test(lower)
+  ) {
+    return "guide";
+  }
+
+  return "direct";
+}
+
+function buildResponseModeInstruction(
+  responseMode: Exclude<ResponseMode, "auto">,
+): string {
+  if (responseMode === "direct") {
+    return `
+Answer mode: Direct.
+- Give the answer first.
+- Then add a short explanation, caveat, or next step only if useful.
+- Keep it efficient for practical work, coding, troubleshooting, and normal chat.
+`.trim();
+  }
+
+  if (responseMode === "guide") {
+    return `
+Answer mode: Guide.
+- Teach how to reach the answer.
+- Start with the core idea, then show the reasoning path in small steps.
+- Give the final answer after the reasoning.
+- Use compact bullets or numbered steps when helpful.
+`.trim();
+  }
+
+  return `
+Answer mode: Tutor.
+- Help the user think instead of immediately handing over the final answer.
+- Give one or two hints, ask a small checkpoint question, and explain the method.
+- If the user explicitly asks for the final answer, is checking completed work, or the task is not a learning/quiz/homework task, you may reveal the answer with explanation.
+- Do not be evasive; be a helpful tutor.
+`.trim();
+}
+
 export async function generateChatResponse(
   rawMessages: unknown[],
   attachedFile?: AttachedFile,
   sessionId?: string | null,
+  requestedResponseMode: ResponseMode = "auto",
 ): Promise<string> {
   const messages = sanitizeMessages(rawMessages);
   const sid = sessionId || "anonymous";
@@ -731,6 +803,12 @@ ${lastAssistantMessage}
   }
 
   const responseStyle = detectResponseStyle(effectiveMessage, questionType);
+  const responseMode = resolveResponseMode(
+    requestedResponseMode,
+    latestUserMessage,
+    questionType,
+    conversationIntent,
+  );
   const memory = await getMemoryContext(latestUserMessage, messages);
 
   const retrievalQuery =
@@ -776,6 +854,7 @@ ${lastAssistantMessage}
     previousUserMessage,
     isCodeFragment: codeFragment,
     conversationIntent,
+    responseMode,
   };
 
   const response = await generateBestResponse(context);
@@ -807,7 +886,7 @@ ${lastAssistantMessage}
         answer: response,
         questionType,
         conversationIntent,
-        responseStyle,
+        responseStyle: `${responseStyle}-${responseMode}`,
         source: "svansai-every-turn",
       });
     }
@@ -826,6 +905,7 @@ async function generateBestResponse(
     responseStyle: context.responseStyle,
     followUpIntent: context.followUpIntent,
     conversationIntent: context.conversationIntent,
+    responseMode: context.responseMode,
     lastAssistantMessage: context.lastAssistantMessage,
     memory: context.memory,
     retrieval: context.retrieval,
@@ -853,6 +933,8 @@ Runtime instructions:
 - If a text/code file is attached, use its content directly in your answer.
 - Keep answers fast, useful, and conversational.
 - Current mode: ${context.isCorrectionRequest ? "correction recovery" : "standard conversation"}.
+
+${buildResponseModeInstruction(context.responseMode)}
 
 ${basePrompt}
 `.trim();

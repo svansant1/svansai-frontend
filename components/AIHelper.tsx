@@ -25,6 +25,8 @@ type AttachedFile = {
   size: number;
 };
 
+type ResponseMode = "auto" | "direct" | "guide" | "tutor";
+
 type UserState = {
   id: string;
   email: string;
@@ -63,6 +65,17 @@ const ACCEPTED_TYPES = [
   "text/x-java-source",
   "text/x-c",
   "text/x-cpp",
+];
+
+const RESPONSE_MODES: Array<{
+  id: ResponseMode;
+  label: string;
+  title: string;
+}> = [
+  { id: "auto", label: "Auto", title: "Let SVANSAI choose the best style" },
+  { id: "direct", label: "Direct", title: "Answer first, then explain briefly" },
+  { id: "guide", label: "Guide", title: "Show how to get the answer" },
+  { id: "tutor", label: "Tutor", title: "Hint and coach before revealing" },
 ];
 
 function isImageType(type: string) {
@@ -343,6 +356,7 @@ export default function AIHelper({
   >({});
   const [totalViews, setTotalViews] = useState(0);
   const [isPasswordMode, setIsPasswordMode] = useState(false);
+  const [responseMode, setResponseMode] = useState<ResponseMode>("auto");
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -578,6 +592,7 @@ export default function AIHelper({
           content: m.content,
         })),
         sessionId,
+        responseMode,
       };
 
       if (fileToSend) {
@@ -980,6 +995,56 @@ export default function AIHelper({
         )}
 
         <div style={{ width: "100%", boxSizing: "border-box" }}>
+          {!isPasswordMode && (
+            <div
+              aria-label="Response mode"
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile
+                  ? "repeat(2, minmax(0, 1fr))"
+                  : "repeat(4, minmax(0, 1fr))",
+                gap: "8px",
+                marginBottom: "12px",
+              }}
+            >
+              {RESPONSE_MODES.map((mode) => {
+                const active = responseMode === mode.id;
+
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    title={mode.title}
+                    aria-pressed={active}
+                    onClick={() => setResponseMode(mode.id)}
+                    style={{
+                      padding: isMobile ? "9px 8px" : "10px 12px",
+                      borderRadius: "14px",
+                      border: active
+                        ? "1px solid rgba(56,189,248,0.58)"
+                        : "1px solid rgba(255,255,255,0.12)",
+                      background: active
+                        ? "linear-gradient(135deg, rgba(56,189,248,0.24), rgba(168,85,247,0.14))"
+                        : "rgba(255,255,255,0.045)",
+                      color: active ? "#e0f2fe" : "rgba(255,255,255,0.72)",
+                      cursor: loading ? "not-allowed" : "pointer",
+                      fontSize: isMobile ? "0.78rem" : "0.84rem",
+                      fontWeight: 850,
+                      letterSpacing: "0.02em",
+                      boxShadow: active
+                        ? "0 10px 24px rgba(56,189,248,0.12)"
+                        : "none",
+                      opacity: loading ? 0.72 : 1,
+                    }}
+                    disabled={loading}
+                  >
+                    {mode.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {isPasswordMode ? (
             <div style={{ position: "relative" }}>
               <input

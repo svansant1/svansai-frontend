@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateChatResponse} from "@/lib/ai/chat-engine";
 import { AttachedFile } from "@/lib/ai/file-types";
-import type { ChatMessage } from "@/lib/ai/types";
+import type { ChatMessage, ResponseMode } from "@/lib/ai/types";
 
 export async function POST(req: Request) {
   try {
@@ -26,7 +26,20 @@ export async function POST(req: Request) {
     const sessionId: string | null =
       typeof body?.sessionId === "string" ? body.sessionId : null;
 
-    const text = await generateChatResponse(messages, attachedFile, sessionId);
+    const responseMode: ResponseMode =
+      body?.responseMode === "direct" ||
+      body?.responseMode === "guide" ||
+      body?.responseMode === "tutor" ||
+      body?.responseMode === "auto"
+        ? body.responseMode
+        : "auto";
+
+    const text = await generateChatResponse(
+      messages,
+      attachedFile,
+      sessionId,
+      responseMode,
+    );
 
     return NextResponse.json({ text });
   } catch (error) {

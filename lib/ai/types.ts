@@ -29,6 +29,8 @@ export type MemoryItem = {
   relevance: number;
 };
 
+export type ResponseMode = "auto" | "direct" | "guide" | "tutor";
+
 export type ChatContext = {
   messages: ChatMessage[];
   latestUserMessage: string;
