@@ -1,4 +1,4 @@
-import type { ChatContext, QuestionType } from "@/lib/ai/types";
+import type { ChatContext, QuestionType, ResponseMode } from "@/lib/ai/types";
 import {
   sanitizeMessages,
   getLatestUserMessage,
@@ -55,6 +55,7 @@ type ExtendedChatContext = ChatContext & {
   previousUserMessage: string;
   isCodeFragment: boolean;
   conversationIntent: ConversationIntent;
+  responseMode: ResponseMode;
 };
 
 type MessageIntent =
@@ -536,6 +537,7 @@ export async function generateChatResponse(
   rawMessages: unknown[],
   attachedFile?: AttachedFile,
   sessionId?: string | null,
+  responseMode: ResponseMode = "auto",
 ): Promise<string> {
   const messages = sanitizeMessages(rawMessages);
   const sid = sessionId || "anonymous";
@@ -775,6 +777,7 @@ ${lastAssistantMessage}
     previousUserMessage,
     isCodeFragment: codeFragment,
     conversationIntent,
+    responseMode,
   };
 
   const response = await generateBestResponse(context);
@@ -817,6 +820,7 @@ async function generateBestResponse(
     memory: context.memory,
     retrieval: context.retrieval,
     hasFile: !!context.attachedFile,
+    responseMode: context.responseMode,
   });
 
   basePrompt = `
