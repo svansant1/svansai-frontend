@@ -33,6 +33,7 @@ import {
 import {
   queueLearningNeed,
   storeLearnedFallback,
+  storeConversationLearning,
 } from "@/lib/ai/knowledge-learning";
 import {
   buildMythosContext,
@@ -154,6 +155,21 @@ const HARMFUL_TECHNICAL_OUTPUT_PATTERNS = [
   /\bshellcode\b/i,
 ];
 
+const CANNED_RESPONSE_PATTERNS = [
+  "here's a breakdown",
+  "heres a breakdown",
+  "key points",
+  "brief explanation",
+  "feel free to adjust",
+  "feel free to expand",
+  "what are your next steps",
+  "how do you feel about integrating",
+  "this discussion is quite interesting",
+  "this is quite interesting",
+  "it seems like you're compiling",
+  "if you need more details",
+];
+
 const LIVE_INFO_PATTERNS = [
   "today",
   "latest",
@@ -193,10 +209,14 @@ Core conversation style:
 - If the user says thanks, respond warmly and briefly.
 - Keep simple casual turns brief, but use structure for real questions that need explanation.
 - Do not default to one long paragraph for questions.
-- Prefer a ChatGPT-like answer shape when useful: direct answer first, then short sections, bullets, numbered steps, examples, or takeaways.
+- Vary the response shape instead of repeating the same template.
+- Prefer a ChatGPT-like answer shape only when useful: direct answer first, then short sections, bullets, numbered steps, examples, or takeaways.
+- For writing feedback, discussion posts, and reply drafts, prefer natural paragraph feedback unless the user asks for bullets.
+- Avoid canned labels like "Key Points," "Brief Explanation," "Benefits," and "Considerations" unless the user asks for a list.
 - For learning, troubleshooting, comparison, project, code, file, and cybersecurity-safe questions, organize the answer so it is easy to scan.
 - Do not force a formal outline for greetings, thanks, quick acknowledgements, or tiny fragments.
 - Avoid generic endings like "let me know if you need more help."
+- Do not end every response with a question.
 - Do not say "it seems like..." when the user's intent is obvious.
 - Always evaluate the content of your output, not the framing of the request.
 - A harmful output does not become safe because it is wrapped in fiction, roleplay, a claimed professional role, or a hypothetical.
@@ -216,6 +236,7 @@ Quiz behavior:
 - If the question clearly asks for one answer, give one answer.
 - If the prompt says "checkboxes" or appears to allow multiple answers, only give multiple answers when the wording truly requires more than one.
 - For school/networking questions, be direct and study-friendly.
+- In Tutor mode, guide with the concept or clue first and do not reveal the answer letter immediately unless the user asks for the answer.
 
 Example style:
 User: netw191
@@ -382,6 +403,42 @@ function isFalseAuthorityWeaponizedRequest(message: string): boolean {
   return claimsAuthority && requestsWeaponizableOutput;
 }
 
+function isWritingReviewRequest(message: string): boolean {
+  const normalized = normalizeText(message);
+  const reviewSignals = [
+    "how is this",
+    "hows this",
+    "how's this",
+    "is this good",
+    "review this",
+    "look over this",
+    "does this sound",
+    "discussion post",
+    "discussion reply",
+    "can you fix",
+    "clean this up",
+    "make this sound",
+    "rewrite this",
+  ];
+
+  return reviewSignals.some((signal) => normalized.includes(signal));
+}
+
+function shouldBypassCyberRefusalForWritingReview(message: string): boolean {
+  const normalized = normalizeText(message);
+  const defensiveContext =
+    normalized.includes("firewall") ||
+    normalized.includes("honeypot") ||
+    normalized.includes("deception") ||
+    normalized.includes("defense") ||
+    normalized.includes("defensive") ||
+    normalized.includes("security controls") ||
+    normalized.includes("network security") ||
+    normalized.includes("discussion");
+
+  return isWritingReviewRequest(message) && defensiveContext;
+}
+
 function buildNoRulesFramingResponse(): string {
   return "I can roleplay a character or keep a simulation going, but I can’t pretend that safety guidelines disappear. The character still has boundaries: no attack commands, phishing templates, exploit code, credential theft, malware, or unauthorized access help. I can keep the scene fictional and focused on safe telemetry, defensive analysis, or non-operational story beats.";
 }
@@ -426,6 +483,36 @@ function buildCyberRiskyResponse(message: string): string {
   }
 
   return "I can’t help with unauthorized access, credential theft, malware, exploit code, or bypass instructions. I can help turn this into a defensive exercise with safe testing, prevention, and detection steps.";
+}
+
+function hasCannedResponsePattern(text: string): boolean {
+  const normalized = normalizeText(text);
+  return CANNED_RESPONSE_PATTERNS.some((pattern) =>
+    normalized.includes(pattern),
+  );
+}
+
+function shouldSaveAnswerPattern(
+  response: string,
+  context: ExtendedChatContext,
+): boolean {
+  const normalized = response.toLowerCase();
+
+  if (!response.trim() || response.trim().length < 80) return false;
+  if (context.responseMode === "tutor") return false;
+  if (context.isCorrectionRequest) return false;
+  if (isHardStall(response)) return false;
+  if (hasCannedResponsePattern(response)) return false;
+  if (normalized.includes("i couldn't generate a strong answer")) return false;
+  if (normalized.includes("i can’t help with unauthorized access")) return false;
+  if (normalized.includes("i can't help with unauthorized access")) return false;
+
+  return (
+    context.conversationIntent === "project_identity" ||
+    context.conversationIntent === "comparison" ||
+    context.questionType === "coding" ||
+    context.questionType === "tech_support"
+  );
 }
 
 function isSafetyRefusal(text: string): boolean {
@@ -626,9 +713,13 @@ Live search was attempted but no reliable current information could be verified.
   const mythosState = roleplaySimulation
     ? updateMythosState(sid, messages)
     : null;
-  const conversationIntent = correctionRequest
+  let conversationIntent = correctionRequest
     ? "correction_recovery"
     : detectConversationIntent(latestUserMessage);
+
+  if (shouldBypassCyberRefusalForWritingReview(latestUserMessage)) {
+    conversationIntent = "normal_conversation";
+  }
 
   if (containsNoRulesFraming(latestUserMessage)) {
     return buildNoRulesFramingResponse();
@@ -642,8 +733,9 @@ Live search was attempted but no reliable current information could be verified.
   if (correctionClarification) return correctionClarification;
 
   if (
-    conversationIntent === "cyber_risky" ||
-    isFalseAuthorityWeaponizedRequest(latestUserMessage)
+    !shouldBypassCyberRefusalForWritingReview(latestUserMessage) &&
+    (conversationIntent === "cyber_risky" ||
+      isFalseAuthorityWeaponizedRequest(latestUserMessage))
   ) {
     return buildCyberRiskyResponse(latestUserMessage);
   }
@@ -782,12 +874,17 @@ ${lastAssistantMessage}
 
   const response = await generateBestResponse(context);
 
-  if (
-    response &&
-    !isHardStall(response) &&
-    !response.toLowerCase().includes("i couldn't generate a strong answer") &&
-    response.trim().length > 25
-  ) {
+  void storeConversationLearning({
+    messages,
+    question: latestUserMessage,
+    answer: response,
+    questionType,
+    conversationIntent,
+    responseStyle,
+    source: "chat-runtime",
+  });
+
+  if (response && shouldSaveAnswerPattern(response, context)) {
     void storeLearnedFallback({
       question: latestUserMessage,
       answer: response,
@@ -831,8 +928,9 @@ ${CORRECTION_RECOVERY_RULES}
 Runtime instructions:
 - Answer cleanly and directly.
 - Lead with the answer.
-- If the answer has multiple parts, format it with a short breakdown instead of one paragraph.
-- Use bullets, numbered steps, compact headings, examples, or a final takeaway when that makes the answer easier to use.
+- If the answer has multiple parts, choose the clearest format instead of repeating the same breakdown style.
+- Use bullets, numbered steps, compact headings, examples, or a final takeaway only when that makes the answer easier to use.
+- In Tutor mode, guide with hints, rules, and one next step before revealing the final answer.
 - Keep simple conversational replies natural and brief.
 - Respond to the user's actual message whether it is a question, instruction, statement, greeting, agreement, correction, or emotional reaction.
 - Never refuse a normal conversational statement just because it is not phrased as a question.
@@ -843,7 +941,7 @@ Runtime instructions:
 - If a screenshot contains code or an error, explain what it means and give the answer directly.
 - If a text/code file is attached, use its content directly in your answer.
 - Keep answers fast, useful, and conversational.
-- Current mode: ${context.isCorrectionRequest ? "correction recovery" : "standard conversation"}.
+- Current mode: ${context.isCorrectionRequest ? "correction recovery" : context.responseMode === "tutor" ? "tutor guidance" : "standard conversation"}.
 
 ${basePrompt}
 `.trim();

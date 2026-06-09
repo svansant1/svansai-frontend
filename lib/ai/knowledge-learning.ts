@@ -216,9 +216,45 @@ function extractPreferenceLesson(question: string): string | null {
     "it should",
     "it needs",
     "can you make",
+    "stop",
+    "avoid",
+    "don't always",
+    "dont always",
+    "too repetitive",
+    "repetitive",
+    "paragraph form",
+    "without bullets",
+    "no bullets",
+    "guide me",
+    "guide someone",
+    "without giving the answer",
+    "don't give the answer",
+    "dont give the answer",
   ];
 
   if (!preferenceSignals.some((signal) => lower.includes(signal))) return null;
+
+  const styleLessons: string[] = [];
+
+  if (/\b(repetitive|same structure|same template|template)\b/i.test(question)) {
+    styleLessons.push("avoid repetitive templates and vary the response shape");
+  }
+
+  if (/\b(paragraph form|discussion paragraph|as a paragraph|without bullets|no bullets)\b/i.test(question)) {
+    styleLessons.push("use paragraph form for writing feedback and discussion posts unless the user asks for bullets");
+  }
+
+  if (/\b(key points|brief explanation|feel free|here'?s|what are your next steps|how do you feel)\b/i.test(question)) {
+    styleLessons.push("avoid canned labels and generic closing questions");
+  }
+
+  if (/\b(guide|hint|tutor|without giving the answer|don't give the answer|dont give the answer)\b/i.test(question)) {
+    styleLessons.push("when tutoring, guide the user with hints and reasoning instead of immediately revealing the final answer");
+  }
+
+  if (styleLessons.length > 0) {
+    return `User response-style preference: ${styleLessons.join("; ")}. Original user wording: ${compactText(question, 500)}`;
+  }
 
   return `User preference or requirement: ${compactText(question, 700)}`;
 }

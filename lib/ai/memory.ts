@@ -88,6 +88,62 @@ export function extractLearnedMemory(messages: ChatMessage[]): MemoryItem[] {
   if (
     userMessages.some(
       (m) =>
+        m.includes("repetitive") ||
+        m.includes("same template") ||
+        m.includes("same structure") ||
+        m.includes("key points") ||
+        m.includes("brief explanation") ||
+        m.includes("feel free to adjust")
+    )
+  ) {
+    learned.push({
+      id: "pref-no-repetitive-templates",
+      summary:
+        "User dislikes repetitive response templates; vary the answer shape and avoid canned labels or generic closing questions.",
+      relevance: 0.99,
+    });
+  }
+
+  if (
+    userMessages.some(
+      (m) =>
+        m.includes("paragraph form") ||
+        m.includes("as a paragraph") ||
+        m.includes("discussion paragraph") ||
+        m.includes("without bullets") ||
+        m.includes("no bullets")
+    )
+  ) {
+    learned.push({
+      id: "pref-paragraph-writing-feedback",
+      summary:
+        "User prefers paragraph form for writing feedback, discussion posts, and replies unless they ask for bullets.",
+      relevance: 0.98,
+    });
+  }
+
+  if (
+    userMessages.some(
+      (m) =>
+        m.includes("guide someone") ||
+        m.includes("guide me") ||
+        m.includes("without giving the answer") ||
+        m.includes("don't give the answer") ||
+        m.includes("dont give the answer") ||
+        m.includes("tutor")
+    )
+  ) {
+    learned.push({
+      id: "pref-tutor-guidance",
+      summary:
+        "User wants tutor-style guidance when requested: give hints, reasoning cues, and one next step before revealing the final answer.",
+      relevance: 0.98,
+    });
+  }
+
+  if (
+    userMessages.some(
+      (m) =>
         m.includes("svansai") ||
         m.includes("super ai") ||
         m.includes("make it smarter") ||
