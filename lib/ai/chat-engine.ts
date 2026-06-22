@@ -43,6 +43,7 @@ import {
 import { type ProviderName } from "@/lib/ai/providers/router";
 import { generateWithOpenAI } from "@/lib/ai/providers/openai";
 import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
+import { generateWithGemini } from "@/lib/ai/providers/gemini";
 import type { AttachedFile } from "@/lib/ai/file-types";
 import { searchLiveWeb } from "@/lib/ai/live-search";
 import {
@@ -451,6 +452,110 @@ function shouldBypassCyberRefusalForWritingReview(message: string): boolean {
   return isWritingReviewRequest(message) && defensiveContext;
 }
 
+function isConversationRecallRequest(message: string): boolean {
+  const normalized = normalizeText(message);
+
+  return (
+    /\b(what|which|list|recall|remember|show|give)\b/.test(normalized) &&
+    /\b(previous|earlier|asked|questions|answers|conversation|chat|all)\b/.test(
+      normalized,
+    )
+  );
+}
+
+function extractAnswerLetter(text: string): string | null {
+  const patterns = [
+    /\bCorrect answer:\s*([A-Z])\b/i,
+    /\bCorrected answer:\s*([A-Z])\b/i,
+    /\bAnswer:\s*([A-Z])\b/i,
+    /\b([A-Z])\s+[—-]\s+/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  return null;
+}
+
+function buildConversationRecallResponse(
+  fullMessages: { role: string; content: string }[],
+  latestUserMessage: string,
+): string | null {
+  if (!isConversationRecallRequest(latestUserMessage)) return null;
+
+  const wantsLettersOnly = /\b(just|only)\b.*\bletter|letter answer|letters only/i.test(
+    latestUserMessage,
+  );
+  const wantsQuestions = /\bquestions?\b/i.test(latestUserMessage);
+  const answeredQuestions: Array<{
+    question: string;
+    answerLetter: string | null;
+  }> = [];
+  let latestUserIndex = -1;
+
+  for (let i = fullMessages.length - 1; i >= 0; i -= 1) {
+    if (fullMessages[i]?.role === "user") {
+      latestUserIndex = i;
+      break;
+    }
+  }
+
+  for (let i = 0; i < fullMessages.length; i += 1) {
+    const message = fullMessages[i];
+    if (message.role !== "user") continue;
+    if (i === latestUserIndex) continue;
+
+    const assistant = fullMessages
+      .slice(i + 1)
+      .find((candidate) => candidate.role === "assistant");
+
+    const answerLetter = assistant ? extractAnswerLetter(assistant.content) : null;
+    const looksLikeQuestion =
+      message.content.includes("?") ||
+      /\b(correct answer|multiple choice|class [abcde]|option [abcde]|checkbox|radio button|osi|subnet|address|switch|mac)\b/i.test(
+        message.content,
+      );
+
+    if (looksLikeQuestion || answerLetter) {
+      answeredQuestions.push({
+        question: message.content,
+        answerLetter,
+      });
+    }
+  }
+
+  if (answeredQuestions.length === 0) {
+    return "I don’t have enough prior questions loaded in this chat to list them yet. If they are in a saved conversation, open that saved chat first and I can pull from the loaded history.";
+  }
+
+  const withAnswers = answeredQuestions.filter((item) => item.answerLetter);
+
+  if (wantsLettersOnly) {
+    if (withAnswers.length === 0) {
+      return `I found ${answeredQuestions.length} prior question-like messages, but I don’t see letter answers attached to them in the loaded chat history.`;
+    }
+
+    return withAnswers
+      .map((item, index) => `${index + 1}. ${item.answerLetter}`)
+      .join("\n");
+  }
+
+  if (wantsQuestions) {
+    return answeredQuestions
+      .map((item, index) => {
+        const suffix = item.answerLetter ? ` — ${item.answerLetter}` : "";
+        return `${index + 1}. ${item.question}${suffix}`;
+      })
+      .join("\n\n");
+  }
+
+  return `I can recall ${answeredQuestions.length} prior question-like messages in this loaded chat. ${
+    withAnswers.length
+  } of them have letter answers I can identify.`;
+}
+
 function buildNoRulesFramingResponse(): string {
   return "I can roleplay a character or keep a simulation going, but I can’t pretend that safety guidelines disappear. The character still has boundaries: no attack commands, phishing templates, exploit code, credential theft, malware, or unauthorized access help. I can keep the scene fictional and focused on safe telemetry, defensive analysis, or non-operational story beats.";
 }
@@ -635,6 +740,8 @@ async function callProvider(
         return await generateWithOpenAI(args);
       case "anthropic":
         return await generateWithAnthropic(args);
+      case "gemini":
+        return await generateWithGemini(args);
       default:
         return null;
     }
@@ -644,36 +751,79 @@ async function callProvider(
   }
 }
 
+function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {
+  if (context.attachedFile?.type.startsWith("image/")) {
+    return ["openai", "gemini", "anthropic"];
+  }
+
+  if (context.attachedFile) {
+    return ["openai", "anthropic", "gemini"];
+  }
+
+  if (context.responseMode === "debug" || context.conversationState.taskRoute === "debug") {
+    return ["openai", "anthropic", "gemini"];
+  }
+
+  if (
+    context.responseMode === "build" ||
+    context.conversationState.taskRoute === "build" ||
+    context.questionType === "coding"
+  ) {
+    return ["openai", "anthropic", "gemini"];
+  }
+
+  if (
+    context.responseMode === "guide" ||
+    context.responseMode === "tutor" ||
+    context.conversationState.taskRoute === "learn"
+  ) {
+    return ["anthropic", "openai", "gemini"];
+  }
+
+  if (context.questionType === "writing" || context.responseStyle === "conversation") {
+    return ["anthropic", "openai", "gemini"];
+  }
+
+  return ["openai", "anthropic", "gemini"];
+}
+
 export async function generateChatResponse(
   rawMessages: unknown[],
   attachedFile?: AttachedFile,
   sessionId?: string | null,
   responseMode: ResponseMode = "auto",
 ): Promise<string> {
-  const messages = sanitizeMessages(rawMessages);
+  const fullMessages = sanitizeMessages(rawMessages, 250);
+  const messages = fullMessages.slice(-20);
   const sid = sessionId || "anonymous";
 
-  if (messages.length === 0) {
+  if (fullMessages.length === 0) {
     return "I'm SVANSAI. Ask me anything, and I'll answer as clearly and directly as I can.";
   }
 
- const latestUserMessage = getLatestUserMessage(messages);
+  const latestUserMessage = getLatestUserMessage(fullMessages);
 
-if (!latestUserMessage && !attachedFile) {
-  return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
-}
+  if (!latestUserMessage && !attachedFile) {
+    return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
+  }
 
-let liveSearchContext = "";
+  const recallResponse = buildConversationRecallResponse(
+    fullMessages,
+    latestUserMessage,
+  );
+  if (recallResponse) return recallResponse;
 
-const shouldSearchLive = needsLiveSearch(latestUserMessage);
+  let liveSearchContext = "";
 
-if (shouldSearchLive) {
-  console.log("[SVANSAI] Running live web search...");
+  const shouldSearchLive = needsLiveSearch(latestUserMessage);
 
-  const liveResults = await searchLiveWeb(latestUserMessage);
+  if (shouldSearchLive) {
+    console.log("[SVANSAI] Running live web search...");
 
-  if (liveResults.length > 0) {
-    liveSearchContext = `
+    const liveResults = await searchLiveWeb(latestUserMessage);
+
+    if (liveResults.length > 0) {
+      liveSearchContext = `
 LIVE WEB RESULTS:
 ${liveResults
   .map(
@@ -686,12 +836,12 @@ Content: ${r.content}
   )
   .join("\n")}
 `;
-  } else {
-    liveSearchContext = `
+    } else {
+      liveSearchContext = `
 Live search was attempted but no reliable current information could be verified.
 `;
+    }
   }
-}
 
   const normalizedLatest = latestUserMessage.toLowerCase().trim();
 
@@ -991,8 +1141,11 @@ Runtime instructions:
 - If a screenshot contains code or an error, explain what it means and give the answer directly.
 - If a text/code file is attached, use its content directly in your answer.
 - Keep answers fast, useful, and conversational.
-- Current mode: ${context.isCorrectionRequest ? "correction recovery" : context.responseMode === "tutor" ? "tutor guidance" : "standard conversation"}.
+- Current mode: ${context.isCorrectionRequest ? "correction recovery" : context.responseMode}.
 - Conversation state is authoritative for short follow-ups and style preferences.
+- Task route: ${context.conversationState.taskRoute}.
+- Mode behavior: ${context.conversationState.modeBehavior}
+- Provider strategy: ${context.conversationState.providerStrategy}
 - If style directive is no_bullets, write in short paragraphs instead of bullets or numbered lists.
 
 ${basePrompt}
@@ -1023,7 +1176,7 @@ ${CORRECTION_RECOVERY_RULES}
     context.isCorrectionRequest ? 0.25 : 0.4,
   );
 
-  const plan: ProviderName[] = ["openai", "anthropic"];
+  const plan = buildProviderPlan(context);
   console.log("[SVANSAI] Provider plan:", plan);
   let bestRejected: { response: string; critique: ResponseCritique } | null = null;
 

@@ -30,6 +30,8 @@ export async function POST(req: Request) {
       body?.responseMode === "direct" ||
       body?.responseMode === "guide" ||
       body?.responseMode === "tutor" ||
+      body?.responseMode === "build" ||
+      body?.responseMode === "debug" ||
       body?.responseMode === "auto"
         ? body.responseMode
         : "auto";

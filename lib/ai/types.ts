@@ -29,7 +29,7 @@ export type MemoryItem = {
   relevance: number;
 };
 
-export type ResponseMode = "auto" | "direct" | "guide" | "tutor";
+export type ResponseMode = "auto" | "direct" | "guide" | "tutor" | "build" | "debug";
 
 export type ConversationStateSummary = {
   currentTopic: string;
@@ -40,6 +40,9 @@ export type ConversationStateSummary = {
   isShortFollowUp: boolean;
   resolvedFollowUp: string;
   styleDirective: "natural" | "no_bullets" | "direct" | "structured";
+  taskRoute: "conversation" | "build" | "debug" | "learn" | "protect" | "analyze";
+  modeBehavior: string;
+  providerStrategy: string;
 };
 
 export type ChatContext = {

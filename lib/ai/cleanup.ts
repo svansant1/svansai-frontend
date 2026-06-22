@@ -3,7 +3,10 @@ import type { ChatMessage } from "@/lib/ai/types";
 const MAX_HISTORY = 20;
 const MAX_CHARS_PER_MESSAGE = 4000;
 
-export function sanitizeMessages(messages: unknown[]): ChatMessage[] {
+export function sanitizeMessages(
+  messages: unknown[],
+  maxHistory = MAX_HISTORY,
+): ChatMessage[] {
   if (!Array.isArray(messages)) return [];
 
   return messages
@@ -18,7 +21,7 @@ export function sanitizeMessages(messages: unknown[]): ChatMessage[] {
       })
     )
     .filter((m) => m.content.length > 0)
-    .slice(-MAX_HISTORY)
+    .slice(-maxHistory)
     .map(
       (m): ChatMessage => ({
         role: m.role,

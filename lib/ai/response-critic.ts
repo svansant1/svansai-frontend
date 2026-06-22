@@ -102,6 +102,24 @@ export function critiqueResponse(params: {
     reasons.push("response gives reassurance instead of the requested engineering fix");
   }
 
+  if (
+    params.conversationState.taskRoute === "build" &&
+    !/\b(implement|file|module|component|api|state|test|verify|build|route|function|step|change|patch|deploy)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push("build-mode response lacks concrete implementation or verification detail");
+  }
+
+  if (
+    params.conversationState.taskRoute === "debug" &&
+    !/\b(cause|symptom|check|log|error|fix|verify|reproduce|inspect|likely|because)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push("debug-mode response lacks diagnosis, checks, or verification detail");
+  }
+
   const score = Math.max(0, 1 - reasons.length * 0.28);
 
   return {

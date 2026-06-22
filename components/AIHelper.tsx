@@ -25,7 +25,7 @@ type AttachedFile = {
   size: number;
 };
 
-type ResponseMode = "auto" | "direct" | "guide" | "tutor";
+type ResponseMode = "auto" | "direct" | "guide" | "tutor" | "build" | "debug";
 
 type UserState = {
   id: string;
@@ -76,6 +76,8 @@ const RESPONSE_MODES: Array<{
   { id: "direct", label: "Direct", title: "Answer first, then explain briefly" },
   { id: "guide", label: "Guide", title: "Show how to get the answer" },
   { id: "tutor", label: "Tutor", title: "Hint and coach before revealing" },
+  { id: "build", label: "Build", title: "Plan, implement, and verify project changes" },
+  { id: "debug", label: "Debug", title: "Diagnose problems and find the smallest fix" },
 ];
 
 function isImageType(type: string) {
@@ -1012,8 +1014,8 @@ export default function AIHelper({
               style={{
                 display: "grid",
                 gridTemplateColumns: isMobile
-                  ? "repeat(2, minmax(0, 1fr))"
-                  : "repeat(4, minmax(0, 1fr))",
+                  ? "repeat(3, minmax(0, 1fr))"
+                  : "repeat(6, minmax(0, 1fr))",
                 gap: "8px",
                 marginBottom: isMobile ? "12px" : "10px",
               }}

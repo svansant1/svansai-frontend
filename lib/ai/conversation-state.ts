@@ -123,9 +123,87 @@ function inferGoal(messages: ChatMessage[], responseMode: ResponseMode): string 
     return "Tutor the user by teaching the concept and checking understanding.";
   }
 
+  if (responseMode === "build") {
+    return "Help the user design, implement, or improve the project with concrete next steps.";
+  }
+
+  if (responseMode === "debug") {
+    return "Diagnose the issue, identify the likely cause, and give the smallest practical fix.";
+  }
+
   if (latest) return compact(latest);
 
   return "Answer the latest user turn helpfully.";
+}
+
+function inferTaskRoute(messages: ChatMessage[], responseMode: ResponseMode): ConversationState["taskRoute"] {
+  const joined = normalize(recentUserMessages(messages, 8).join(" "));
+
+  if (responseMode === "build") return "build";
+  if (responseMode === "debug") return "debug";
+
+  if (/\b(shield|unsafe|risk|protect|security|guardrail|phishing|malware|bypass|unauthorized)\b/.test(joined)) {
+    return "protect";
+  }
+
+  if (/\b(debug|error|bug|broken|not working|stack trace|log|fix)\b/.test(joined)) {
+    return "debug";
+  }
+
+  if (/\b(build|implement|update|feature|code|component|api|deploy|project|platform)\b/.test(joined)) {
+    return "build";
+  }
+
+  if (/\b(teach|tutor|learn|study|quiz|homework|explain|guide)\b/.test(joined) || responseMode === "guide" || responseMode === "tutor") {
+    return "learn";
+  }
+
+  if (/\b(file|image|pdf|screenshot|analyze|review|inspect)\b/.test(joined)) {
+    return "analyze";
+  }
+
+  return "conversation";
+}
+
+function modeBehavior(responseMode: ResponseMode): string {
+  switch (responseMode) {
+    case "direct":
+      return "Answer first, keep setup short, and only explain what is needed.";
+    case "guide":
+      return "Show the reasoning path and give the user a practical next move.";
+    case "tutor":
+      return "Teach the concept with a clue or checkpoint before giving away answers unless the user asks directly.";
+    case "build":
+      return "Think like a project helper: propose architecture, implementation steps, code-level changes, and verification.";
+    case "debug":
+      return "Think like a debugger: isolate symptoms, likely causes, checks, and the smallest fix.";
+    default:
+      return "Choose the response shape that best fits the user's latest turn.";
+  }
+}
+
+function providerStrategy(taskRoute: ConversationState["taskRoute"], responseMode: ResponseMode): string {
+  if (taskRoute === "debug") {
+    return "Prefer precise diagnosis and code/project reasoning. Use critique to reject vague troubleshooting.";
+  }
+
+  if (taskRoute === "build") {
+    return "Prefer implementation-focused reasoning. Connect ideas to files, modules, tests, and rollout steps.";
+  }
+
+  if (taskRoute === "learn" || responseMode === "tutor" || responseMode === "guide") {
+    return "Prefer clear teaching flow, continuity, and examples over generic definitions.";
+  }
+
+  if (taskRoute === "analyze") {
+    return "Use attached files, images, screenshots, and retrieved context as primary evidence.";
+  }
+
+  if (taskRoute === "protect") {
+    return "Route through Shield-style safety judgment before giving technical details.";
+  }
+
+  return "Prefer natural conversation, memory continuity, and low-repetition answers.";
 }
 
 function resolveShortFollowUp(
@@ -190,6 +268,7 @@ export function buildConversationState(params: {
   responseMode: ResponseMode;
 }): ConversationState {
   const previousUserMessage = lastUserBeforeLatest(params.messages);
+  const taskRoute = inferTaskRoute(params.messages, params.responseMode);
   const followUp = resolveShortFollowUp(
     params.latestUserMessage,
     previousUserMessage,
@@ -206,6 +285,9 @@ export function buildConversationState(params: {
     isShortFollowUp: followUp.isShortFollowUp,
     resolvedFollowUp: followUp.resolvedFollowUp,
     styleDirective: detectStyleDirective(params.messages),
+    taskRoute,
+    modeBehavior: modeBehavior(params.responseMode),
+    providerStrategy: providerStrategy(taskRoute, params.responseMode),
   };
 }
 
@@ -218,6 +300,9 @@ Conversation state:
 - Short follow-up: ${state.isShortFollowUp ? "yes" : "no"}
 - Resolved follow-up: ${state.resolvedFollowUp}
 - Style directive: ${state.styleDirective}
+- Task route: ${state.taskRoute}
+- Mode behavior: ${state.modeBehavior}
+- Provider strategy: ${state.providerStrategy}
 - User preferences: ${state.userPreferences.length ? state.userPreferences.join(" ") : "None detected."}
 - Avoid patterns: ${state.avoidPatterns.join(" ")}
 `.trim();

@@ -243,3 +243,28 @@ assert(
 );
 
 console.log("\nConversation quality regression prompts completed.");
+
+const longQuizHistory = [];
+for (let i = 1; i <= 25; i += 1) {
+  longQuizHistory.push({
+    role: "user",
+    content: `Question ${i}: Which class does 192.168.${i}.1 belong to? A Class A B Class B C Class C D Class D`,
+  });
+  longQuizHistory.push({
+    role: "assistant",
+    content: "Correct answer: C — Class C",
+  });
+}
+
+const recallLetters = await ask(
+  "Can you give me a list of all 25 questions with just the letter answer?",
+  longQuizHistory,
+);
+const recallCompact = recallLetters.replace(/\s+/g, " ").trim();
+console.log(`\nPROMPT: long conversation letter recall\nRESPONSE: ${recallCompact.slice(0, 500)}`);
+assert(
+  /^1\.\s*C\b[\s\S]*25\.\s*C\b/.test(recallLetters),
+  "Long conversation recall did not include all 25 letter answers.",
+);
+
+console.log("\nConversation recall regression prompts completed.");
