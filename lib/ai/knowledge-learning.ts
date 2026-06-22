@@ -282,6 +282,28 @@ function extractProjectLesson(question: string, answer: string): string | null {
   return `Project context learned: ${compactText(question, 520)} Answer pattern that helped: ${compactText(answer, 700)}`;
 }
 
+function extractReusableAnswerLesson(question: string, answer: string): string | null {
+  const combined = `${question}\n${answer}`;
+
+  if (
+    !/\b(correct answer|quiz|multiple choice|osi|switch|network|code|error|bug|fix|architecture|flow|build first|self-check|brain|memory|retrieval)\b/i.test(
+      combined,
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    /\b(i appreciate your feedback|let me know|feel free|it sounds like|specific topics or styles)\b/i.test(
+      answer,
+    )
+  ) {
+    return null;
+  }
+
+  return `Reusable answer pattern learned. User need: ${compactText(question, 650)} Helpful response: ${compactText(answer, 900)}`;
+}
+
 async function upsertLearnedKnowledge(params: {
   title: string;
   category: QuestionType;
@@ -360,12 +382,6 @@ export async function storeConversationLearning(params: {
 
   const lessons = [
     {
-      title: buildLearnedTitle("Conversation turn", question),
-      summary: `User asked or said: ${compactText(question, 900)}\n\nSVANSAI answered: ${compactText(answer, 1200)}`,
-      confidence: 0.62,
-      tags: [...baseTags, "turn-memory"],
-    },
-    {
       title: buildLearnedTitle("Preference", question),
       summary: extractPreferenceLesson(question),
       confidence: 0.78,
@@ -382,6 +398,12 @@ export async function storeConversationLearning(params: {
       summary: extractProjectLesson(question, answer),
       confidence: 0.74,
       tags: [...baseTags, "project-context"],
+    },
+    {
+      title: buildLearnedTitle("Reusable pattern", question),
+      summary: extractReusableAnswerLesson(question, answer),
+      confidence: 0.7,
+      tags: [...baseTags, "reusable-pattern"],
     },
   ].filter((lesson): lesson is {
     title: string;

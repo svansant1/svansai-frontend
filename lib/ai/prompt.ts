@@ -1,4 +1,9 @@
-import type { MemoryItem, QuestionType, RetrievalItem } from "@/lib/ai/types";
+import type {
+  ConversationStateSummary,
+  MemoryItem,
+  QuestionType,
+  RetrievalItem,
+} from "@/lib/ai/types";
 import type { ResponseStyle, FollowUpIntent, ConversationIntent } from "@/lib/ai/router";
 
 export function getTemperature(
@@ -206,6 +211,7 @@ export function buildUserPrompt(params: {
   conversationIntent: ConversationIntent;
   responseMode?: string;
   lastAssistantMessage: string;
+  conversationState?: ConversationStateSummary;
   memory: MemoryItem[];
   retrieval: RetrievalItem[];
   hasFile?: boolean;
@@ -258,6 +264,24 @@ Answer mode: Tutor.
   const selectedModeInstructions =
     modeInstructions[params.responseMode ?? "auto"] ?? modeInstructions.auto;
 
+  const conversationStateText = params.conversationState
+    ? `
+Conversation state before answering:
+- User goal: ${params.conversationState.userGoal}
+- Current topic: ${params.conversationState.currentTopic}
+- Unresolved need: ${params.conversationState.unresolvedNeed}
+- Short follow-up: ${params.conversationState.isShortFollowUp ? "yes" : "no"}
+- Resolved follow-up: ${params.conversationState.resolvedFollowUp}
+- Style directive: ${params.conversationState.styleDirective}
+- User preferences: ${
+        params.conversationState.userPreferences.length
+          ? params.conversationState.userPreferences.join(" ")
+          : "None detected."
+      }
+- Avoid patterns: ${params.conversationState.avoidPatterns.join(" ")}
+`.trim()
+    : "None";
+
   return `
 Latest user message:
 ${params.latestUserMessage}
@@ -282,6 +306,8 @@ ${params.responseMode ?? "auto"}
 
 Previous assistant response:
 ${params.lastAssistantMessage || "None"}
+
+${conversationStateText}
 
 File attached:
 ${params.hasFile ? "Yes" : "No"}
@@ -314,6 +340,10 @@ ${selectedModeInstructions}
 - Do not force a formal outline for simple casual chat.
 - In correction recovery, do not use "Corrected answer" when the original answer was already correct. Use "The answer still appears to be..." and explain.
 - If the user message is a short follow-up, interpret it using the previous assistant response.
+- If the conversation state says this is a short follow-up, answer the resolved follow-up directly instead of asking what the user means.
+- If the user asked for no bullets, do not use bullets or numbered lists unless the latest user explicitly requests a list.
+- If the user says the conversation feels repetitive, fake, or not up to par, give the actual product/engineering fix instead of reassurance.
+- If discussing SVANSAI competitiveness, be honest and practical rather than sounding like a product pitch.
 - If the follow-up means shorten, shorten the previous answer.
 - If the follow-up means expand, expand the previous answer.
 - If the follow-up means simplify, simplify the previous answer.

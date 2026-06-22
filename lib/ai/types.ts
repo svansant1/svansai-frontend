@@ -31,6 +31,17 @@ export type MemoryItem = {
 
 export type ResponseMode = "auto" | "direct" | "guide" | "tutor";
 
+export type ConversationStateSummary = {
+  currentTopic: string;
+  userGoal: string;
+  userPreferences: string[];
+  avoidPatterns: string[];
+  unresolvedNeed: string;
+  isShortFollowUp: boolean;
+  resolvedFollowUp: string;
+  styleDirective: "natural" | "no_bullets" | "direct" | "structured";
+};
+
 export type ChatContext = {
   messages: ChatMessage[];
   latestUserMessage: string;

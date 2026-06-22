@@ -63,6 +63,7 @@ export default function HomePage() {
   const [lastThought, setLastThought] = useState("Ready to help.");
 
   const [isMobile, setIsMobile] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -102,6 +103,7 @@ export default function HomePage() {
       const size = mobile ? 96 : 230;
 
       setIsMobile(mobile);
+      setViewportHeight(window.innerHeight);
       setMascotPosition((current) => clampMascotPosition(current, size));
     };
 
@@ -433,6 +435,7 @@ export default function HomePage() {
   };
 
   const robotSize = isMobile ? 96 : 230;
+  const isShortDesktop = !isMobile && viewportHeight > 0 && viewportHeight < 850;
 
   const RobotMascot = ({ size }: { size: number }) => (
     <div
@@ -771,7 +774,8 @@ export default function HomePage() {
       style={{
         background:
           "radial-gradient(circle at top, rgba(14,165,233,0.22), transparent 34%), radial-gradient(circle at bottom left, rgba(168,85,247,0.18), transparent 34%), linear-gradient(135deg, #020617 0%, #07111f 42%, #111827 100%)",
-        minHeight: "100vh",
+        height: "100dvh",
+        minHeight: "100dvh",
         width: "100%",
         maxWidth: "100vw",
         display: "flex",
@@ -779,7 +783,7 @@ export default function HomePage() {
         padding: 0,
         position: "relative",
         overflowX: "hidden",
-        overflowY: "visible",
+        overflowY: "hidden",
         color: "white",
         boxSizing: "border-box",
       }}
@@ -1217,12 +1221,15 @@ export default function HomePage() {
           maxWidth: "100%",
           padding: isMobile
             ? "18px 14px calc(176px + env(safe-area-inset-bottom))"
-            : "28px clamp(20px, 4vw, 56px) 24px",
+            : "20px clamp(20px, 4vw, 56px) 18px",
           boxSizing: "border-box",
           position: "relative",
           zIndex: 10,
-          overflowY: "visible",
+          overflowY: "hidden",
           overflowX: "hidden",
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         <AnimatePresence>
@@ -1581,8 +1588,9 @@ export default function HomePage() {
           style={{
             width: "100%",
             maxWidth: "min(1180px, calc(100vw - 32px))",
-            margin: isMobile ? "0 auto 10px" : "0 auto 14px",
-            minHeight: isMobile ? 138 : 218,
+            margin: isMobile ? "0 auto 10px" : "0 auto 10px",
+            minHeight: isMobile ? 138 : isShortDesktop ? 142 : 196,
+            flex: "0 0 auto",
             display: "flex",
             alignItems: "flex-start",
             justifyContent: "center",
@@ -1591,7 +1599,7 @@ export default function HomePage() {
             pointerEvents: "none",
           }}
         >
-          <RobotMascot size={isMobile ? 118 : 190} />
+          <RobotMascot size={isMobile ? 118 : isShortDesktop ? 138 : 190} />
         </motion.div>
 
         <motion.div
@@ -1601,13 +1609,18 @@ export default function HomePage() {
           style={{
             background:
               "linear-gradient(135deg, rgba(14,165,233,0.16), rgba(255,255,255,0.055) 45%, rgba(168,85,247,0.11))",
-            padding: isMobile ? "20px 16px 18px" : "34px 38px 30px",
+            padding: isMobile
+              ? "20px 16px 18px"
+              : isShortDesktop
+                ? "18px 30px 16px"
+                : "26px 34px 24px",
             borderRadius: isMobile ? "24px" : "30px",
             backdropFilter: "blur(32px)",
             border: "1px solid rgba(125,211,252,0.24)",
             width: "100%",
             maxWidth: "min(1180px, calc(100vw - 32px))",
             margin: isMobile ? "0 auto 14px" : "0 auto 16px",
+            flex: "0 0 auto",
             textAlign: "center",
             position: "relative",
             zIndex: 10,
@@ -1731,7 +1744,11 @@ export default function HomePage() {
 
           <h1
             style={{
-              fontSize: isMobile ? "2.2rem" : "clamp(3.1rem, 5.2vw, 4.8rem)",
+              fontSize: isMobile
+                ? "2.2rem"
+                : isShortDesktop
+                  ? "clamp(2.7rem, 4.6vw, 4rem)"
+                  : "clamp(3.1rem, 5.2vw, 4.8rem)",
               fontWeight: 950,
               margin: 0,
               lineHeight: 0.9,
@@ -1799,22 +1816,23 @@ export default function HomePage() {
           style={{
             background:
               "linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0.025))",
-            padding: isMobile ? "16px" : "34px",
+            padding: isMobile ? "16px" : "24px",
             borderRadius: isMobile ? "24px" : "34px",
             backdropFilter: "blur(42px)",
             border: "1px solid rgba(125,211,252,0.12)",
             width: "100%",
             maxWidth: "min(1180px, calc(100vw - 32px))",
             margin: isMobile ? "12px auto 0" : "12px auto 0",
-            minHeight: isMobile
-              ? "calc(100vh - 140px)"
-              : "clamp(780px, 88vh, 1040px)",
+            minHeight: 0,
             height: "auto",
+            flex: "1 1 0",
+            display: "flex",
+            flexDirection: "column",
             position: "relative",
             zIndex: 10,
             boxShadow:
               "0 24px 90px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.07)",
-            overflow: "visible",
+            overflow: "hidden",
             boxSizing: "border-box",
           }}
         >
@@ -1848,7 +1866,10 @@ export default function HomePage() {
               position: "relative",
               zIndex: 2,
               minWidth: 0,
-              height: "auto",
+              minHeight: 0,
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
             }}
           >
             <AIHelper

@@ -311,7 +311,9 @@ const CONTEXT_DEPENDENT_PATTERNS = [
   "dumb it down", "in plain english", "like i'm five", "eli5",
   "make it shorter", "make it simpler", "rephrase", "rephrase that",
   "word it differently", "say it better", "i don't understand",
-  "i dont understand", "what does that mean",
+  "i dont understand", "what does that mean", "why", "how", "are you sure",
+  "you sure", "what first", "what part", "real fix", "make it sharper",
+  "make it better",
 ];
 
 /**
@@ -320,6 +322,10 @@ const CONTEXT_DEPENDENT_PATTERNS = [
  */
 export function isContextDependentFollowUp(input: string): boolean {
   const q = input.toLowerCase().trim();
+
+  if (/^(why|how|are you sure|you sure|what first|what part|real fix)\??$/.test(q)) {
+    return true;
+  }
 
   // Short messages that match a known follow-up pattern
   if (q.length <= 60 && CONTEXT_DEPENDENT_PATTERNS.some((p) => q.includes(p))) {

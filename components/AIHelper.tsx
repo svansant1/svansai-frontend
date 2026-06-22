@@ -703,8 +703,8 @@ export default function AIHelper({
     <div
       style={{
         width: "100%",
-        height: "auto",
-        minHeight: isMobile ? "560px" : "720px",
+        height: "100%",
+        minHeight: 0,
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
@@ -747,14 +747,15 @@ export default function AIHelper({
         style={{
           width: "100%",
           flex: "1 1 auto",
-          minHeight: isMobile ? "300px" : "430px",
-          maxHeight: isMobile ? "58dvh" : "none",
-          overflowY: isMobile ? "auto" : "visible",
+          minHeight: 0,
+          maxHeight: "none",
+          overflowY: "auto",
           overflowX: "hidden",
           marginBottom: isMobile ? "14px" : "18px",
-          padding: isMobile ? "2px 4px 18px 0" : "4px 10px 4px 0",
+          padding: isMobile ? "2px 10px 18px 0" : "4px 14px 4px 0",
           borderRadius: "18px",
           scrollBehavior: "smooth",
+          scrollbarGutter: "stable",
           boxSizing: "border-box",
           WebkitOverflowScrolling: "touch",
         }}
@@ -1004,7 +1005,7 @@ export default function AIHelper({
                   ? "repeat(2, minmax(0, 1fr))"
                   : "repeat(4, minmax(0, 1fr))",
                 gap: "8px",
-                marginBottom: "12px",
+                marginBottom: isMobile ? "12px" : "10px",
               }}
             >
               {RESPONSE_MODES.map((mode) => {
@@ -1018,7 +1019,7 @@ export default function AIHelper({
                     aria-pressed={active}
                     onClick={() => setResponseMode(mode.id)}
                     style={{
-                      padding: isMobile ? "9px 8px" : "10px 12px",
+                      padding: isMobile ? "9px 8px" : "8px 12px",
                       borderRadius: "14px",
                       border: active
                         ? "1px solid rgba(56,189,248,0.58)"
@@ -1104,11 +1105,11 @@ export default function AIHelper({
               }
               style={{
                 width: "100%",
-                minHeight: isMobile ? "100px" : "130px",
+                minHeight: isMobile ? "100px" : "92px",
                 backgroundColor: "rgba(255, 255, 255, 0.04)",
                 border: "1px solid rgba(255, 255, 255, 0.14)",
                 borderRadius: "20px",
-                padding: isMobile ? "16px" : "22px",
+                padding: isMobile ? "16px" : "16px 18px",
                 color: "white",
                 fontSize: isMobile ? "0.95rem" : "1.05rem",
                 outline: "none",
@@ -1126,7 +1127,7 @@ export default function AIHelper({
             style={{
               display: "flex",
               gap: "10px",
-              marginTop: "14px",
+              marginTop: isMobile ? "14px" : "10px",
               alignItems: "center",
             }}
           >
@@ -1147,7 +1148,7 @@ export default function AIHelper({
                 disabled={loading}
                 title="Attach file"
                 style={{
-                  padding: "14px 18px",
+                  padding: isMobile ? "14px 18px" : "12px 16px",
                   borderRadius: "16px",
                   backgroundColor: attachedFile
                     ? "rgba(56,189,248,0.2)"
@@ -1173,7 +1174,7 @@ export default function AIHelper({
               disabled={loading}
               style={{
                 flex: 1,
-                padding: "14px",
+                padding: isMobile ? "14px" : "12px",
                 borderRadius: "16px",
                 backgroundColor: isPasswordMode
                   ? "rgba(56,189,248,0.85)"

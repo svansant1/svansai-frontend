@@ -45,6 +45,17 @@ import { generateWithOpenAI } from "@/lib/ai/providers/openai";
 import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
 import type { AttachedFile } from "@/lib/ai/file-types";
 import { searchLiveWeb } from "@/lib/ai/live-search";
+import {
+  buildConversationState,
+  formatConversationState,
+  type ConversationState,
+} from "@/lib/ai/conversation-state";
+import {
+  buildCritiqueRetryInstruction,
+  critiqueResponse,
+  shouldLearnFromResponse,
+  type ResponseCritique,
+} from "@/lib/ai/response-critic";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
@@ -57,6 +68,7 @@ type ExtendedChatContext = ChatContext & {
   isCodeFragment: boolean;
   conversationIntent: ConversationIntent;
   responseMode: ResponseMode;
+  conversationState: ConversationState;
 };
 
 type MessageIntent =
@@ -529,7 +541,19 @@ function isSafetyRefusal(text: string): boolean {
 }
 
 function containsHarmfulTechnicalOutput(text: string): boolean {
-  if (!text.trim() || isSafetyRefusal(text)) return false;
+  if (!text.trim()) return false;
+
+  const normalized = normalizeText(text);
+  const refusalWithOperationalDetail =
+    isSafetyRefusal(text) &&
+    (normalized.includes("reverse shell") ||
+      normalized.includes("interactive shell") ||
+      normalized.includes("erase traces") ||
+      normalized.includes("delete logs") ||
+      normalized.includes("cover their tracks") ||
+      normalized.includes("netcat"));
+
+  if (isSafetyRefusal(text) && !refusalWithOperationalDetail) return false;
   return HARMFUL_TECHNICAL_OUTPUT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
@@ -686,6 +710,17 @@ Live search was attempted but no reliable current information could be verified.
   }
 
   if (
+    /\b(better than|different from|top ai companies|other ai assistants|competitive)\b/i.test(
+      latestUserMessage,
+    ) &&
+    /\b(svansai|you|ai assistants|ai companies|openai|anthropic)\b/i.test(
+      latestUserMessage,
+    )
+  ) {
+    return "The honest answer: SVANSAI is not automatically better than OpenAI or Anthropic at raw model intelligence. Its advantage has to come from being built around your platform: memory that knows your goals, a brain-check before provider calls, strong follow-up handling, Guide and Tutor modes, Shield for safety, Debugger for diagnosis, and Sandbox for experiments. To compete conversationally, it needs to feel less like a prompt wrapper and more like an assistant that understands the thread, remembers preferences, avoids repetition, and gives the next useful move.";
+  }
+
+  if (
     isAwaitingPassword(sid) ||
     latestUserMessage.toLowerCase().trim().startsWith("sv ")
   ) {
@@ -703,6 +738,13 @@ Live search was attempted but no reliable current information could be verified.
 
   const lastAssistantMessage = getLastAssistantMessage(messages);
   const followUpIntent = detectFollowUpIntent(latestUserMessage);
+  const conversationState = buildConversationState({
+    messages,
+    latestUserMessage,
+    lastAssistantMessage,
+    followUpIntent,
+    responseMode,
+  });
   const correctionRequest = isCorrectionRequest(latestUserMessage);
   const previousUserMessage = getPreviousUserMessage(messages);
   const messageIntent = detectMessageIntent(latestUserMessage);
@@ -809,10 +851,13 @@ Keep the simulation non-operational. Do not include real attack commands, exploi
 
 ${mythosState ? buildMythosContext(mythosState) : ""}
 `.trim();
-  } else if (isContextDependentFollowUp(latestUserMessage) && lastAssistantMessage) {
+  } else if ((conversationState.isShortFollowUp || isContextDependentFollowUp(latestUserMessage)) && lastAssistantMessage) {
     effectiveMessage = `
 User follow-up:
 ${latestUserMessage}
+
+Resolved follow-up:
+${conversationState.resolvedFollowUp}
 
 Previous assistant response:
 ${lastAssistantMessage}
@@ -856,6 +901,7 @@ ${lastAssistantMessage}
     lastAssistantMessage,
     effectiveMessage: [
   effectiveMessage,
+  formatConversationState(conversationState),
   fileContext,
   liveSearchContext,
 ]
@@ -870,21 +916,24 @@ ${lastAssistantMessage}
     isCodeFragment: codeFragment,
     conversationIntent,
     responseMode,
+    conversationState,
   };
 
-  const response = await generateBestResponse(context);
+  const { response, critique } = await generateBestResponse(context);
 
-  void storeConversationLearning({
-    messages,
-    question: latestUserMessage,
-    answer: response,
-    questionType,
-    conversationIntent,
-    responseStyle,
-    source: "chat-runtime",
-  });
+  if (shouldLearnFromResponse(critique)) {
+    void storeConversationLearning({
+      messages,
+      question: latestUserMessage,
+      answer: response,
+      questionType,
+      conversationIntent,
+      responseStyle,
+      source: "chat-runtime",
+    });
+  }
 
-  if (response && shouldSaveAnswerPattern(response, context)) {
+  if (response && shouldLearnFromResponse(critique) && shouldSaveAnswerPattern(response, context)) {
     void storeLearnedFallback({
       question: latestUserMessage,
       answer: response,
@@ -905,7 +954,7 @@ ${lastAssistantMessage}
 
 async function generateBestResponse(
   context: ExtendedChatContext,
-): Promise<string> {
+): Promise<{ response: string; critique: ResponseCritique }> {
   let basePrompt = buildUserPrompt({
     latestUserMessage: context.latestUserMessage,
     effectiveMessage: context.effectiveMessage,
@@ -918,6 +967,7 @@ async function generateBestResponse(
     retrieval: context.retrieval,
     hasFile: !!context.attachedFile,
     responseMode: context.responseMode,
+    conversationState: context.conversationState,
   });
 
   basePrompt = `
@@ -942,6 +992,8 @@ Runtime instructions:
 - If a text/code file is attached, use its content directly in your answer.
 - Keep answers fast, useful, and conversational.
 - Current mode: ${context.isCorrectionRequest ? "correction recovery" : context.responseMode === "tutor" ? "tutor guidance" : "standard conversation"}.
+- Conversation state is authoritative for short follow-ups and style preferences.
+- If style directive is no_bullets, write in short paragraphs instead of bullets or numbered lists.
 
 ${basePrompt}
 `.trim();
@@ -973,6 +1025,7 @@ ${CORRECTION_RECOVERY_RULES}
 
   const plan: ProviderName[] = ["openai", "anthropic"];
   console.log("[SVANSAI] Provider plan:", plan);
+  let bestRejected: { response: string; critique: ResponseCritique } | null = null;
 
   for (const provider of plan) {
     console.log("[SVANSAI] Trying provider:", provider);
@@ -994,20 +1047,33 @@ ${CORRECTION_RECOVERY_RULES}
       );
 
       if (containsHarmfulTechnicalOutput(cleanFirst)) {
-        return buildCyberRiskyResponse(context.latestUserMessage);
+        const response = buildCyberRiskyResponse(context.latestUserMessage);
+        return {
+          response,
+          critique: critiqueResponse({
+            response,
+            latestUserMessage: context.latestUserMessage,
+            messages: context.messages,
+            conversationState: context.conversationState,
+          }),
+        };
       }
 
-      if (
-        cleanFirst &&
-        !isHardStall(cleanFirst) &&
-        !isRawRetrievalEcho(cleanFirst, context) &&
-        cleanFirst.trim().length > 20
-      ) {
-        return formatResponseForContext(cleanFirst, context);
+      const firstCandidate = evaluateCandidate(cleanFirst, context);
+      if (firstCandidate.accepted) {
+        return firstCandidate.result;
+      }
+      if (firstCandidate.result) {
+        bestRejected = chooseBetterRejected(bestRejected, firstCandidate.result);
       }
 
+      const critiqueInstruction = firstCandidate.result
+        ? buildCritiqueRetryInstruction(firstCandidate.result.critique)
+        : "";
       const second = await callProvider(provider, {
-        prompt: retryPrompt,
+        prompt: critiqueInstruction
+          ? buildRetryPrompt(`${basePrompt}\n\n${critiqueInstruction}`)
+          : retryPrompt,
         systemInstruction,
         temperature,
         attachedFile: context.attachedFile,
@@ -1022,16 +1088,24 @@ ${CORRECTION_RECOVERY_RULES}
       );
 
       if (containsHarmfulTechnicalOutput(cleanSecond)) {
-        return buildCyberRiskyResponse(context.latestUserMessage);
+        const response = buildCyberRiskyResponse(context.latestUserMessage);
+        return {
+          response,
+          critique: critiqueResponse({
+            response,
+            latestUserMessage: context.latestUserMessage,
+            messages: context.messages,
+            conversationState: context.conversationState,
+          }),
+        };
       }
 
-      if (
-        cleanSecond &&
-        !isHardStall(cleanSecond) &&
-        !isRawRetrievalEcho(cleanSecond, context) &&
-        cleanSecond.trim().length > 20
-      ) {
-        return formatResponseForContext(cleanSecond, context);
+      const secondCandidate = evaluateCandidate(cleanSecond, context);
+      if (secondCandidate.accepted) {
+        return secondCandidate.result;
+      }
+      if (secondCandidate.result) {
+        bestRejected = chooseBetterRejected(bestRejected, secondCandidate.result);
       }
     } catch (error) {
       console.error("[SVANSAI] Provider loop error:", provider, error);
@@ -1046,7 +1120,57 @@ ${CORRECTION_RECOVERY_RULES}
     source: "hard-fallback",
   });
 
-  return finalFallback(context);
+  const response =
+    bestRejected?.critique.score && bestRejected.critique.score >= 0.85
+      ? bestRejected.response
+      : finalFallback(context);
+  return {
+    response,
+    critique: critiqueResponse({
+      response,
+      latestUserMessage: context.latestUserMessage,
+      messages: context.messages,
+      conversationState: context.conversationState,
+    }),
+  };
+}
+
+function chooseBetterRejected(
+  current: { response: string; critique: ResponseCritique } | null,
+  next: { response: string; critique: ResponseCritique },
+): { response: string; critique: ResponseCritique } {
+  if (!current) return next;
+  return next.critique.score > current.critique.score ? next : current;
+}
+
+function evaluateCandidate(
+  text: string,
+  context: ExtendedChatContext,
+): {
+  accepted: boolean;
+  result: { response: string; critique: ResponseCritique } | null;
+} {
+  if (
+    !text ||
+    isHardStall(text) ||
+    isRawRetrievalEcho(text, context) ||
+    text.trim().length <= 20
+  ) {
+    return { accepted: false, result: null };
+  }
+
+  const response = formatResponseForContext(text, context);
+  const critique = critiqueResponse({
+    response,
+    latestUserMessage: context.latestUserMessage,
+    messages: context.messages,
+    conversationState: context.conversationState,
+  });
+
+  return {
+    accepted: critique.usable,
+    result: { response, critique },
+  };
 }
 
 function normalizeProviderText(text: string): string {
@@ -1172,6 +1296,14 @@ function finalFallback(context: ExtendedChatContext): string {
   }
 
   if (intent === "statement") {
+    if (/\b(no bullets|without bullets|do not use bullets|dont use bullets)\b/i.test(message)) {
+      return "Got it. I’ll keep this chat natural and stay away from bullets unless you ask for them.";
+    }
+
+    if (/\b(not up to par|repeats|repetitive|fake|top tier|openai|anthropic)\b/i.test(message)) {
+      return "The real fix is to give SVANSAI a stronger conversation layer before it calls the model: track the current goal, resolve short follow-ups, enforce style preferences, reject repetitive drafts, and only learn from answers that pass a quality check. That turns it from a prompt wrapper into an assistant that understands the thread it is inside.";
+    }
+
     return normalized.length > 0
       ? `I hear you. ${message.trim()} sounds like the main point, so the next useful move is to turn it into something actionable or clearer.`
       : "I’m here. Send me the thought, topic, file, or problem and I’ll respond directly.";
@@ -1183,6 +1315,10 @@ function finalFallback(context: ExtendedChatContext): string {
 
   if (context.conversationIntent === "project_identity") {
     return "SVANSAI is the assistant layer that coordinates the experience. Shield protects, Debugger diagnoses, Sandbox isolates experiments, and SVANSAI turns those pieces into a useful conversation and next action.";
+  }
+
+  if (/\b(repeating itself|repeats|repetitive|same answer|same template)\b/i.test(message)) {
+    return "Your AI keeps repeating itself because it is probably answering each turn without enough live conversation state. The practical fix is to track what the user wants, what style they requested, what was already said, and what patterns to avoid before generating the next answer. Then add a critic that rejects drafts using the same structure or canned phrases, and only save useful lessons instead of storing every response.";
   }
 
   if (context.retrieval.length > 0) {

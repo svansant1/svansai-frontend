@@ -56,6 +56,28 @@ async function ask(prompt, prior = []) {
   return String(data.text || data.response || data.answer || "");
 }
 
+async function askTurn(history, prompt, responseMode = "auto") {
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "chat-regression-quality",
+      responseMode,
+      messages: [...history, { role: "user", content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} for prompt: ${prompt}`);
+  }
+
+  const data = await response.json();
+  const text = String(data.text || data.response || data.answer || "");
+  history.push({ role: "user", content: prompt });
+  history.push({ role: "assistant", content: text });
+  return text;
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -160,3 +182,64 @@ assert(
 );
 
 console.log("\nChat regression prompts completed.");
+
+const qualityHistory = [];
+const noBulletsAck = await askTurn(
+  qualityHistory,
+  "For this chat, do not use bullets unless I ask. Talk like a person.",
+);
+console.log(`\nPROMPT: no-bullets preference\nRESPONSE: ${noBulletsAck.replace(/\s+/g, " ").slice(0, 300)}`);
+
+const noBulletsAnswer = await askTurn(
+  qualityHistory,
+  "Explain why my AI keeps repeating itself.",
+);
+const noBulletsCompact = noBulletsAnswer.replace(/\s+/g, " ").trim();
+console.log(`\nPROMPT: no-bullets follow-through\nRESPONSE: ${noBulletsCompact.slice(0, 500)}`);
+assert(
+  !/(^|\n)\s*(?:[-*•]|\d+[.)])\s+/.test(noBulletsAnswer),
+  "No-bullets preference was ignored.",
+);
+
+const followUpHistory = [];
+const firstBuild = await askTurn(
+  followUpHistory,
+  "I want SVANSAI to check its own brain before calling OpenAI. What part should I build first?",
+);
+console.log(`\nPROMPT: build-first setup\nRESPONSE: ${firstBuild.replace(/\s+/g, " ").slice(0, 500)}`);
+
+const whyAnswer = await askTurn(followUpHistory, "why");
+const whyCompact = whyAnswer.replace(/\s+/g, " ").trim();
+console.log(`\nPROMPT: short follow-up why\nRESPONSE: ${whyCompact.slice(0, 500)}`);
+assert(
+  !/what do you mean|could you clarify|specific topic|please elaborate/i.test(whyCompact),
+  "Short follow-up 'why' was treated as standalone instead of contextual.",
+);
+assert(
+  /because|reason|first|before|foundation|depends|lets|lets you|allows/i.test(whyCompact),
+  "Short follow-up 'why' did not explain the prior recommendation.",
+);
+
+const fakeHistory = [];
+const fakeSetup = await askTurn(
+  fakeHistory,
+  "I feel like the conversations still are not up to par.",
+);
+console.log(`\nPROMPT: conversation quality complaint\nRESPONSE: ${fakeSetup.replace(/\s+/g, " ").slice(0, 400)}`);
+
+const realFix = await askTurn(
+  fakeHistory,
+  "yeah exactly, it repeats and feels fake sometimes. so what is the real fix?",
+);
+const realFixCompact = realFix.replace(/\s+/g, " ").trim();
+console.log(`\nPROMPT: real fix for fake repetition\nRESPONSE: ${realFixCompact.slice(0, 600)}`);
+assert(
+  !/i appreciate your feedback|let me know|specific topics or styles|i'm here to adapt/i.test(realFixCompact),
+  "Repetition complaint got generic reassurance instead of a real fix.",
+);
+assert(
+  /state|memory|critic|follow-up|repetition|prompt|learning|score|gate/i.test(realFixCompact),
+  "Real-fix response did not name concrete engineering improvements.",
+);
+
+console.log("\nConversation quality regression prompts completed.");

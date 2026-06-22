@@ -11,11 +11,16 @@ body {
   background: #09090b;
   color: white;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
+  height: 100%;
 
   /* Space Grotesk for UI text — geometric, modern, matches the sci-fi brand */
   /* Space Mono for monospace/code — pairs naturally with the Space family    */
   font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+
+body {
+  min-height: 100dvh;
 }
 
 code,
