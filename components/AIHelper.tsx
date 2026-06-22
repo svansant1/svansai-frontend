@@ -723,7 +723,6 @@ export default function AIHelper({
       }}
     >
       <div
-        ref={chatScrollRef}
         style={{
           width: "100%",
           display: "flex",
@@ -756,6 +755,7 @@ export default function AIHelper({
       </div>
 
       <div
+        ref={chatScrollRef}
         style={{
           width: "100%",
           flex: "1 1 auto",
