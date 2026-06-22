@@ -85,11 +85,33 @@ export default function HomePage() {
   // ─── Ref tracks conversationId synchronously to prevent stale closures ────
   const activeConversationIdRef = useRef<string | null>(null);
   const creatingConversationRef = useRef(false);
+  const creatingConversationPromiseRef = useRef<Promise<string | null> | null>(
+    null,
+  );
 
   // Keep ref in sync with state
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
   }, [activeConversationId]);
+
+  useEffect(() => {
+    if ("scrollRestoration" in window.history) {
+      window.history.scrollRestoration = "manual";
+    }
+
+    window.scrollTo({ top: 0, left: 0 });
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0 });
+    });
+    const settled = window.setTimeout(() => {
+      window.scrollTo({ top: 0, left: 0 });
+    }, 300);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settled);
+    };
+  }, []);
 
   const aiUser: AiUser | null = useMemo(() => {
     if (user?.id && user?.email) return { id: user.id, email: user.email };
@@ -247,6 +269,47 @@ export default function HomePage() {
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
+    if (!user?.id) return;
+
+    const syncActiveConversation = () => {
+      const savedId =
+        activeConversationIdRef.current ||
+        localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+
+      if (!savedId) return;
+
+      void (async () => {
+        const [msgs, rows] = await Promise.all([
+          getConversationMessages(savedId),
+          listConversations(user.id),
+        ]);
+
+        if (msgs.length > 0) {
+          setActiveConversationId(savedId);
+          activeConversationIdRef.current = savedId;
+          setInitialMessages(msgs);
+        }
+
+        setConversations(rows);
+      })();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        syncActiveConversation();
+      }
+    };
+
+    window.addEventListener("focus", syncActiveConversation);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", syncActiveConversation);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
     localStorage.setItem(MASCOT_KEY, JSON.stringify(mascotPosition));
   }, [mascotPosition]);
 
@@ -348,23 +411,29 @@ export default function HomePage() {
       let conversationId = activeConversationIdRef.current;
 
       if (!conversationId) {
-        // Prevent concurrent creation
-        if (creatingConversationRef.current) return;
-        creatingConversationRef.current = true;
-
-        try {
-          const created = await createConversation(aiUser.id, firstUserMessage);
-          if (!created) return;
-          conversationId = created.id;
-          activeConversationIdRef.current = created.id;
-          setActiveConversationId(created.id);
-          localStorage.setItem(ACTIVE_CONVERSATION_KEY, created.id);
-        } finally {
-          creatingConversationRef.current = false;
+        if (!creatingConversationPromiseRef.current) {
+          creatingConversationRef.current = true;
+          creatingConversationPromiseRef.current = (async () => {
+            try {
+              const created = await createConversation(aiUser.id, firstUserMessage);
+              if (!created) return null;
+              activeConversationIdRef.current = created.id;
+              setActiveConversationId(created.id);
+              localStorage.setItem(ACTIVE_CONVERSATION_KEY, created.id);
+              return created.id;
+            } finally {
+              creatingConversationRef.current = false;
+              creatingConversationPromiseRef.current = null;
+            }
+          })();
         }
+
+        conversationId = await creatingConversationPromiseRef.current;
+        if (!conversationId) return;
       }
 
       await replaceConversationMessages(conversationId, messages);
+      setInitialMessages(messages);
 
       // Refresh sidebar list
       const rows = await listConversations(aiUser.id);
@@ -774,7 +843,6 @@ export default function HomePage() {
       style={{
         background:
           "radial-gradient(circle at top, rgba(14,165,233,0.22), transparent 34%), radial-gradient(circle at bottom left, rgba(168,85,247,0.18), transparent 34%), linear-gradient(135deg, #020617 0%, #07111f 42%, #111827 100%)",
-        height: "100dvh",
         minHeight: "100dvh",
         width: "100%",
         maxWidth: "100vw",
@@ -783,7 +851,7 @@ export default function HomePage() {
         padding: 0,
         position: "relative",
         overflowX: "hidden",
-        overflowY: "hidden",
+        overflowY: "visible",
         color: "white",
         boxSizing: "border-box",
       }}
@@ -1225,9 +1293,9 @@ export default function HomePage() {
           boxSizing: "border-box",
           position: "relative",
           zIndex: 10,
-          overflowY: "hidden",
+          overflowY: "visible",
           overflowX: "hidden",
-          height: "100%",
+          minHeight: "100dvh",
           display: "flex",
           flexDirection: "column",
         }}
@@ -1823,9 +1891,9 @@ export default function HomePage() {
             width: "100%",
             maxWidth: "min(1180px, calc(100vw - 32px))",
             margin: isMobile ? "12px auto 0" : "12px auto 0",
-            minHeight: 0,
-            height: "auto",
-            flex: "1 1 0",
+            minHeight: isMobile ? "calc(100dvh - 140px)" : 420,
+            height: isMobile ? "auto" : "clamp(520px, 58dvh, 760px)",
+            flex: "0 0 auto",
             display: "flex",
             flexDirection: "column",
             position: "relative",

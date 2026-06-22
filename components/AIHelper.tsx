@@ -358,7 +358,7 @@ export default function AIHelper({
   const [isPasswordMode, setIsPasswordMode] = useState(false);
   const [responseMode, setResponseMode] = useState<ResponseMode>("auto");
 
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const passwordInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -393,7 +393,7 @@ export default function AIHelper({
   }, []);
 
   useEffect(() => {
-    if (conversationId && initialMessages) {
+    if (conversationId && initialMessages !== undefined) {
       setMessages(
         initialMessages.length
           ? initialMessages
@@ -407,6 +407,8 @@ export default function AIHelper({
       return;
     }
 
+    if (conversationId) return;
+
     setMessages([
       {
         role: "assistant",
@@ -418,7 +420,13 @@ export default function AIHelper({
   }, [user, initialMessages, conversationId]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const chatScroll = chatScrollRef.current;
+    if (!chatScroll) return;
+
+    chatScroll.scrollTo({
+      top: chatScroll.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages, loading]);
 
   useEffect(() => {
@@ -567,6 +575,7 @@ export default function AIHelper({
     const nextMessages = [...messages, userMessage];
 
     setMessages(nextMessages);
+    onMessagesChangeRef.current?.(nextMessages);
     setInput("");
 
     const fileToSend = attachedFile;
@@ -712,6 +721,7 @@ export default function AIHelper({
       }}
     >
       <div
+        ref={chatScrollRef}
         style={{
           width: "100%",
           display: "flex",
@@ -892,7 +902,7 @@ export default function AIHelper({
           </div>
         )}
 
-        <div ref={chatEndRef} />
+        <div />
       </div>
 
       <div
