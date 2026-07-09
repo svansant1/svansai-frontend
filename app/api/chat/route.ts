@@ -6,6 +6,7 @@ import { verifyOwnerRequest, verifyUserRequest } from "@/lib/auth/server-owner";
 import { loadWritingProfile } from "@/lib/personalization/writing-profile";
 import { loadUserMemories } from "@/lib/personalization/structured-memory";
 import { orchestrateChat } from "@/lib/platform/orchestrator";
+import { createRequestId } from "@/lib/platform/telemetry";
 
 const MAX_REQUEST_BYTES = 55 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -21,6 +22,7 @@ const SUPPORTED_FILE_TYPES = new Set([
 ]);
 
 export async function POST(req: Request) {
+  const requestId = req.headers.get("x-svansai-request-id") || createRequestId();
   try {
     if (!consumeRateLimit(clientKey(req))) {
       return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
@@ -110,19 +112,21 @@ export async function POST(req: Request) {
       isVerifiedOwner: ownerAuth.authorized,
       writingProfile,
       userMemories,
+      userId: userAuth.authenticated ? userAuth.userId : null,
+      requestId,
     });
 
     return NextResponse.json(
       { text: result.text, orchestration: result },
-      { headers: { "Cache-Control": "no-store" } },
+      { headers: { "Cache-Control": "no-store", "x-svansai-request-id": result.requestId } },
     );
   } catch (error) {
-    console.error("CHAT_ROUTE_ERROR:", error);
+    console.error("CHAT_ROUTE_ERROR:", requestId, error);
     return NextResponse.json(
       {
         text: "Something went wrong while generating that response. Please send it again.",
       },
-      { status: 500 }
+      { status: 500, headers: { "x-svansai-request-id": requestId } }
     );
   }
 }

@@ -47,3 +47,37 @@ create policy "Users control their memories"
 on public.user_memories for all
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
+
+create table if not exists public.conversation_analytics (
+  id uuid primary key default gen_random_uuid(),
+  request_id text not null,
+  session_id text,
+  user_id uuid references auth.users(id) on delete set null,
+  route text not null,
+  modules jsonb not null default '[]'::jsonb,
+  module_reasons jsonb not null default '[]'::jsonb,
+  capabilities jsonb not null default '[]'::jsonb,
+  response_mode text not null,
+  provider_selected text,
+  provider_plan jsonb not null default '[]'::jsonb,
+  latency_ms integer not null default 0,
+  retry_count integer not null default 0,
+  quality_score numeric,
+  quality_reasons jsonb not null default '[]'::jsonb,
+  files_used integer not null default 0,
+  memory_used integer not null default 0,
+  research_used boolean not null default false,
+  fallback_used boolean not null default false,
+  failure_reason text,
+  prompt_version text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists conversation_analytics_request_idx on public.conversation_analytics(request_id);
+create index if not exists conversation_analytics_user_created_idx on public.conversation_analytics(user_id, created_at desc);
+alter table public.conversation_analytics add column if not exists prompt_version text;
+alter table public.conversation_analytics enable row level security;
+
+drop policy if exists "Users can read their conversation analytics" on public.conversation_analytics;
+create policy "Users can read their conversation analytics"
+on public.conversation_analytics for select using (auth.uid() = user_id);

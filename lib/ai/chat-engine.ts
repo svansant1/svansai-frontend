@@ -67,6 +67,7 @@ import {
   formatUserMemories,
   type UserMemory,
 } from "@/lib/personalization/structured-memory";
+import { applyCritique, type RuntimeTelemetry } from "@/lib/platform/telemetry";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
@@ -813,6 +814,15 @@ function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {
     return ["openai", "anthropic", "gemini"];
   }
 
+  const shortLowRiskQuestion =
+    context.latestUserMessage.length < 180 &&
+    context.responseMode === "auto" &&
+    context.conversationState.taskRoute === "conversation" &&
+    context.questionType === "general";
+  if (shortLowRiskQuestion) {
+    return ["gemini", "openai", "anthropic"];
+  }
+
   if (context.responseMode === "debug" || context.conversationState.taskRoute === "debug") {
     return ["openai", "anthropic", "gemini"];
   }
@@ -848,6 +858,7 @@ export async function generateChatResponse(
   isVerifiedOwner = false,
   writingProfile?: WritingProfile | null,
   userMemories: UserMemory[] = [],
+  runtimeTelemetry?: RuntimeTelemetry,
 ): Promise<string> {
   const fullMessages = sanitizeMessages(rawMessages, 250);
   const messages = fullMessages.slice(-20);
@@ -1153,7 +1164,8 @@ ${lastAssistantMessage}
     userMemories,
   };
 
-  const { response, critique } = await generateBestResponse(context);
+  const { response, critique } = await generateBestResponse(context, runtimeTelemetry);
+  if (runtimeTelemetry) applyCritique(runtimeTelemetry, critique);
 
   if (shouldLearnFromResponse(critique)) {
     void storeConversationLearning({
@@ -1188,6 +1200,7 @@ ${lastAssistantMessage}
 
 async function generateBestResponse(
   context: ExtendedChatContext,
+  runtimeTelemetry?: RuntimeTelemetry,
 ): Promise<{ response: string; critique: ResponseCritique }> {
   let basePrompt = buildUserPrompt({
     latestUserMessage: context.latestUserMessage,
@@ -1267,6 +1280,7 @@ ${CORRECTION_RECOVERY_RULES}
   );
 
   const plan = buildProviderPlan(context);
+  if (runtimeTelemetry) runtimeTelemetry.providerPlan = plan;
   console.log("[SVANS-AI] Provider plan:", plan);
   let bestRejected: { response: string; critique: ResponseCritique } | null = null;
 
@@ -1291,19 +1305,29 @@ ${CORRECTION_RECOVERY_RULES}
 
       if (containsHarmfulTechnicalOutput(cleanFirst)) {
         const response = buildCyberRiskyResponse(context.latestUserMessage);
+        const critique = critiqueResponse({
+          response,
+          latestUserMessage: context.latestUserMessage,
+          messages: context.messages,
+          conversationState: context.conversationState,
+        });
+        if (runtimeTelemetry) {
+          runtimeTelemetry.providerSelected = "local";
+          runtimeTelemetry.fallbackUsed = true;
+          applyCritique(runtimeTelemetry, critique);
+        }
         return {
           response,
-          critique: critiqueResponse({
-            response,
-            latestUserMessage: context.latestUserMessage,
-            messages: context.messages,
-            conversationState: context.conversationState,
-          }),
+          critique,
         };
       }
 
       const firstCandidate = evaluateCandidate(cleanFirst, context);
       if (firstCandidate.accepted) {
+        if (runtimeTelemetry) {
+          runtimeTelemetry.providerSelected = provider;
+          applyCritique(runtimeTelemetry, firstCandidate.result.critique);
+        }
         return firstCandidate.result;
       }
       if (firstCandidate.result) {
@@ -1313,6 +1337,7 @@ ${CORRECTION_RECOVERY_RULES}
       const critiqueInstruction = firstCandidate.result
         ? buildCritiqueRetryInstruction(firstCandidate.result.critique)
         : "";
+      if (runtimeTelemetry) runtimeTelemetry.retryCount += 1;
       const second = await callProvider(provider, {
         prompt: critiqueInstruction
           ? buildRetryPrompt(`${basePrompt}\n\n${critiqueInstruction}`)
@@ -1332,19 +1357,29 @@ ${CORRECTION_RECOVERY_RULES}
 
       if (containsHarmfulTechnicalOutput(cleanSecond)) {
         const response = buildCyberRiskyResponse(context.latestUserMessage);
+        const critique = critiqueResponse({
+          response,
+          latestUserMessage: context.latestUserMessage,
+          messages: context.messages,
+          conversationState: context.conversationState,
+        });
+        if (runtimeTelemetry) {
+          runtimeTelemetry.providerSelected = "local";
+          runtimeTelemetry.fallbackUsed = true;
+          applyCritique(runtimeTelemetry, critique);
+        }
         return {
           response,
-          critique: critiqueResponse({
-            response,
-            latestUserMessage: context.latestUserMessage,
-            messages: context.messages,
-            conversationState: context.conversationState,
-          }),
+          critique,
         };
       }
 
       const secondCandidate = evaluateCandidate(cleanSecond, context);
       if (secondCandidate.accepted) {
+        if (runtimeTelemetry) {
+          runtimeTelemetry.providerSelected = provider;
+          applyCritique(runtimeTelemetry, secondCandidate.result.critique);
+        }
         return secondCandidate.result;
       }
       if (secondCandidate.result) {
@@ -1352,6 +1387,12 @@ ${CORRECTION_RECOVERY_RULES}
       }
     } catch (error) {
       console.error("[SVANS-AI] Provider loop error:", provider, error);
+      if (runtimeTelemetry) {
+        runtimeTelemetry.providerFailures.push({
+          provider,
+          reason: error instanceof Error ? error.message : "unknown provider error",
+        });
+      }
     }
   }
 
@@ -1367,14 +1408,20 @@ ${CORRECTION_RECOVERY_RULES}
     bestRejected?.critique.score && bestRejected.critique.score >= 0.85
       ? bestRejected.response
       : finalFallback(context);
+  const critique = critiqueResponse({
+    response,
+    latestUserMessage: context.latestUserMessage,
+    messages: context.messages,
+    conversationState: context.conversationState,
+  });
+  if (runtimeTelemetry) {
+    runtimeTelemetry.providerSelected = bestRejected ? "local" : "local";
+    runtimeTelemetry.fallbackUsed = true;
+    applyCritique(runtimeTelemetry, critique);
+  }
   return {
     response,
-    critique: critiqueResponse({
-      response,
-      latestUserMessage: context.latestUserMessage,
-      messages: context.messages,
-      conversationState: context.conversationState,
-    }),
+    critique,
   };
 }
 

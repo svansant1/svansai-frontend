@@ -3,6 +3,13 @@ import type { AttachedFile } from "@/lib/ai/file-types";
 import type { ChatMessage, ResponseMode } from "@/lib/ai/types";
 import type { WritingProfile } from "@/lib/personalization/writing-profile";
 import type { UserMemory } from "@/lib/personalization/structured-memory";
+import { selectModules, type ModuleDecision } from "@/lib/platform/modules";
+import {
+  createRequestId,
+  createRuntimeTelemetry,
+  logConversationAnalytics,
+  type RuntimeTelemetry,
+} from "@/lib/platform/telemetry";
 
 export type PlatformModule = "svans-ai" | "shield" | "debugger" | "sandbox";
 export type TaskRoute = "conversation" | "learn" | "write" | "analyze" | "build" | "debug" | "protect";
@@ -19,11 +26,26 @@ export type PlatformCapability =
 
 export type OrchestrationResult = {
   text: string;
+  requestId: string;
   route: TaskRoute;
   coordinator: "svans-ai";
   recommendedModules: PlatformModule[];
+  moduleDecisions: ModuleDecision[];
   responseMode: ResponseMode;
   capabilities: PlatformCapability[];
+  analytics: {
+    latencyMs: number;
+    providerSelected?: string;
+    providerPlan: string[];
+    retryCount: number;
+    qualityScore?: number;
+    qualityReasons: string[];
+    filesUsed: number;
+    memoryUsed: number;
+    researchUsed: boolean;
+    fallbackUsed: boolean;
+    failureReason?: string;
+  };
 };
 
 function latestUserMessage(messages: ChatMessage[]): string {
@@ -71,7 +93,12 @@ export async function orchestrateChat(params: {
   isVerifiedOwner: boolean;
   writingProfile?: WritingProfile | null;
   userMemories?: UserMemory[];
+  userId?: string | null;
+  requestId?: string;
 }): Promise<OrchestrationResult> {
+  const startedAt = Date.now();
+  const requestId = params.requestId ?? createRequestId();
+  const runtimeTelemetry: RuntimeTelemetry = createRuntimeTelemetry(requestId);
   const latestMessage = latestUserMessage(params.messages);
   const files = params.attachedFiles ?? [];
   const route = chooseRoute(
@@ -79,6 +106,16 @@ export async function orchestrateChat(params: {
     params.responseMode,
     Boolean(params.attachedFiles?.length),
   );
+  const capabilities = capabilitiesForRequest(latestMessage, files);
+  const moduleDecisions = selectModules({
+    latestMessage,
+    messages: params.messages,
+    attachedFiles: files,
+    responseMode: params.responseMode,
+    route,
+    capabilities,
+  });
+  const recommendedModules = moduleDecisions.map((item) => item.module);
   const text = await generateChatResponse(
     params.messages,
     params.attachedFiles,
@@ -87,14 +124,54 @@ export async function orchestrateChat(params: {
     params.isVerifiedOwner,
     params.writingProfile,
     params.userMemories,
+    runtimeTelemetry,
   );
+  const latencyMs = Date.now() - startedAt;
+  const analytics = {
+    latencyMs,
+    providerSelected: runtimeTelemetry.providerSelected,
+    providerPlan: runtimeTelemetry.providerPlan,
+    retryCount: runtimeTelemetry.retryCount,
+    qualityScore: runtimeTelemetry.qualityScore,
+    qualityReasons: runtimeTelemetry.qualityReasons,
+    filesUsed: files.length,
+    memoryUsed: params.userMemories?.length ?? 0,
+    researchUsed: capabilities.includes("web_research"),
+    fallbackUsed: runtimeTelemetry.fallbackUsed,
+    failureReason: runtimeTelemetry.providerFailures[0]?.reason,
+  };
+
+  void logConversationAnalytics({
+    requestId,
+    sessionId: params.sessionId ?? null,
+    userId: params.userId ?? null,
+    route,
+    modules: recommendedModules,
+    moduleReasons: moduleDecisions.map((item) => `${item.module}: ${item.reason}`),
+    capabilities,
+    responseMode: params.responseMode,
+    providerSelected: analytics.providerSelected,
+    providerPlan: analytics.providerPlan,
+    latencyMs,
+    retryCount: analytics.retryCount,
+    qualityScore: analytics.qualityScore,
+    qualityReasons: analytics.qualityReasons,
+    filesUsed: analytics.filesUsed,
+    memoryUsed: analytics.memoryUsed,
+    researchUsed: analytics.researchUsed,
+    fallbackUsed: analytics.fallbackUsed,
+    failureReason: analytics.failureReason,
+  });
 
   return {
     text,
+    requestId,
     route,
     coordinator: "svans-ai",
-    recommendedModules: modulesForRoute(route),
+    recommendedModules,
+    moduleDecisions,
     responseMode: params.responseMode,
-    capabilities: capabilitiesForRequest(latestMessage, files),
+    capabilities,
+    analytics,
   };
 }

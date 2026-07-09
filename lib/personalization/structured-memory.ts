@@ -8,6 +8,8 @@ export type UserMemory = {
   source: "user" | "approved_feedback" | "system_suggestion";
   confirmed: boolean;
   createdAt: string;
+  updatedAt?: string;
+  relevanceScore?: number;
 };
 
 function serverClient() {
@@ -22,20 +24,43 @@ export async function loadUserMemories(userId: string): Promise<UserMemory[]> {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from("user_memories")
-    .select("id,category,summary,source,confirmed,created_at")
+    .select("id,category,summary,source,confirmed,created_at,updated_at")
     .eq("user_id", userId)
     .eq("confirmed", true)
     .order("updated_at", { ascending: false })
-    .limit(30);
+    .limit(60);
   if (error || !data) return [];
-  return data.map((row) => ({
-    id: row.id,
-    category: row.category,
-    summary: row.summary,
-    source: row.source,
-    confirmed: row.confirmed,
-    createdAt: row.created_at,
-  }));
+  return data
+    .map((row) => {
+      const memory = {
+        id: row.id,
+        category: row.category,
+        summary: row.summary,
+        source: row.source,
+        confirmed: row.confirmed,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+      return { ...memory, relevanceScore: rankMemory(memory) };
+    })
+    .sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0))
+    .slice(0, 30);
+}
+
+function rankMemory(memory: Pick<UserMemory, "summary" | "source" | "confirmed" | "createdAt" | "updatedAt" | "category">): number {
+  const updated = new Date(memory.updatedAt ?? memory.createdAt).getTime();
+  const ageDays = Number.isFinite(updated) ? Math.max(0, (Date.now() - updated) / 86_400_000) : 365;
+  const recency = Math.max(0, 1 - ageDays / 120);
+  const approval = memory.confirmed ? 1 : 0.25;
+  const sourceWeight = memory.source === "user" ? 1 : memory.source === "approved_feedback" ? 0.8 : 0.55;
+  const importanceSignals = /\b(always|never|prefer|important|remember|project|voice|style|goal|deadline|class|course)\b/i.test(memory.summary)
+    ? 1
+    : 0.45;
+  const categoryWeight = memory.category === "project_context" || memory.category === "writing_preference" ? 0.85 : 0.65;
+
+  return Number(
+    (recency * 0.3 + approval * 0.25 + sourceWeight * 0.15 + importanceSignals * 0.2 + categoryWeight * 0.1).toFixed(4),
+  );
 }
 
 export async function addUserMemory(
@@ -69,6 +94,6 @@ export function formatUserMemories(memories: UserMemory[]): string {
   if (!memories.length) return "No confirmed persistent user memories are loaded.";
   return `Confirmed user-controlled memories:\n${memories
     .slice(0, 20)
-    .map((memory) => `- [${memory.category}] ${memory.summary}`)
+    .map((memory) => `- [${memory.category}; relevance ${memory.relevanceScore ?? "n/a"}] ${memory.summary}`)
     .join("\n")}\nUse these for personalization only. They are not factual evidence about the outside world.`;
 }

@@ -215,17 +215,22 @@ function renderMarkdownTextBlock(text: string, blockKey: string) {
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
 
-    const value = paragraph.join(" ").trim();
+    const lines = paragraph.map((line) => line.trim()).filter(Boolean);
     paragraph = [];
 
-    if (!value) return;
+    if (!lines.length) return;
 
     elements.push(
       <p
         key={`${blockKey}-p-${elements.length}`}
         style={{ margin: "0 0 12px" }}
       >
-        {renderInlineMarkdown(value)}
+        {lines.map((line, index) => (
+          <span key={`${blockKey}-p-line-${elements.length}-${index}`}>
+            {renderInlineMarkdown(line)}
+            {index < lines.length - 1 && <br />}
+          </span>
+        ))}
       </p>,
     );
   };
@@ -415,6 +420,7 @@ export default function AIHelper({
   const [totalViews, setTotalViews] = useState(0);
   const [isPasswordMode, setIsPasswordMode] = useState(false);
   const [responseMode, setResponseMode] = useState<ResponseMode>("auto");
+  const [showAdvancedModes, setShowAdvancedModes] = useState(false);
   const [showVoiceProfile, setShowVoiceProfile] = useState(false);
   const [voiceContext, setVoiceContext] = useState<WritingContext>("general");
   const [voiceSample, setVoiceSample] = useState("");
@@ -1277,12 +1283,14 @@ export default function AIHelper({
                 display: "grid",
                 gridTemplateColumns: isMobile
                   ? "repeat(3, minmax(0, 1fr))"
-                  : "repeat(6, minmax(0, 1fr))",
+                  : showAdvancedModes
+                    ? "repeat(6, minmax(0, 1fr))"
+                    : "minmax(0, 1fr) auto",
                 gap: "8px",
                 marginBottom: isMobile ? "12px" : "10px",
               }}
             >
-              {RESPONSE_MODES.map((mode) => {
+              {RESPONSE_MODES.filter((mode) => showAdvancedModes || mode.id === "auto").map((mode) => {
                 const active = responseMode === mode.id;
 
                 return (
@@ -1317,6 +1325,24 @@ export default function AIHelper({
                   </button>
                 );
               })}
+              {!showAdvancedModes && (
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedModes(true)}
+                  style={{
+                    padding: isMobile ? "9px 8px" : "8px 12px",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(255,255,255,0.045)",
+                    color: "rgba(255,255,255,0.72)",
+                    cursor: "pointer",
+                    fontSize: isMobile ? "0.78rem" : "0.84rem",
+                    fontWeight: 850,
+                  }}
+                >
+                  Advanced modes
+                </button>
+              )}
             </div>
           )}
 
