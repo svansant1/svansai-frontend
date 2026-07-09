@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { verifyOwnerRequest } from "@/lib/auth/server-owner";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,13 +9,17 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
-    const { instruction, userId } = (await req.json()) as {
+    const { instruction } = (await req.json()) as {
       instruction: string;
-      userId: string;
     };
 
-    if (userId !== process.env.OWNER_USER_ID) {
+    const auth = await verifyOwnerRequest(req);
+    if (!auth.authorized) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!instruction?.trim() || instruction.length > 4000) {
+      return NextResponse.json({ error: "Invalid instruction" }, { status: 400 });
     }
 
     await supabase.from("sv_instructions").insert({

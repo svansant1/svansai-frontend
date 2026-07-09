@@ -18,6 +18,10 @@ export type FileUnderstandingResult =
       extractedText: string;
     }
   | {
+      kind: "data";
+      extractedText: string;
+    }
+  | {
       kind: "unsupported";
       error: string;
     };

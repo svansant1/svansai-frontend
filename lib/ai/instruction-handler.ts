@@ -138,7 +138,10 @@ async function storeInstruction(text: string): Promise<void> {
 // ─── Read a source file from disk ─────────────────────────────────────────────
 function readSourceFile(filePath: string): string | null {
   try {
-    return fs.readFileSync(path.join(process.cwd(), filePath), "utf-8");
+    return fs.readFileSync(
+      path.join(/* turbopackIgnore: true */ process.cwd(), filePath),
+      "utf-8",
+    );
   } catch {
     return null;
   }

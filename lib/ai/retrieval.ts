@@ -14,10 +14,10 @@ type KnowledgeRow = {
 const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
   {
     id: "sv-architecture",
-    title: "SVANSAI Architecture",
+    title: "SVANS-AI Architecture",
     source: "system",
     snippet:
-      "SVANSAI uses a chat engine, routing logic, memory, retrieval, response cleanup, question detection, self-analysis, self-monitoring, self-improvement, and provider-based AI responses.",
+      "SVANS-AI uses a chat engine, routing logic, memory, retrieval, response cleanup, question detection, self-analysis, self-monitoring, self-improvement, and provider-based AI responses.",
     score: 0.92,
     tags: ["system", "architecture", "chat-engine", "memory", "retrieval"],
   },
@@ -35,7 +35,7 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "AI Providers",
     source: "system",
     snippet:
-      "SVANSAI can use Gemini, OpenAI, and Anthropic providers. Routing can prioritize different models depending on coding, learning, tech support, business, or general questions.",
+      "SVANS-AI can use Gemini, OpenAI, and Anthropic providers. Routing can prioritize different models depending on coding, learning, tech support, business, or general questions.",
     score: 0.93,
     tags: ["providers", "gemini", "openai", "anthropic", "routing"],
   },
@@ -44,7 +44,7 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "Self Improvement",
     source: "system",
     snippet:
-      "SVANSAI logs weak responses, analyzes failure patterns, creates improvement candidates, and can deploy approved upgrades through owner commands.",
+      "SVANS-AI logs weak responses, analyzes failure patterns, creates improvement candidates, and can deploy approved upgrades through owner commands.",
     score: 0.94,
     tags: ["self-analysis", "self-monitor", "self-improve", "upgrade"],
   },
@@ -53,7 +53,7 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "Chat Persistence",
     source: "system",
     snippet:
-      "SVANSAI stores conversations and conversation_messages in Supabase. The active chat should persist through refresh and saved chats should remain available in the sidebar.",
+      "SVANS-AI stores conversations and conversation_messages in Supabase. The active chat should persist through refresh and saved chats should remain available in the sidebar.",
     score: 0.9,
     tags: ["chat", "history", "sidebar", "supabase", "conversations"],
   },
@@ -62,7 +62,7 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "Owner Commands",
     source: "system",
     snippet:
-      "SVANSAI supports owner commands like sv unlock, sv lock, sv analyze, sv improve, sv show candidates, sv deploy, and sv instruct for guided self-improvement.",
+      "SVANS-AI supports owner commands like sv unlock, sv lock, sv analyze, sv improve, sv show candidates, sv deploy, and sv instruct for guided self-improvement.",
     score: 0.9,
     tags: ["owner", "sv unlock", "sv lock", "sv analyze", "sv instruct"],
   },
@@ -71,7 +71,7 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "Shield Module",
     source: "system",
     snippet:
-      "Shield is SVANSAI's protection layer. It should detect risky prompts, enforce safe behavior, protect user data, and guide cybersecurity requests toward defensive education.",
+      "Shield is SVANS-AI's protection layer. It should detect risky prompts, enforce safe behavior, protect user data, and guide cybersecurity requests toward defensive education.",
     score: 0.92,
     tags: ["shield", "safety", "security", "protection", "cybersecurity"],
   },
@@ -80,7 +80,7 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "Debugger Module",
     source: "system",
     snippet:
-      "Debugger is SVANSAI's diagnosis layer. It should inspect errors, trace failures, explain likely causes, and suggest the smallest practical fix.",
+      "Debugger is SVANS-AI's diagnosis layer. It should inspect errors, trace failures, explain likely causes, and suggest the smallest practical fix.",
     score: 0.92,
     tags: ["debugger", "debugging", "errors", "diagnosis", "fixes"],
   },
@@ -89,18 +89,18 @@ const SYSTEM_KNOWLEDGE: RetrievalItem[] = [
     title: "Sandbox Module",
     source: "system",
     snippet:
-      "Sandbox is SVANSAI's isolated experiment layer. It should support safe simulations, prompt tests, and code-like reasoning without treating experiments as production actions.",
+      "Sandbox is SVANS-AI's isolated experiment layer. It should support safe simulations, prompt tests, and code-like reasoning without treating experiments as production actions.",
     score: 0.92,
     tags: ["sandbox", "simulation", "testing", "experiments", "isolation"],
   },
   {
     id: "sv-module-collaboration",
-    title: "SVANSAI Module Collaboration",
+    title: "SVANS-AI Module Collaboration",
     source: "system",
     snippet:
-      "Sandbox runs isolated experiments, Debugger diagnoses failures, Shield enforces safety and risk boundaries, and SVANSAI coordinates the assistant experience across them.",
+      "Sandbox runs isolated experiments, Debugger diagnoses failures, Shield enforces safety and risk boundaries, and SVANS-AI coordinates the assistant experience across them.",
     score: 0.94,
-    tags: ["sandbox", "debugger", "shield", "svansai", "modules"],
+    tags: ["sandbox", "debugger", "shield", "SVANS-AI", "modules"],
   },
 ];
 
@@ -149,7 +149,7 @@ function boostSelfKnowledge(query: string, item: RetrievalItem): number {
     "fallback",
     "why did you fail",
     "why fallback",
-    "svansai",
+    "SVANS-AI",
     "architecture",
     "chat engine",
     "memory",

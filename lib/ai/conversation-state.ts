@@ -112,7 +112,7 @@ function inferGoal(messages: ChatMessage[], responseMode: ResponseMode): string 
   const joined = normalize(recentUserMessages(messages, 8).join(" "));
 
   if (joined.includes("top tier") || joined.includes("openai") || joined.includes("anthropic")) {
-    return "Upgrade SVANSAI toward top-tier conversational quality.";
+    return "Upgrade SVANS-AI toward top-tier conversational quality.";
   }
 
   if (joined.includes("guide") || responseMode === "guide") {
@@ -165,12 +165,28 @@ function inferTaskRoute(messages: ChatMessage[], responseMode: ResponseMode): Co
   return "conversation";
 }
 
-function modeBehavior(responseMode: ResponseMode): string {
+function requestsDirectAnswer(message: string): boolean {
+  return /\b(just (give me|tell me|show me)|direct answer|answer directly|give me the answer|tell me the answer|correct answer|answer only|no hints|skip the explanation)\b/i.test(
+    message,
+  );
+}
+
+function modeBehavior(
+  responseMode: ResponseMode,
+  taskRoute: ConversationState["taskRoute"],
+  latestUserMessage: string,
+): string {
+  const directOverride = requestsDirectAnswer(latestUserMessage);
+
+  if (directOverride) {
+    return "The user explicitly requested a direct answer. Give it immediately, then add only essential explanation.";
+  }
+
   switch (responseMode) {
     case "direct":
       return "Answer first, keep setup short, and only explain what is needed.";
     case "guide":
-      return "Show the reasoning path and give the user a practical next move.";
+      return "Show the reasoning path with a useful hint or checkpoint, then help the user reach a practical next move without stalling.";
     case "tutor":
       return "Teach the concept with a clue or checkpoint before giving away answers unless the user asks directly.";
     case "build":
@@ -178,7 +194,9 @@ function modeBehavior(responseMode: ResponseMode): string {
     case "debug":
       return "Think like a debugger: isolate symptoms, likely causes, checks, and the smallest fix.";
     default:
-      return "Choose the response shape that best fits the user's latest turn.";
+      return taskRoute === "learn"
+        ? "Use teaching-first assistance: begin with the key concept, clue, or reasoning step and help the user work toward the answer. Reveal it when needed or requested."
+        : "Choose the response shape that best fits the task. Complete writing, building, debugging, analysis, and ordinary assistance requests without forcing a lesson.";
   }
 }
 
@@ -286,7 +304,7 @@ export function buildConversationState(params: {
     resolvedFollowUp: followUp.resolvedFollowUp,
     styleDirective: detectStyleDirective(params.messages),
     taskRoute,
-    modeBehavior: modeBehavior(params.responseMode),
+    modeBehavior: modeBehavior(params.responseMode, taskRoute, params.latestUserMessage),
     providerStrategy: providerStrategy(taskRoute, params.responseMode),
   };
 }

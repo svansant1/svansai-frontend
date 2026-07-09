@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { runMonitor } from "@/lib/ai/self-monitor";
+import { verifyOwnerRequest } from "@/lib/auth/server-owner";
 
 export async function POST(req: Request) {
   try {
-    const { userId } = (await req.json()) as { userId?: string };
-
-    if (userId !== process.env.OWNER_USER_ID) {
+    const auth = await verifyOwnerRequest(req);
+    if (!auth.authorized) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

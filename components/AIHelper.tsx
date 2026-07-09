@@ -7,6 +7,7 @@ import {
   getFeedbackSummary,
   getTotalViews,
 } from "@/lib/db/engagement";
+import { supabase } from "@/lib/supabase";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -15,6 +16,15 @@ export type ChatMessage = {
   fileName?: string;
   fileType?: string;
   isPassword?: boolean;
+  orchestration?: ChatOrchestration;
+};
+
+type ChatOrchestration = {
+  route?: string;
+  coordinator?: string;
+  recommendedModules?: string[];
+  responseMode?: string;
+  capabilities?: string[];
 };
 
 type AttachedFile = {
@@ -26,6 +36,10 @@ type AttachedFile = {
 };
 
 type ResponseMode = "auto" | "direct" | "guide" | "tutor" | "build" | "debug";
+type WritingContext = "general" | "casual" | "professional" | "academic" | "sensitive";
+type MemoryCategory = "writing_preference" | "learning_progress" | "personal_preference" | "project_context";
+type ProfileMemory = { id: string; category: MemoryCategory; summary: string };
+type StarterQuoteMode = "show" | "ask" | "off";
 
 type UserState = {
   id: string;
@@ -42,6 +56,8 @@ type AIHelperProps = {
 
 const GUEST_LIMIT = 5;
 const MAX_FILE_MB = 10;
+const MAX_ATTACHMENTS = 10;
+const MAX_TOTAL_FILE_MB = 40;
 
 const PASSWORD_PROMPT = "enter owner password:";
 const PASSWORD_SUCCESS = "owner mode enabled";
@@ -59,7 +75,12 @@ const ACCEPTED_TYPES = [
   "text/typescript",
   "text/html",
   "text/css",
+  "text/csv",
+  "text/tab-separated-values",
   "application/json",
+  "application/csv",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/x-python",
   "text/x-python",
   "text/x-java-source",
@@ -72,7 +93,7 @@ const RESPONSE_MODES: Array<{
   label: string;
   title: string;
 }> = [
-  { id: "auto", label: "Auto", title: "Let SVANSAI choose the best style" },
+  { id: "auto", label: "Auto", title: "Let SVANS-AI choose the best style" },
   { id: "direct", label: "Direct", title: "Answer first, then explain briefly" },
   { id: "guide", label: "Guide", title: "Show how to get the answer" },
   { id: "tutor", label: "Tutor", title: "Hint and coach before revealing" },
@@ -80,12 +101,47 @@ const RESPONSE_MODES: Array<{
   { id: "debug", label: "Debug", title: "Diagnose problems and find the smallest fix" },
 ];
 
+const STARTER_QUOTES = [
+  "Small steps still count when they are aimed in the right direction.",
+  "Learn the pattern, not just the answer.",
+  "A clear mind beats a rushed answer every time.",
+  "Build it calmly. Test it honestly. Improve it one layer at a time.",
+  "Progress gets easier when the next step is visible.",
+];
+
+function getStarterQuote() {
+  const index = new Date().getDate() % STARTER_QUOTES.length;
+  return STARTER_QUOTES[index];
+}
+
+function formatLabel(value: string) {
+  return value.replace(/[_-]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function isImageType(type: string) {
   return type.startsWith("image/");
 }
 
 function isPdfType(type: string) {
   return type === "application/pdf";
+}
+
+function readBrowserFile(file: File): Promise<AttachedFile> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? "");
+      resolve({
+        name: file.name,
+        type: file.type || "text/plain",
+        base64: dataUrl.split(",")[1] || "",
+        dataUrl,
+        size: file.size,
+      });
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function renderInlineMarkdown(text: string) {
@@ -348,7 +404,7 @@ export default function AIHelper({
   const [loading, setLoading] = useState(false);
   const [loginDismissed, setLoginDismissed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState("");
   const [feedbackState, setFeedbackState] = useState<
     Record<number, "up" | "down" | null>
@@ -359,6 +415,26 @@ export default function AIHelper({
   const [totalViews, setTotalViews] = useState(0);
   const [isPasswordMode, setIsPasswordMode] = useState(false);
   const [responseMode, setResponseMode] = useState<ResponseMode>("auto");
+  const [showVoiceProfile, setShowVoiceProfile] = useState(false);
+  const [voiceContext, setVoiceContext] = useState<WritingContext>("general");
+  const [voiceSample, setVoiceSample] = useState("");
+  const [toneNotes, setToneNotes] = useState("");
+  const [preserveVoice, setPreserveVoice] = useState(true);
+  const [correctEnglish, setCorrectEnglish] = useState(true);
+  const [preserveSlang, setPreserveSlang] = useState(true);
+  const [voiceStatus, setVoiceStatus] = useState("");
+  const [profileMemories, setProfileMemories] = useState<ProfileMemory[]>([]);
+  const [memoryCategory, setMemoryCategory] = useState<MemoryCategory>("personal_preference");
+  const [memorySummary, setMemorySummary] = useState("");
+  const [starterQuoteMode, setStarterQuoteMode] = useState<StarterQuoteMode>(() => {
+    if (typeof window === "undefined") return "ask";
+    const value = localStorage.getItem("svansai-starter-quote-mode");
+    if (value === "show" || value === "ask" || value === "off") return value;
+    return localStorage.getItem("SVANS-AI-show-starter-quote") === "false" ? "off" : "ask";
+  });
+  const [starterQuoteAccepted, setStarterQuoteAccepted] = useState(false);
+  const [starterQuoteDismissed, setStarterQuoteDismissed] = useState(false);
+  const attachedFile = attachedFiles[0] ?? null;
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -374,7 +450,7 @@ export default function AIHelper({
   const sessionId = useMemo(() => {
     if (typeof window === "undefined") return "ssr";
 
-    const key = "svansai-session-id";
+    const key = "SVANS-AI-session-id";
     let id = sessionStorage.getItem(key);
 
     if (!id) {
@@ -422,6 +498,29 @@ export default function AIHelper({
   }, [user, initialMessages, conversationId]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("svansai-starter-quote-mode", starterQuoteMode);
+  }, [starterQuoteMode]);
+
+  const handleModuleBadgeClick = (item: string) => {
+    const normalized = item.toLowerCase();
+    if (normalized.includes("debugger") || normalized.includes("debug")) {
+      setResponseMode("debug");
+      setInput((current) => current || "Help me debug this.");
+    } else if (normalized.includes("sandbox") || normalized.includes("build")) {
+      setResponseMode("build");
+      setInput((current) => current || "Help me test this safely in Sandbox.");
+    } else if (normalized.includes("shield") || normalized.includes("protect")) {
+      setInput((current) => current || "Check this for safety and risk.");
+    } else if (normalized.includes("teaching")) {
+      setResponseMode("tutor");
+    } else if (normalized.includes("writing")) {
+      setInput((current) => current || "Help me refine this writing.");
+    }
+    textareaRef.current?.focus();
+  };
+
+  useEffect(() => {
     const chatScroll = chatScrollRef.current;
     if (!chatScroll) return;
 
@@ -458,6 +557,99 @@ export default function AIHelper({
     }
   }, [isPasswordMode]);
 
+  useEffect(() => {
+    if (!showVoiceProfile || !user) return;
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) return;
+      const response = await fetch("/api/profile/writing", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const result = await response.json();
+        const profile = result?.profile;
+        if (profile) {
+          setVoiceContext(profile.defaultContext ?? "general");
+          setToneNotes(profile.toneNotes ?? "");
+          setPreserveVoice(profile.preserveVoice ?? true);
+          setCorrectEnglish(profile.correctEnglish ?? true);
+          setPreserveSlang(profile.preserveIntentionalSlang ?? true);
+        }
+      }
+
+      const memoryResponse = await fetch("/api/profile/memory", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (memoryResponse.ok) {
+        const memoryResult = await memoryResponse.json();
+        setProfileMemories(memoryResult?.memories ?? []);
+      }
+    })();
+  }, [showVoiceProfile, user]);
+
+  const saveVoiceProfile = async () => {
+    if (!user) {
+      onRequestLogin();
+      return;
+    }
+    setVoiceStatus("Saving...");
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      setVoiceStatus("Please sign in again.");
+      return;
+    }
+    const samples = voiceSample.trim()
+      ? { [voiceContext]: [voiceSample.trim()] }
+      : undefined;
+    const response = await fetch("/api/profile/writing", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        preserveVoice,
+        correctEnglish,
+        preserveIntentionalSlang: preserveSlang,
+        defaultContext: voiceContext,
+        toneNotes,
+        ...(samples ? { samples } : {}),
+      }),
+    });
+    setVoiceStatus(response.ok ? "Voice profile saved." : "Could not save the profile.");
+    if (response.ok) setVoiceSample("");
+  };
+
+  const addProfileMemory = async () => {
+    if (!memorySummary.trim()) return;
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return onRequestLogin();
+    const response = await fetch("/api/profile/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ category: memoryCategory, summary: memorySummary }),
+    });
+    if (response.ok) {
+      setMemorySummary("");
+      setShowVoiceProfile(false);
+      setTimeout(() => setShowVoiceProfile(true), 0);
+    }
+  };
+
+  const deleteProfileMemory = async (id?: string) => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    const response = await fetch(`/api/profile/memory${id ? `?id=${encodeURIComponent(id)}` : ""}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.ok) setProfileMemories((current) => id ? current.filter((memory) => memory.id !== id) : []);
+  };
+
   const checkPasswordMode = (svResponse: string) => {
     const lower = svResponse.toLowerCase();
 
@@ -483,49 +675,46 @@ export default function AIHelper({
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError("");
-
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+    const selected = Array.from(e.target.files ?? []);
     e.target.value = "";
-
-    const hasAcceptedExtension = file.name.match(
-      /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md)$/i,
-    );
-
-    if (!ACCEPTED_TYPES.includes(file.type) && !hasAcceptedExtension) {
-      setFileError(
-        "That file type isn't supported. Try an image, PDF, or code/text file.",
-      );
+    if (!selected.length) return;
+    if (attachedFiles.length + selected.length > MAX_ATTACHMENTS) {
+      setFileError(`You can attach up to ${MAX_ATTACHMENTS} files.`);
       return;
     }
 
-    if (file.size > MAX_FILE_MB * 1024 * 1024) {
-      setFileError(`File is too large. Max size is ${MAX_FILE_MB}MB.`);
+    const invalid = selected.find((file) => {
+      const acceptedExtension = /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|csv|tsv|xlsx)$/i.test(file.name);
+      return (!ACCEPTED_TYPES.includes(file.type) && !acceptedExtension) || file.size > MAX_FILE_MB * 1024 * 1024;
+    });
+    if (invalid) {
+      setFileError(`${invalid.name} is unsupported or larger than ${MAX_FILE_MB}MB.`);
       return;
     }
 
-    const reader = new FileReader();
+    const totalBytes = [...attachedFiles, ...selected].reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes > MAX_TOTAL_FILE_MB * 1024 * 1024) {
+      setFileError(`Combined attachments cannot exceed ${MAX_TOTAL_FILE_MB}MB.`);
+      return;
+    }
 
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(",")[1];
-
-      setAttachedFile({
-        name: file.name,
-        type: file.type || "text/plain",
-        base64,
-        dataUrl,
-        size: file.size,
-      });
-    };
-
-    reader.readAsDataURL(file);
+    const converted = await Promise.all(selected.map(readBrowserFile));
+    setAttachedFiles((current) => [...current, ...converted].slice(0, MAX_ATTACHMENTS));
   };
 
-  const removeAttachment = () => {
-    setAttachedFile(null);
+  const removeAttachment = (index: number) => {
+    setAttachedFiles((current) => current.filter((_, itemIndex) => itemIndex !== index));
     setFileError("");
+  };
+
+  const moveAttachment = (index: number, direction: -1 | 1) => {
+    setAttachedFiles((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   };
 
   const handleFeedback = async (messageIndex: number, vote: "up" | "down") => {
@@ -554,20 +743,21 @@ export default function AIHelper({
   };
 
   const handleSend = async () => {
-    if ((!input.trim() && !attachedFile) || loading) return;
+    if ((!input.trim() && attachedFiles.length === 0) || loading) return;
 
     const userCount = messages.filter((m) => m.role === "user").length;
 
     if (!user && userCount >= GUEST_LIMIT && !loginDismissed) {
       setLoginDismissed(true);
       onRequestLogin();
+      return;
     }
 
     const userMessage: ChatMessage = {
       role: "user",
       content:
         input.trim() ||
-        (attachedFile ? `[Attached: ${attachedFile.name}]` : ""),
+        (attachedFiles.length ? `[Attached: ${attachedFiles.map((file) => file.name).join(", ")}]` : ""),
       filePreview: attachedFile?.dataUrl,
       fileName: attachedFile?.name,
       fileType: attachedFile?.type,
@@ -580,19 +770,19 @@ export default function AIHelper({
     onMessagesChangeRef.current?.(nextMessages);
     setInput("");
 
-    const fileToSend = attachedFile;
+    const filesToSend = attachedFiles;
 
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setLoading(true);
 
     notifyThinking(
       true,
-      fileToSend
-        ? isImageType(fileToSend.type)
-          ? "Analyzing your image..."
-          : isPdfType(fileToSend.type)
-            ? "Reading your PDF..."
-            : "Reading your file..."
+      filesToSend.length
+        ? filesToSend.every((file) => isImageType(file.type))
+          ? `Analyzing ${filesToSend.length} image${filesToSend.length === 1 ? "" : "s"}...`
+          : filesToSend.some((file) => isPdfType(file.type))
+            ? "Reading your documents..."
+            : "Reading your files..."
         : "Thinking it through...",
     );
 
@@ -606,17 +796,22 @@ export default function AIHelper({
         responseMode,
       };
 
-      if (fileToSend) {
-        body.file = {
-          name: fileToSend.name,
-          type: fileToSend.type,
-          base64: fileToSend.base64,
-        };
+      if (filesToSend.length) {
+        body.files = filesToSend.map((file) => ({
+          name: file.name,
+          type: file.type,
+          base64: file.base64,
+        }));
       }
 
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         body: JSON.stringify(body),
       });
 
@@ -636,7 +831,7 @@ export default function AIHelper({
 
       const finalMessages = [
         ...nextMessages,
-        { role: "assistant" as const, content: reply },
+        { role: "assistant" as const, content: reply, orchestration: data?.orchestration },
       ];
 
       setMessages(finalMessages);
@@ -676,17 +871,17 @@ export default function AIHelper({
         const dataUrl = event.target?.result;
         if (typeof dataUrl !== "string") return;
 
-        setAttachedFile({
+        setAttachedFiles((current) => [...current, {
           name: "pasted-image.png",
           type: file.type,
           base64: dataUrl.split(",")[1] || "",
           dataUrl,
           size: file.size,
-        });
+        }].slice(0, MAX_ATTACHMENTS));
       };
 
       reader.readAsDataURL(file);
-      break;
+      if (attachedFiles.length >= MAX_ATTACHMENTS) break;
     }
   };
 
@@ -773,6 +968,45 @@ export default function AIHelper({
         }}
       >
         <AnimatePresence initial={false}>
+          {!conversationId && starterQuoteMode !== "off" && !starterQuoteDismissed && messages.length <= 1 && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{
+                marginBottom: "12px",
+                padding: "14px 16px",
+                borderRadius: "16px",
+                background: "linear-gradient(135deg, rgba(56,189,248,0.13), rgba(168,85,247,0.1))",
+                border: "1px solid rgba(125,211,252,0.18)",
+                color: "white",
+              }}
+            >
+              <div style={{ color: "#7dd3fc", fontSize: "0.78rem", fontWeight: 900, letterSpacing: "0.08em", marginBottom: "6px" }}>
+                SVANS-AI STARTER QUOTE
+              </div>
+              {starterQuoteMode === "ask" && !starterQuoteAccepted ? (
+                <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>Would you like to start off with a quote?</div>
+              ) : (
+                <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>“{getStarterQuote()}”</div>
+              )}
+              <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
+                {starterQuoteMode === "ask" && !starterQuoteAccepted && (
+                  <button type="button" onClick={() => setStarterQuoteAccepted(true)} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(125,211,252,0.28)", background: "rgba(56,189,248,0.14)", color: "white", cursor: "pointer" }}>
+                    Show quote
+                  </button>
+                )}
+                <button type="button" onClick={() => setStarterQuoteDismissed(true)} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer" }}>
+                  Start chat
+                </button>
+                <button type="button" onClick={() => { setStarterQuoteMode("show"); setStarterQuoteAccepted(true); }} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.75)", cursor: "pointer" }}>
+                  Always show
+                </button>
+                <button type="button" onClick={() => { setStarterQuoteMode("off"); setStarterQuoteDismissed(true); }} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.75)", cursor: "pointer" }}>
+                  Don’t show quotes
+                </button>
+              </div>
+            </motion.div>
+          )}
           {messages.map((msg, i) => (
             <motion.div
               key={`${msg.role}-${i}-${msg.content.slice(0, 16)}`}
@@ -819,8 +1053,30 @@ export default function AIHelper({
                     fontSize: isMobile ? "0.82rem" : "0.9rem",
                   }}
                 >
-                  {msg.role === "user" ? "You" : "SV"}
+                  {msg.role === "user" ? "You" : "SVANS-AI"}
                 </strong>
+
+                {msg.role === "assistant" && msg.orchestration && (
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}>
+                    {[...(msg.orchestration.recommendedModules ?? []), ...(msg.orchestration.capabilities ?? [])]
+                      .slice(0, 8)
+                      .map((item) => (
+                        <button key={`${i}-${item}`} type="button" onClick={() => handleModuleBadgeClick(item)} title={`Use ${formatLabel(item)}`} style={{
+                          fontSize: "0.68rem",
+                          letterSpacing: "0.04em",
+                          padding: "3px 7px",
+                          borderRadius: "999px",
+                          color: "#bae6fd",
+                          border: "1px solid rgba(125,211,252,0.22)",
+                          background: "rgba(56,189,248,0.08)",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                        }}>
+                          {formatLabel(item)}
+                        </button>
+                      ))}
+                  </div>
+                )}
 
                 {msg.filePreview && isImageType(msg.fileType || "") && (
                   <img
@@ -915,82 +1171,23 @@ export default function AIHelper({
           boxSizing: "border-box",
         }}
       >
-        {attachedFile && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              background: "rgba(56,189,248,0.08)",
-              border: "1px solid rgba(56,189,248,0.2)",
-              borderRadius: "14px",
-              padding: "10px 14px",
-              marginBottom: "10px",
-              boxSizing: "border-box",
-            }}
-          >
-            {isImageType(attachedFile.type) ? (
-              <img
-                src={attachedFile.dataUrl}
-                alt={attachedFile.name}
-                style={{
-                  width: "48px",
-                  height: "48px",
-                  borderRadius: "8px",
-                  objectFit: "cover",
-                  flexShrink: 0,
-                }}
-              />
-            ) : (
-              <span style={{ fontSize: "1.6rem", flexShrink: 0 }}>
-                {isPdfType(attachedFile.type) ? "📄" : "📎"}
-              </span>
-            )}
-
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p
-                style={{
-                  margin: 0,
-                  color: "white",
-                  fontSize: "0.85rem",
-                  fontWeight: 600,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {attachedFile.name}
-              </p>
-              <p
-                style={{
-                  margin: 0,
-                  color: "rgba(255,255,255,0.45)",
-                  fontSize: "0.75rem",
-                }}
-              >
-                {(attachedFile.size / 1024).toFixed(0)} KB
-              </p>
-            </div>
-
-            <button
-              onClick={removeAttachment}
-              style={{
-                background: "rgba(255,255,255,0.08)",
-                border: "1px solid rgba(255,255,255,0.14)",
-                borderRadius: "999px",
-                color: "white",
-                cursor: "pointer",
-                width: "28px",
-                height: "28px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "0.85rem",
-                flexShrink: 0,
-              }}
-            >
-              ×
-            </button>
+        {attachedFiles.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: "8px", marginBottom: "10px" }}>
+            {attachedFiles.map((file, index) => (
+              <div key={`${file.name}-${index}`} style={{ display: "flex", alignItems: "center", gap: "10px", background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.2)", borderRadius: "14px", padding: "8px 10px", minWidth: 0 }}>
+                {isImageType(file.type) ? <img src={file.dataUrl} alt={file.name} style={{ width: "42px", height: "42px", borderRadius: "8px", objectFit: "cover" }} /> : <span style={{ fontSize: "1.4rem" }}>{isPdfType(file.type) ? "📄" : "📎"}</span>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "#7dd3fc", fontSize: "0.68rem", fontWeight: 900 }}>FILE {index + 1}</div>
+                  <div style={{ color: "white", fontSize: "0.82rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</div>
+                  <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.7rem" }}>{(file.size / 1024).toFixed(0)} KB</div>
+                </div>
+                <div style={{ display: "flex", gap: "3px" }}>
+                  <button type="button" disabled={index === 0} onClick={() => moveAttachment(index, -1)} aria-label={`Move ${file.name} earlier`} style={{ background: "transparent", border: 0, color: "white", cursor: index === 0 ? "default" : "pointer", opacity: index === 0 ? 0.3 : 1 }}>←</button>
+                  <button type="button" disabled={index === attachedFiles.length - 1} onClick={() => moveAttachment(index, 1)} aria-label={`Move ${file.name} later`} style={{ background: "transparent", border: 0, color: "white", cursor: index === attachedFiles.length - 1 ? "default" : "pointer", opacity: index === attachedFiles.length - 1 ? 0.3 : 1 }}>→</button>
+                  <button type="button" onClick={() => removeAttachment(index)} aria-label={`Remove ${file.name}`} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: "999px", color: "white", cursor: "pointer", width: "28px", height: "28px" }}>×</button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -1008,6 +1205,71 @@ export default function AIHelper({
         )}
 
         <div style={{ width: "100%", boxSizing: "border-box" }}>
+          {!isPasswordMode && (
+            <div style={{ marginBottom: "10px" }}>
+              <button
+                type="button"
+                onClick={() => setShowVoiceProfile((value) => !value)}
+                style={{
+                  padding: "7px 12px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(125,211,252,0.25)",
+                  background: "rgba(56,189,248,0.08)",
+                  color: "#bae6fd",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                Voice Profile
+              </button>
+              {showVoiceProfile && (
+                <div style={{ marginTop: "8px", padding: "12px", borderRadius: "14px", background: "rgba(15,23,42,0.55)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
+                    <select value={voiceContext} onChange={(event) => setVoiceContext(event.target.value as WritingContext)} style={{ padding: "8px", borderRadius: "9px", background: "#0f172a", color: "white" }}>
+                      {(["general", "casual", "professional", "academic", "sensitive"] as const).map((context) => <option key={context} value={context}>{context}</option>)}
+                    </select>
+                    <label><input type="checkbox" checked={preserveVoice} onChange={(event) => setPreserveVoice(event.target.checked)} /> Preserve my voice</label>
+                    <label><input type="checkbox" checked={correctEnglish} onChange={(event) => setCorrectEnglish(event.target.checked)} /> Correct English</label>
+                    <label><input type="checkbox" checked={preserveSlang} onChange={(event) => setPreserveSlang(event.target.checked)} /> Keep intentional slang</label>
+                  </div>
+                  <input value={toneNotes} onChange={(event) => setToneNotes(event.target.value)} placeholder="Tone notes, such as warm, direct, and concise" style={{ width: "100%", padding: "9px", marginBottom: "8px", borderRadius: "9px", boxSizing: "border-box" }} />
+                  <textarea value={voiceSample} onChange={(event) => setVoiceSample(event.target.value)} placeholder="Optional approved writing sample (20+ characters)" style={{ width: "100%", minHeight: "70px", padding: "9px", borderRadius: "9px", boxSizing: "border-box" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px" }}>
+                    <button type="button" onClick={saveVoiceProfile} style={{ padding: "8px 12px", borderRadius: "9px", border: 0, background: "#38bdf8", color: "#020617", fontWeight: 900, cursor: "pointer" }}>Save profile</button>
+                    <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.7)" }}>{voiceStatus}</span>
+                  </div>
+                  <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+                    <strong>Starter quote</strong>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0 12px" }}>
+                      {(["ask", "show", "off"] as const).map((mode) => (
+                        <button key={mode} type="button" onClick={() => setStarterQuoteMode(mode)} style={{ padding: "6px 10px", borderRadius: "999px", border: starterQuoteMode === mode ? "1px solid rgba(56,189,248,0.58)" : "1px solid rgba(255,255,255,0.14)", background: starterQuoteMode === mode ? "rgba(56,189,248,0.16)" : "rgba(255,255,255,0.04)", color: "white", cursor: "pointer" }}>
+                          {mode === "ask" ? "Ask first" : mode === "show" ? "Always show" : "Off"}
+                        </button>
+                      ))}
+                    </div>
+                    <strong>User-controlled memory</strong>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                      <select value={memoryCategory} onChange={(event) => setMemoryCategory(event.target.value as MemoryCategory)} style={{ padding: "8px", borderRadius: "9px", background: "#0f172a", color: "white" }}>
+                        <option value="writing_preference">Writing preference</option>
+                        <option value="learning_progress">Learning progress</option>
+                        <option value="personal_preference">Personal preference</option>
+                        <option value="project_context">Project context</option>
+                      </select>
+                      <input value={memorySummary} onChange={(event) => setMemorySummary(event.target.value)} placeholder="What should SVANS-AI remember?" style={{ flex: 1, minWidth: "220px", padding: "8px", borderRadius: "9px" }} />
+                      <button type="button" onClick={addProfileMemory} style={{ padding: "8px 12px", borderRadius: "9px", cursor: "pointer" }}>Remember</button>
+                      {profileMemories.length > 0 && <button type="button" onClick={() => deleteProfileMemory()} style={{ padding: "8px 12px", borderRadius: "9px", cursor: "pointer" }}>Clear all</button>}
+                    </div>
+                    {profileMemories.map((memory) => (
+                      <div key={memory.id} style={{ display: "flex", justifyContent: "space-between", gap: "8px", marginTop: "7px", fontSize: "0.82rem" }}>
+                        <span><strong>{memory.category.replaceAll("_", " ")}:</strong> {memory.summary}</span>
+                        <button type="button" onClick={() => deleteProfileMemory(memory.id)} aria-label="Delete memory" style={{ border: 0, background: "transparent", color: "#fca5a5", cursor: "pointer" }}>Delete</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {!isPasswordMode && (
             <div
               aria-label="Response mode"
@@ -1146,9 +1408,10 @@ export default function AIHelper({
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               accept={
                 ACCEPTED_TYPES.join(",") +
-                ",.py,.ts,.tsx,.js,.jsx,.java,.c,.cpp,.cs,.go,.rb,.rs,.swift,.kt,.md"
+                ",.py,.ts,.tsx,.js,.jsx,.java,.c,.cpp,.cs,.go,.rb,.rs,.swift,.kt,.md,.csv,.tsv,.xlsx"
               }
               onChange={handleFileSelect}
               style={{ display: "none" }}

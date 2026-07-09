@@ -45,7 +45,9 @@ import { generateWithOpenAI } from "@/lib/ai/providers/openai";
 import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
 import { generateWithGemini } from "@/lib/ai/providers/gemini";
 import type { AttachedFile } from "@/lib/ai/file-types";
+import { understandAttachedFile } from "@/lib/ai/file-understanding";
 import { searchLiveWeb } from "@/lib/ai/live-search";
+import { enforceLiveCitations } from "@/lib/ai/citation-guard";
 import {
   buildConversationState,
   formatConversationState,
@@ -57,19 +59,29 @@ import {
   shouldLearnFromResponse,
   type ResponseCritique,
 } from "@/lib/ai/response-critic";
+import {
+  formatWritingProfile,
+  type WritingProfile,
+} from "@/lib/personalization/writing-profile";
+import {
+  formatUserMemories,
+  type UserMemory,
+} from "@/lib/personalization/structured-memory";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
   followUpIntent: FollowUpIntent;
   lastAssistantMessage: string;
   effectiveMessage: string;
-  attachedFile?: AttachedFile;
+  attachedFiles: AttachedFile[];
   isCorrectionRequest: boolean;
   previousUserMessage: string;
   isCodeFragment: boolean;
   conversationIntent: ConversationIntent;
   responseMode: ResponseMode;
   conversationState: ConversationState;
+  writingProfile?: WritingProfile | null;
+  userMemories: UserMemory[];
 };
 
 type MessageIntent =
@@ -208,7 +220,7 @@ function needsLiveSearch(message: string): boolean {
 }
 
 const CONVERSATION_STYLE_RULES = `
-You are SVANSAI, a clear, conversational AI assistant.
+You are SVANS-AI, a clear, conversational AI assistant.
 
 Core conversation style:
 - Sound like a real assistant talking to the user, not like a glossary bot.
@@ -299,6 +311,11 @@ function isTextLikeAttachment(file?: AttachedFile) {
   if (
     file.type.startsWith("text/") ||
     file.type === "application/json" ||
+    file.type === "application/csv" ||
+    file.type === "application/vnd.ms-excel" ||
+    file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.type === "text/csv" ||
+    file.type === "text/tab-separated-values" ||
     file.type === "text/x-python" ||
     file.type === "application/x-python" ||
     file.type === "text/x-java-source" ||
@@ -308,8 +325,20 @@ function isTextLikeAttachment(file?: AttachedFile) {
     return true;
   }
 
-  return /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|json|txt|html|css)$/i.test(
+  return /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|json|txt|html|css|csv|tsv|xlsx)$/i.test(
     file.name,
+  );
+}
+
+function isDataAttachment(file?: AttachedFile) {
+  if (!file) return false;
+  return (
+    file.type === "text/csv" ||
+    file.type === "text/tab-separated-values" ||
+    file.type === "application/csv" ||
+    file.type === "application/vnd.ms-excel" ||
+    file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    /\.(csv|tsv|xlsx)$/i.test(file.name)
   );
 }
 
@@ -454,13 +483,19 @@ function shouldBypassCyberRefusalForWritingReview(message: string): boolean {
 
 function isConversationRecallRequest(message: string): boolean {
   const normalized = normalizeText(message);
-
-  return (
-    /\b(what|which|list|recall|remember|show|give)\b/.test(normalized) &&
-    /\b(previous|earlier|asked|questions|answers|conversation|chat|all)\b/.test(
+  const explicitRecallAction =
+    /\b(list|recall|show|give me|pull up|summarize)\b/.test(normalized);
+  const explicitHistoryTarget =
+    /\b(previous|earlier|prior|from (this|the) (conversation|chat)|chat history|conversation history)\b/.test(
       normalized,
-    )
-  );
+    );
+  const explicitQuestionCollection =
+    /\b(all|the)\s+(\d+\s+)?(previous|earlier|prior)?\s*questions?\b/.test(
+      normalized,
+    );
+  const writingRequest = isWritingReviewRequest(message);
+
+  return !writingRequest && explicitRecallAction && (explicitHistoryTarget || explicitQuestionCollection);
 }
 
 function extractAnswerLetter(text: string): string | null {
@@ -671,7 +706,7 @@ function getProjectModuleAnswer(message: string): string | null {
     normalized.includes("shield") &&
     normalized.includes("work together")
   ) {
-    return "Sandbox should be the isolated testing space, Debugger should inspect failures and explain what broke, Shield should watch for risk and enforce safety rules, and SVANSAI should coordinate the conversation across all of them. In practice: Sandbox runs experiments, Debugger turns the results into fixes, Shield blocks unsafe paths, and SVANSAI explains the next best action.";
+    return "Sandbox should be the isolated testing space, Debugger should inspect failures and explain what broke, Shield should watch for risk and enforce safety rules, and SVANS-AI should coordinate the conversation across all of them. In practice: Sandbox runs experiments, Debugger turns the results into fixes, Shield blocks unsafe paths, and SVANS-AI explains the next best action.";
   }
 
   if (normalized.includes("what is shield for") || /\bwhat (is|does).*\bshield\b/.test(normalized)) {
@@ -683,10 +718,28 @@ function getProjectModuleAnswer(message: string): string | null {
   }
 
   if (normalized.includes("what is sandbox for") || /\bwhat (is|does).*\bsandbox\b/.test(normalized)) {
-    return "Sandbox is the isolated experiment layer. It should let SVANSAI test ideas, simulations, prompts, and code-like reasoning without treating the experiment as production truth.";
+    return "Sandbox is the isolated experiment layer. It should let SVANS-AI test ideas, simulations, prompts, and code-like reasoning without treating the experiment as production truth.";
   }
 
   return null;
+}
+
+function getConversationQualityAnswer(
+  message: string,
+  lastAssistantMessage: string,
+): string | null {
+  const normalized = normalizeText(`${message}\n${lastAssistantMessage}`);
+  const asksForRealFix =
+    normalized.includes("real fix") ||
+    normalized.includes("not up to par") ||
+    normalized.includes("repeats") ||
+    normalized.includes("repetitive") ||
+    normalized.includes("feels fake") ||
+    normalized.includes("fake sometimes");
+
+  if (!asksForRealFix) return null;
+
+  return "The real fix is engineering, not a nicer prompt. SVANS-AI needs a conversation-state layer that tracks the current goal, user style, unresolved need, and what was already said; a follow-up resolver for short replies like “why” or “exactly”; a repetition critic that scores drafts before they reach the user; a memory gate that only saves useful patterns; and route-specific prompts for teaching, writing, debugging, building, research, and file analysis. That combination stops the assistant from sounding fake because every answer is checked against context, intent, and quality before it is sent.";
 }
 
 function buildStatementAwarePrompt(
@@ -731,7 +784,7 @@ async function callProvider(
     prompt: string;
     systemInstruction: string;
     temperature: number;
-    attachedFile?: AttachedFile;
+    attachedFiles?: AttachedFile[];
   },
 ): Promise<string | null> {
   try {
@@ -746,17 +799,17 @@ async function callProvider(
         return null;
     }
   } catch (error) {
-    console.error("[SVANSAI] Provider call error:", provider, error);
+    console.error("[SVANS-AI] Provider call error:", provider, error);
     return null;
   }
 }
 
 function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {
-  if (context.attachedFile?.type.startsWith("image/")) {
+  if (context.attachedFiles.some((file) => file.type.startsWith("image/"))) {
     return ["openai", "gemini", "anthropic"];
   }
 
-  if (context.attachedFile) {
+  if (context.attachedFiles.length) {
     return ["openai", "anthropic", "gemini"];
   }
 
@@ -789,21 +842,24 @@ function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {
 
 export async function generateChatResponse(
   rawMessages: unknown[],
-  attachedFile?: AttachedFile,
+  attachedFiles: AttachedFile[] = [],
   sessionId?: string | null,
   responseMode: ResponseMode = "auto",
+  isVerifiedOwner = false,
+  writingProfile?: WritingProfile | null,
+  userMemories: UserMemory[] = [],
 ): Promise<string> {
   const fullMessages = sanitizeMessages(rawMessages, 250);
   const messages = fullMessages.slice(-20);
   const sid = sessionId || "anonymous";
 
   if (fullMessages.length === 0) {
-    return "I'm SVANSAI. Ask me anything, and I'll answer as clearly and directly as I can.";
+    return "I'm SVANS-AI. Ask me anything, and I'll help in the response mode you choose.";
   }
 
   const latestUserMessage = getLatestUserMessage(fullMessages);
 
-  if (!latestUserMessage && !attachedFile) {
+  if (!latestUserMessage && attachedFiles.length === 0) {
     return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
   }
 
@@ -818,7 +874,7 @@ export async function generateChatResponse(
   const shouldSearchLive = needsLiveSearch(latestUserMessage);
 
   if (shouldSearchLive) {
-    console.log("[SVANSAI] Running live web search...");
+    console.log("[SVANS-AI] Running live web search...");
 
     const liveResults = await searchLiveWeb(latestUserMessage);
 
@@ -835,6 +891,12 @@ Content: ${r.content}
 `,
   )
   .join("\n")}
+
+Live web answer rules:
+- Cite live claims with bracketed source numbers, for example [1] or [2].
+- Only make current/live claims that are supported by the listed results.
+- If the results conflict or are thin, say what is verified and what remains uncertain.
+- End with a short "Sources" list using the source numbers and URLs.
 `;
     } else {
       liveSearchContext = `
@@ -850,30 +912,33 @@ Live search was attempted but no reliable current information could be verified.
     normalizedLatest === "what are you?" ||
     normalizedLatest === "who are you" ||
     normalizedLatest === "who are you?" ||
-    normalizedLatest.includes("what is svansai") ||
-    normalizedLatest.includes("who is svansai") ||
+    normalizedLatest.includes("what is SVANS-AI") ||
+    normalizedLatest.includes("who is SVANS-AI") ||
     normalizedLatest.includes("tell me about yourself") ||
     normalizedLatest.includes("what do you do") ||
     normalizedLatest.includes("do you know who you are")
   ) {
-    return "I'm SVANSAI, your AI assistant. I help with learning, coding, troubleshooting, writing, strategy, and conversation, and I improve over time through memory and retrieval.";
+    return "I'm SVANS-AI, the teaching and coordination assistant for the Vansant Platform. I help with learning, coding, troubleshooting, writing, strategy, and conversation while Shield, Debugger, and Sandbox handle their specialized roles.";
   }
 
   if (
     /\b(better than|different from|top ai companies|other ai assistants|competitive)\b/i.test(
       latestUserMessage,
     ) &&
-    /\b(svansai|you|ai assistants|ai companies|openai|anthropic)\b/i.test(
+    /\b(SVANS-AI|you|ai assistants|ai companies|openai|anthropic)\b/i.test(
       latestUserMessage,
     )
   ) {
-    return "The honest answer: SVANSAI is not automatically better than OpenAI or Anthropic at raw model intelligence. Its advantage has to come from being built around your platform: memory that knows your goals, a brain-check before provider calls, strong follow-up handling, Guide and Tutor modes, Shield for safety, Debugger for diagnosis, and Sandbox for experiments. To compete conversationally, it needs to feel less like a prompt wrapper and more like an assistant that understands the thread, remembers preferences, avoids repetition, and gives the next useful move.";
+    return "The honest answer: SVANS-AI is not automatically better than OpenAI or Anthropic at raw model intelligence. Its advantage comes from being the personalized teaching and coordination layer of the Vansant Platform: Shield for protection, Debugger for diagnosis, Sandbox for experiments, and user-controlled memory and writing profiles for continuity.";
   }
 
   if (
     isAwaitingPassword(sid) ||
     latestUserMessage.toLowerCase().trim().startsWith("sv ")
   ) {
+    if (!isVerifiedOwner) {
+      return "Owner controls require a signed-in, verified owner account. Sign in with the owner account before using SV administration commands.";
+    }
     const command = parseSVCommand(latestUserMessage, sid);
     if (command) {
       const commandResponse = await handleSVCommand(command, sid);
@@ -937,6 +1002,14 @@ Live search was attempted but no reliable current information could be verified.
     return projectModuleAnswer;
   }
 
+  const conversationQualityAnswer = getConversationQualityAnswer(
+    latestUserMessage,
+    lastAssistantMessage,
+  );
+  if (conversationQualityAnswer) {
+    return conversationQualityAnswer;
+  }
+
   let effectiveMessage = buildStatementAwarePrompt(
     latestUserMessage,
     messageIntent,
@@ -944,23 +1017,30 @@ Live search was attempted but no reliable current information could be verified.
   );
   let questionType = await detectQuestionType(latestUserMessage || "general");
 
-  let fileContext = "";
-
-  if (attachedFile) {
-    if (isImageAttachment(attachedFile)) {
-      fileContext = `User attached an image named "${attachedFile.name}" (${attachedFile.type}).`;
-    } else if (isPdfAttachment(attachedFile)) {
-      fileContext = `User attached a PDF named "${attachedFile.name}".`;
-    } else if (isTextLikeAttachment(attachedFile)) {
-      const extractedText = decodeBase64ToText(attachedFile.base64).slice(
-        0,
-        12000,
+  const fileContextParts: string[] = [];
+  for (let index = 0; index < attachedFiles.length; index += 1) {
+    const file = attachedFiles[index];
+    const position = `File ${index + 1} of ${attachedFiles.length}`;
+    const understood = await understandAttachedFile(file);
+    if (understood.kind === "image") {
+      fileContextParts.push(`${position}: image "${file.name}" (${file.type}). Analyze it together with the other numbered images.`);
+    } else if (understood.kind === "pdf") {
+      fileContextParts.push(
+        understood.extractedText
+          ? `${position}: PDF "${file.name}". Extracted text:\n\n${understood.extractedText}`
+          : `${position}: PDF "${file.name}". ${understood.error ?? "No text could be extracted."}`,
       );
-      fileContext = `User attached a text/code file named "${attachedFile.name}" (${attachedFile.type}). File contents:\n\n${extractedText}`;
+    } else if (understood.kind === "text") {
+      fileContextParts.push(`${position}: text/code file "${file.name}" (${file.type}). Contents:\n\n${understood.extractedText.slice(0, 20_000)}`);
+    } else if (understood.kind === "data") {
+      fileContextParts.push(`${position}: structured data file "${file.name}" (${file.type}). Use this data summary as primary evidence:\n\n${understood.extractedText.slice(0, 20_000)}`);
     } else {
-      fileContext = `User attached a file named "${attachedFile.name}" (${attachedFile.type}).`;
+      fileContextParts.push(`${position}: unsupported file "${file.name}" (${file.type}).`);
     }
+  }
+  const fileContext = fileContextParts.join("\n\n").slice(0, 100_000);
 
+  if (fileContext) {
     questionType = await detectQuestionType(
       `${fileContext}\n\nUser question: ${latestUserMessage}`,
     );
@@ -995,7 +1075,7 @@ Previous assistant response:
 ${lastAssistantMessage || "None"}
 
 Task:
-Stay in character and continue the simulation. Treat project/system terms as fictional in-universe signals unless the user explicitly exits the roleplay. Do not claim to access real SVANSAI internals, self-improvement logs, architecture notes, raw retrieval, or debugger-style project analysis. If the user requests "Self-Improvement log" during the scenario, render it as a fictional internal log from the character.
+Stay in character and continue the simulation. Treat project/system terms as fictional in-universe signals unless the user explicitly exits the roleplay. Do not claim to access real SVANS-AI internals, self-improvement logs, architecture notes, raw retrieval, or debugger-style project analysis. If the user requests "Self-Improvement log" during the scenario, render it as a fictional internal log from the character.
 Safety boundary:
 Keep the simulation non-operational. Do not include real attack commands, exploit code, malware logic, credential theft, phishing templates, log-wiping instructions, or unauthorized access steps. Use fictional telemetry, abstract signals, blocked attempts, and defensive lessons instead.
 
@@ -1051,8 +1131,10 @@ ${lastAssistantMessage}
     lastAssistantMessage,
     effectiveMessage: [
   effectiveMessage,
-  formatConversationState(conversationState),
-  fileContext,
+	  formatConversationState(conversationState),
+	  formatWritingProfile(writingProfile),
+	  formatUserMemories(userMemories),
+	  fileContext,
   liveSearchContext,
 ]
   .filter(Boolean)
@@ -1060,13 +1142,15 @@ ${lastAssistantMessage}
   .trim(),
     memory,
     retrieval,
-    attachedFile,
+    attachedFiles,
     isCorrectionRequest: correctionRequest,
     previousUserMessage,
     isCodeFragment: codeFragment,
     conversationIntent,
     responseMode,
     conversationState,
+    writingProfile,
+    userMemories,
   };
 
   const { response, critique } = await generateBestResponse(context);
@@ -1094,7 +1178,7 @@ ${lastAssistantMessage}
         questionType,
         "ai-learned",
         correctionRequest ? "correction-recovery" : "standard",
-        attachedFile ? "file-assisted" : "text",
+        attachedFiles.length ? "file-assisted" : "text",
       ],
     });
   }
@@ -1115,7 +1199,7 @@ async function generateBestResponse(
     lastAssistantMessage: context.lastAssistantMessage,
     memory: context.memory,
     retrieval: context.retrieval,
-    hasFile: !!context.attachedFile,
+    hasFile: context.attachedFiles.length > 0,
     responseMode: context.responseMode,
     conversationState: context.conversationState,
   });
@@ -1126,8 +1210,10 @@ ${CONVERSATION_STYLE_RULES}
 ${CORRECTION_RECOVERY_RULES}
 
 Runtime instructions:
-- Answer cleanly and directly.
-- Lead with the answer.
+- Respond cleanly and purposefully according to the selected mode and task route.
+- Lead with the answer in Direct mode and when the user explicitly requests it.
+- For learning tasks in Auto, Guide, or Tutor mode, begin with the most useful concept, clue, or reasoning step rather than automatically revealing the final answer.
+- For writing, building, debugging, analysis, and ordinary completion tasks, do the requested work without forcing a tutoring exchange.
 - If the answer has multiple parts, choose the clearest format instead of repeating the same breakdown style.
 - Use bullets, numbered steps, compact headings, examples, or a final takeaway only when that makes the answer easier to use.
 - In Tutor mode, guide with hints, rules, and one next step before revealing the final answer.
@@ -1138,8 +1224,12 @@ Runtime instructions:
 - Use the user's project/course context when relevant.
 - If coding is requested, prefer practical production-style code.
 - If an image is attached, analyze the image and answer what is visible.
-- If a screenshot contains code or an error, explain what it means and give the answer directly.
-- If a text/code file is attached, use its content directly in your answer.
+- When multiple images are attached, analyze them as one ordered collection and identify them as Image 1, Image 2, and so on.
+- If a screenshot contains code or an error, explain what it means and give the answer according to the selected mode.
+- If extracted PDF, text, or code content is present, treat that content as primary evidence and answer the user's question from it. Never respond as though the user failed to provide a question.
+- If structured CSV/TSV data is present, use the row/column summary, sample rows, and numeric stats as primary evidence. Mention limitations if the user asks for analysis beyond the visible sample/summary.
+- If live web results are present, cite them with bracketed source numbers like [1] and do not invent current facts that are not supported by those results.
+- If live search was attempted but no reliable current information could be verified, say that clearly and avoid pretending to know the latest state.
 - Keep answers fast, useful, and conversational.
 - Current mode: ${context.isCorrectionRequest ? "correction recovery" : context.responseMode}.
 - Conversation state is authoritative for short follow-ups and style preferences.
@@ -1177,24 +1267,24 @@ ${CORRECTION_RECOVERY_RULES}
   );
 
   const plan = buildProviderPlan(context);
-  console.log("[SVANSAI] Provider plan:", plan);
+  console.log("[SVANS-AI] Provider plan:", plan);
   let bestRejected: { response: string; critique: ResponseCritique } | null = null;
 
   for (const provider of plan) {
-    console.log("[SVANSAI] Trying provider:", provider);
+    console.log("[SVANS-AI] Trying provider:", provider);
 
     try {
       const first = await callProvider(provider, {
         prompt: basePrompt,
         systemInstruction,
         temperature,
-        attachedFile: context.attachedFile,
+        attachedFiles: context.attachedFiles,
       });
 
       const cleanFirst = normalizeProviderText(cleanResponse(first || ""));
 
       console.log(
-        "[SVANSAI] Provider result:",
+        "[SVANS-AI] Provider result:",
         provider,
         cleanFirst ? cleanFirst.slice(0, 200) : "[empty]",
       );
@@ -1229,13 +1319,13 @@ ${CORRECTION_RECOVERY_RULES}
           : retryPrompt,
         systemInstruction,
         temperature,
-        attachedFile: context.attachedFile,
+        attachedFiles: context.attachedFiles,
       });
 
       const cleanSecond = normalizeProviderText(cleanResponse(second || ""));
 
       console.log(
-        "[SVANSAI] Provider retry result:",
+        "[SVANS-AI] Provider retry result:",
         provider,
         cleanSecond ? cleanSecond.slice(0, 200) : "[empty]",
       );
@@ -1261,7 +1351,7 @@ ${CORRECTION_RECOVERY_RULES}
         bestRejected = chooseBetterRejected(bestRejected, secondCandidate.result);
       }
     } catch (error) {
-      console.error("[SVANSAI] Provider loop error:", provider, error);
+      console.error("[SVANS-AI] Provider loop error:", provider, error);
     }
   }
 
@@ -1344,13 +1434,52 @@ function formatResponseForContext(
   text: string,
   context: ExtendedChatContext,
 ): string {
-  const cleaned = normalizeProviderText(text);
+  let cleaned = normalizeProviderText(text);
 
-  if (!context.isCorrectionRequest || startsWithCorrectionRecovery(cleaned)) {
-    return cleaned;
+  if (
+    context.responseMode === "direct" &&
+    isWritingReviewRequest(context.latestUserMessage)
+  ) {
+    cleaned = extractDirectWritingRevision(cleaned, context.latestUserMessage);
   }
 
-  return `Oh, I'm sorry. Let me double-check that.\n\n${cleaned}`.trim();
+  if (!context.isCorrectionRequest || startsWithCorrectionRecovery(cleaned)) {
+    return enforceLiveCitations(cleaned, context.effectiveMessage);
+  }
+
+  return enforceLiveCitations(
+    `Oh, I'm sorry. Let me double-check that.\n\n${cleaned}`.trim(),
+    context.effectiveMessage,
+  );
+}
+
+function extractDirectWritingRevision(text: string, original: string): string {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const separator = lines.findIndex((line) => /^---+$/.test(line.trim()));
+  let candidate = separator >= 0 ? lines.slice(separator + 1) : lines;
+
+  while (
+    candidate.length &&
+    /^(here(?:'s| is)|i(?:'ve| have) refined|refined version)/i.test(candidate[0].trim())
+  ) {
+    candidate = candidate.slice(1);
+  }
+
+  const explanationIndex = candidate.findIndex((line) =>
+    /^(this (version|revision)|changes made|what i changed|let me know|if you(?:'d| would) like)/i.test(
+      line.trim(),
+    ),
+  );
+  if (explanationIndex >= 0) candidate = candidate.slice(0, explanationIndex);
+
+  let revision = candidate.join("\n").trim() || text.trim();
+  const salutation = original.match(
+    /\b((?:good morning|good afternoon|good evening|hello|hi|dear)\s*,?\s+[A-Z][a-z]+,?)/i,
+  )?.[1];
+  if (salutation && !normalizeText(revision).includes(normalizeText(salutation))) {
+    revision = `${salutation}\n\n${revision}`;
+  }
+  return revision;
 }
 
 function isRawRetrievalEcho(text: string, context: ExtendedChatContext): boolean {
@@ -1407,7 +1536,7 @@ function isHardStall(text: string): boolean {
 function finalFallback(context: ExtendedChatContext): string {
   const message = context.latestUserMessage;
   const type = context.questionType;
-  const attachedFile = context.attachedFile;
+  const attachedFiles = context.attachedFiles;
   const isCorrectionRequest = context.isCorrectionRequest;
   const normalized = normalizeText(message);
   const intent = detectMessageIntent(message);
@@ -1416,20 +1545,23 @@ function finalFallback(context: ExtendedChatContext): string {
     return "Oh, I'm sorry. Let me double-check that.\n\nI need the original question or answer choices to verify the correction confidently. I won’t blindly change the answer without enough context.";
   }
 
-  if (attachedFile) {
-    if (isImageAttachment(attachedFile)) {
-      return "I received your image, but I couldn't confidently analyze it just now. Send one short note about what you want identified, and I’ll focus on that.";
+  if (attachedFiles.length) {
+    if (attachedFiles.every(isImageAttachment)) {
+      return "I received the images, but I couldn't confidently analyze them just now. Send one short note about what you want compared or identified, and I’ll focus on that.";
     }
 
-    if (isPdfAttachment(attachedFile)) {
-      return "I received your PDF, but I couldn't confidently read it just now. Send the page or section you want extracted, and I’ll focus on that.";
+    if (attachedFiles.some(isPdfAttachment)) {
+      return "I received the PDF, but I couldn't confidently read it just now. If it is scanned, upload the relevant pages as images for visual analysis.";
     }
 
-    if (isTextLikeAttachment(attachedFile)) {
-      return "I received your file, but I couldn't confidently analyze its contents just now. Send the specific part you want reviewed.";
+    if (attachedFiles.some(isTextLikeAttachment)) {
+      if (attachedFiles.some(isDataAttachment)) {
+        return "I received the data file, but I couldn't confidently analyze it just now. Send the exact question you want answered from the table, such as totals, highest value, trends, or cleanup.";
+      }
+      return "I received the files, but I couldn't confidently analyze their contents just now. Send the specific part you want reviewed.";
     }
 
-    return "I received your file, but I couldn't confidently process it just now. Send a short note about what you want from it.";
+    return "I received the files, but I couldn't confidently process them just now. Send a short note about what you want from them.";
   }
 
   if (intent === "greeting") {
@@ -1454,7 +1586,7 @@ function finalFallback(context: ExtendedChatContext): string {
     }
 
     if (/\b(not up to par|repeats|repetitive|fake|top tier|openai|anthropic)\b/i.test(message)) {
-      return "The real fix is to give SVANSAI a stronger conversation layer before it calls the model: track the current goal, resolve short follow-ups, enforce style preferences, reject repetitive drafts, and only learn from answers that pass a quality check. That turns it from a prompt wrapper into an assistant that understands the thread it is inside.";
+      return "The real fix is to give SVANS-AI a stronger conversation layer before it calls the model: track the current goal, resolve short follow-ups, enforce style preferences, reject repetitive drafts, and only learn from answers that pass a quality check. That turns it from a prompt wrapper into an assistant that understands the thread it is inside.";
     }
 
     return normalized.length > 0
@@ -1463,11 +1595,11 @@ function finalFallback(context: ExtendedChatContext): string {
   }
 
   if (context.conversationIntent === "comparison") {
-    return "SVANSAI is different because it is built around your platform workflow, not just a generic chat box. The strongest version is a coordinated assistant: Shield handles safety and risk, Debugger diagnoses problems, Sandbox supports isolated experiments, and SVANSAI ties the pieces together into clear next steps. I wouldn’t claim it is universally better than every top AI company, but it can be better for your own system because it is tailored to your tools, memory, and goals.";
+    return "SVANS-AI is different because it is built around your platform workflow, not just a generic chat box. The strongest version is a coordinated assistant: Shield handles safety and risk, Debugger diagnoses problems, Sandbox supports isolated experiments, and SVANS-AI ties the pieces together into clear next steps. I wouldn’t claim it is universally better than every top AI company, but it can be better for your own system because it is tailored to your tools, memory, and goals.";
   }
 
   if (context.conversationIntent === "project_identity") {
-    return "SVANSAI is the assistant layer that coordinates the experience. Shield protects, Debugger diagnoses, Sandbox isolates experiments, and SVANSAI turns those pieces into a useful conversation and next action.";
+    return "SVANS-AI is the assistant layer that coordinates the experience. Shield protects, Debugger diagnoses, Sandbox isolates experiments, and SVANS-AI turns those pieces into a useful conversation and next action.";
   }
 
   if (/\b(repeating itself|repeats|repetitive|same answer|same template)\b/i.test(message)) {

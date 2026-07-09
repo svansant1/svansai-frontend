@@ -170,6 +170,7 @@ export function detectConversationIntent(input: string): ConversationIntent {
       "exploit this site", "hack this account", "unauthorized access",
       "script to break", "script for breaking", "dump passwords",
       "reverse shell", "shellcode", "payload", "wipe logs", "log wiping",
+      "interactive shell", "erase traces", "cover tracks", "clear logs",
       "disable logging", "phishing template", "phishing email",
       "credential harvester", "malware skeleton", "weaponized",
     ])

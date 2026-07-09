@@ -48,7 +48,7 @@ const LOCKED_FILES = [
 // ─── Read a source file from disk ─────────────────────────────────────────────
 function readSourceFile(filePath: string): string | null {
   try {
-    const fullPath = path.join(process.cwd(), filePath);
+    const fullPath = path.join(/* turbopackIgnore: true */ process.cwd(), filePath);
     return fs.readFileSync(fullPath, "utf-8");
   } catch {
     return null;

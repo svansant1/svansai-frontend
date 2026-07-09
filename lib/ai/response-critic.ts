@@ -120,6 +120,33 @@ export function critiqueResponse(params: {
     reasons.push("debug-mode response lacks diagnosis, checks, or verification detail");
   }
 
+  if (
+    params.conversationState.taskRoute === "analyze" &&
+    /\b(how can i assist|specific question or topic|feel free to share|please attach|upload the file|provide the file)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push("analysis response ignored the attached evidence and asked for information already provided");
+  }
+
+  const teachingFirst = /teaching-first|teach the concept|clue or checkpoint/i.test(
+    params.conversationState.modeBehavior,
+  );
+  const explicitDirect = /\b(just (give me|tell me)|direct answer|give me the answer|answer only|no hints)\b/i.test(
+    params.latestUserMessage,
+  );
+  const looksLikeQuiz = /\b([a-d][.)]\s|multiple choice|which (answer|option)|quiz)\b/i.test(
+    params.latestUserMessage,
+  );
+  if (
+    teachingFirst &&
+    !explicitDirect &&
+    looksLikeQuiz &&
+    /^(correct )?answer\s*:|^[a-d]\s*[—:-]/i.test(response)
+  ) {
+    reasons.push("teaching-first mode revealed the quiz answer before offering a useful clue or reasoning step");
+  }
+
   const score = Math.max(0, 1 - reasons.length * 0.28);
 
   return {

@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { deployCandidate, rejectCandidate } from "@/lib/ai/deployer";
+import { verifyOwnerRequest } from "@/lib/auth/server-owner";
 
 export async function POST(req: Request) {
   try {
-    const { candidateId, action, userId } = (await req.json()) as {
+    const { candidateId, action } = (await req.json()) as {
       candidateId: string;
       action: "deploy" | "reject";
-      userId: string;
     };
 
-    if (userId !== process.env.OWNER_USER_ID) {
+    const auth = await verifyOwnerRequest(req);
+    if (!auth.authorized) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

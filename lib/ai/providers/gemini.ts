@@ -5,6 +5,7 @@ type GeminiInput = {
   systemInstruction: string;
   temperature: number;
   model?: string;
+  attachedFiles?: Array<{ name: string; type: string; base64: string }>;
 };
 
 const apiKey = process.env.GEMINI_API_KEY || "";
@@ -14,9 +15,16 @@ export async function generateWithGemini(input: GeminiInput): Promise<string | n
   if (!apiKey) return null;
 
   try {
+    const images = (input.attachedFiles ?? []).filter((file) => file.type.startsWith("image/") && file.base64);
     const result = await ai.models.generateContent({
       model: input.model || "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: input.prompt }] }],
+      contents: [{
+        role: "user",
+        parts: [
+          { text: images.length ? `${input.prompt}\n\nAnalyze the ${images.length} attached images together in their supplied order.` : input.prompt },
+          ...images.map((image) => ({ inlineData: { mimeType: image.type, data: image.base64 } })),
+        ],
+      }],
       config: {
         systemInstruction: input.systemInstruction,
         temperature: input.temperature,

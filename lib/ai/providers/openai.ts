@@ -3,11 +3,11 @@ type OpenAIInput = {
   systemInstruction: string;
   temperature: number;
   model?: string;
-  attachedFile?: {
+  attachedFiles?: Array<{
     name: string;
     type: string;
     base64: string;
-  };
+  }>;
 };
 
 export async function generateWithOpenAI(
@@ -17,14 +17,11 @@ export async function generateWithOpenAI(
   if (!apiKey) return null;
 
   try {
-    const isImage = input.attachedFile?.type?.startsWith("image/");
+    const images = (input.attachedFiles ?? []).filter(
+      (file) => file.type.startsWith("image/") && file.base64,
+    );
 
-    if (isImage && input.attachedFile?.base64) {
-      console.log("OPENAI IMAGE MODE:", {
-        hasFile: !!input.attachedFile,
-        type: input.attachedFile?.type,
-        name: input.attachedFile?.name,
-      });
+    if (images.length) {
 
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -45,14 +42,14 @@ export async function generateWithOpenAI(
               content: [
                 {
                   type: "text",
-                  text: input.prompt,
+                  text: `${input.prompt}\n\nThe attached images are ordered Image 1 through Image ${images.length}. Analyze them together and refer to their numbers when comparing them.`,
                 },
-                {
+                ...images.map((image) => ({
                   type: "image_url",
                   image_url: {
-                    url: `data:${input.attachedFile.type};base64,${input.attachedFile.base64}`,
+                    url: `data:${image.type};base64,${image.base64}`,
                   },
-                },
+                })),
               ],
             },
           ],
@@ -65,10 +62,7 @@ export async function generateWithOpenAI(
       }
 
       const data = await res.json();
-      console.log("OPENAI_IMAGE_RAW_RESPONSE:", JSON.stringify(data, null, 2));
-
       const text = data?.choices?.[0]?.message?.content?.trim() || "";
-      console.log("OPENAI_IMAGE_FINAL_TEXT:", text || "[empty]");
       return text || null;
     }
 
@@ -94,10 +88,7 @@ export async function generateWithOpenAI(
     }
 
     const data = await res.json();
-    console.log("OPENAI_TEXT_RAW_RESPONSE:", JSON.stringify(data, null, 2));
-
     const text = data?.choices?.[0]?.message?.content?.trim() || "";
-    console.log("OPENAI_TEXT_FINAL_TEXT:", text || "[empty]");
     return text || null;
   } catch (error) {
     console.error("OPENAI_PROVIDER_ERROR:", error);

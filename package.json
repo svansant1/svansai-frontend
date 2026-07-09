@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:chat": "node scripts/chat-regression.mjs"
+    "test:chat": "node scripts/chat-regression.mjs",
+    "test:attachments": "node scripts/attachment-regression.mjs",
+    "test:guards": "node scripts/quality-guards-regression.mjs",
+    "test:profile-memory": "node scripts/profile-memory-regression.mjs",
+    "readiness": "node scripts/readiness-check.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.49.0",
@@ -16,6 +20,7 @@
     "@tavily/core": "^0.7.3",
     "axios": "^1.7.7",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.460.0",
     "next": "^16.2.3",
@@ -23,6 +28,7 @@
     "react-dom": "19.1.0",
     "recharts": "^2.12.7",
     "socket.io-client": "^4.7.5",
+    "unpdf": "^1.6.2",
     "uuid": "^11.0.3"
   },
   "devDependencies": {
@@ -34,5 +40,10 @@
     "prettier": "^3.8.3",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

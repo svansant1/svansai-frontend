@@ -144,15 +144,15 @@ export function extractLearnedMemory(messages: ChatMessage[]): MemoryItem[] {
   if (
     userMessages.some(
       (m) =>
-        m.includes("svansai") ||
+        m.includes("SVANS-AI") ||
         m.includes("super ai") ||
         m.includes("make it smarter") ||
         m.includes("make it more developed")
     )
   ) {
     learned.push({
-      id: "project-svansai",
-      summary: "User is actively building SVANSAI and wants it to be smarter, more conversational, and more adaptive.",
+      id: "project-SVANS-AI",
+      summary: "User is actively building SVANS-AI and wants it to be smarter, more conversational, and more adaptive.",
       relevance: 0.97,
     });
   }

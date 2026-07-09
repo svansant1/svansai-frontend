@@ -45,6 +45,7 @@ export async function getLearnedKnowledge(query: string): Promise<RetrievalItem[
     const { data, error } = await supabase
       .from("learned_knowledge")
       .select("id,title,category,summary,source,confidence,tags,usage_count")
+      .eq("verified", true)
       .order("updated_at", { ascending: false })
       .limit(250);
 

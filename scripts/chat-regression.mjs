@@ -1,4 +1,5 @@
 const baseUrl = process.env.SVANSAI_TEST_URL || "http://localhost:3000";
+const testClientIp = process.env.SVANSAI_TEST_CLIENT_IP || "127.0.0.201";
 
 const prompts = [
   "What makes you different from other AI assistants?",
@@ -59,7 +60,7 @@ async function ask(prompt, prior = []) {
 async function askTurn(history, prompt, responseMode = "auto") {
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-forwarded-for": testClientIp },
     body: JSON.stringify({
       sessionId: "chat-regression-quality",
       responseMode,
@@ -268,3 +269,84 @@ assert(
 );
 
 console.log("\nConversation recall regression prompts completed.");
+
+const writingReviewHistory = [
+  {
+    role: "user",
+    content: "Which of these jobs would you choose?",
+  },
+  {
+    role: "assistant",
+    content: "I would compare the responsibilities and growth opportunities.",
+  },
+  {
+    role: "user",
+    content: "What matters most when comparing all of them?",
+  },
+  {
+    role: "assistant",
+    content: "Prioritize fit, growth, compensation, and the work environment.",
+  },
+];
+
+const refinementPrompt = `how is this for refine Good evening, Janet,
+
+Looking at the job postings you chose, I have to say they all look pretty intriguing. I can definitely see why you selected them. If I had to choose, I think I would lean toward either Job #1 or Job #3. If you had to pick just one out of the three, which one would you choose the most, and why?`;
+
+const refinementText = await askTurn(
+  writingReviewHistory,
+  refinementPrompt,
+  "direct",
+);
+const refinementCompact = refinementText.replace(/\s+/g, " ").trim();
+console.log(`\nPROMPT: writing refinement must bypass conversation recall\nRESPONSE: ${refinementCompact.slice(0, 500)}`);
+assert(
+  !/prior question-like messages|letter answers|loaded chat history/i.test(refinementCompact),
+  "Writing refinement was hijacked by the conversation-recall shortcut.",
+);
+assert(
+  /good evening/i.test(refinementCompact) && /janet/i.test(refinementCompact),
+  "Writing refinement did not address the supplied draft.",
+);
+
+console.log("\nRouting precedence regression prompts completed.");
+
+const tutorHistory = [];
+const tutorAnswer = await askTurn(
+  tutorHistory,
+  "Quiz question: Which layer of the OSI model routes packets? A. Data Link B. Network C. Transport D. Session",
+  "tutor",
+);
+assert(
+  !/^(correct )?answer\s*:|^[a-d]\s*[—:-]/i.test(tutorAnswer.trim()),
+  "Tutor mode revealed the answer before teaching or providing a clue.",
+);
+
+const directHistory = [];
+const directAnswer = await askTurn(
+  directHistory,
+  "Give me the direct answer: Which layer of the OSI model routes packets? A. Data Link B. Network C. Transport D. Session",
+  "direct",
+);
+assert(
+  /\b(network|b\b)/i.test(directAnswer),
+  "Direct mode did not provide the requested answer.",
+);
+
+const orchestrationResponse = await fetch(`${baseUrl}/api/chat`, {
+  method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": testClientIp },
+  body: JSON.stringify({
+    sessionId: "orchestration-regression",
+    responseMode: "debug",
+    messages: [{ role: "user", content: "Debug this error: connection refused." }],
+  }),
+});
+const orchestrationData = await orchestrationResponse.json();
+assert(orchestrationData?.orchestration?.route === "debug", "Debug request did not use the debug route.");
+assert(
+  orchestrationData?.orchestration?.recommendedModules?.includes("debugger"),
+  "Debug route did not recommend the Debugger platform module.",
+);
+
+console.log("\nMode and orchestration regression prompts completed.");

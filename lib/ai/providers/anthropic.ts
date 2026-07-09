@@ -3,6 +3,7 @@ type AnthropicInput = {
   systemInstruction: string;
   temperature: number;
   model?: string;
+  attachedFiles?: Array<{ name: string; type: string; base64: string }>;
 };
 
 export async function generateWithAnthropic(input: AnthropicInput): Promise<string | null> {
@@ -10,6 +11,7 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
   if (!apiKey) return null;
 
   try {
+    const images = (input.attachedFiles ?? []).filter((file) => file.type.startsWith("image/") && file.base64);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -22,7 +24,18 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
         max_tokens: 1200,
         temperature: input.temperature,
         system: input.systemInstruction,
-        messages: [{ role: "user", content: input.prompt }],
+        messages: [{
+          role: "user",
+          content: images.length
+            ? [
+                { type: "text", text: `${input.prompt}\n\nAnalyze the ${images.length} attached images together in their supplied order.` },
+                ...images.map((image) => ({
+                  type: "image",
+                  source: { type: "base64", media_type: image.type, data: image.base64 },
+                })),
+              ]
+            : input.prompt,
+        }],
       }),
     });
 
