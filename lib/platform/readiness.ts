@@ -18,7 +18,6 @@ const REQUIRED_ENV = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
-  "OWNER_USER_ID",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",
@@ -45,6 +44,24 @@ function envCheck(name: string, required: boolean): ReadinessCheck {
     name,
     status: required ? "missing" : "warning",
     detail: required ? "Required for production." : "Optional feature is disabled until configured.",
+  };
+}
+
+function ownerIdentityCheck(): ReadinessCheck {
+  const ownerId = process.env.OWNER_USER_ID?.trim();
+  const ownerEmail = process.env.OWNER_EMAIL?.trim();
+  if (ownerId || ownerEmail) {
+    return {
+      name: "OWNER_USER_ID or OWNER_EMAIL",
+      status: "ok",
+      detail: ownerId ? "Owner user ID is configured." : "Owner email is configured.",
+    };
+  }
+
+  return {
+    name: "OWNER_USER_ID or OWNER_EMAIL",
+    status: "missing",
+    detail: "Required for owner/admin controls. Configure either OWNER_USER_ID or OWNER_EMAIL.",
   };
 }
 
@@ -91,6 +108,7 @@ async function checkSupabaseTable(table: string): Promise<ReadinessCheck> {
 export async function buildReadinessReport(): Promise<ReadinessReport> {
   const checks: ReadinessCheck[] = [
     ...REQUIRED_ENV.map((name) => envCheck(name, true)),
+    ownerIdentityCheck(),
     ...OPTIONAL_ENV.map((name) => envCheck(name, false)),
     await checkSupabaseTable("writing_profiles"),
     await checkSupabaseTable("user_memories"),

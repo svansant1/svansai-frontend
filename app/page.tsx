@@ -12,6 +12,7 @@ import {
   getConversationMessages,
   listConversations,
   replaceConversationMessages,
+  updateConversationTitle,
   type ConversationRecord,
 } from "@/lib/db/chat-history";
 import {
@@ -71,6 +72,10 @@ export default function HomePage() {
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(null);
+  const [editingConversationId, setEditingConversationId] = useState<
+    string | null
+  >(null);
+  const [editingConversationTitle, setEditingConversationTitle] = useState("");
   const [initialMessages, setInitialMessages] = useState<
     ChatMessage[] | undefined
   >(undefined);
@@ -415,7 +420,10 @@ export default function HomePage() {
           creatingConversationRef.current = true;
           creatingConversationPromiseRef.current = (async () => {
             try {
-              const created = await createConversation(aiUser.id, firstUserMessage);
+              const created = await createConversation(
+                aiUser.id,
+                firstUserMessage,
+              );
               if (!created) return null;
               activeConversationIdRef.current = created.id;
               setActiveConversationId(created.id);
@@ -464,7 +472,37 @@ export default function HomePage() {
   const handleDeleteConversation = async (conversationId: string) => {
     await deleteConversation(conversationId);
     setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+    if (editingConversationId === conversationId) {
+      setEditingConversationId(null);
+      setEditingConversationTitle("");
+    }
     if (activeConversationIdRef.current === conversationId) handleNewChat();
+  };
+
+  const beginRenameConversation = (conversation: ConversationRecord) => {
+    setEditingConversationId(conversation.id);
+    setEditingConversationTitle(conversation.title);
+  };
+
+  const cancelRenameConversation = () => {
+    setEditingConversationId(null);
+    setEditingConversationTitle("");
+  };
+
+  const saveConversationTitle = async (conversationId: string) => {
+    const title = editingConversationTitle.trim().slice(0, 80);
+    if (!title) return;
+
+    const updatedAt = new Date().toISOString();
+    await updateConversationTitle(conversationId, title);
+    setConversations((prev) =>
+      prev.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, title, updated_at: updatedAt }
+          : conversation,
+      ),
+    );
+    cancelRenameConversation();
   };
 
   // ─── Mascot drag ──────────────────────────────────────────────────────────
@@ -504,7 +542,8 @@ export default function HomePage() {
   };
 
   const robotSize = isMobile ? 96 : 230;
-  const isShortDesktop = !isMobile && viewportHeight > 0 && viewportHeight < 850;
+  const isShortDesktop =
+    !isMobile && viewportHeight > 0 && viewportHeight < 850;
 
   const RobotMascot = ({ size }: { size: number }) => (
     <div
@@ -674,6 +713,200 @@ export default function HomePage() {
     </div>
   );
 
+  const ConversationRow = ({
+    conversation,
+    compact = false,
+  }: {
+    conversation: ConversationRecord;
+    compact?: boolean;
+  }) => {
+    const isActive = activeConversationId === conversation.id;
+    const isEditing = editingConversationId === conversation.id;
+
+    if (compact) {
+      return (
+        <button
+          onClick={() => handleLoadConversation(conversation.id)}
+          style={{
+            width: "100%",
+            padding: "10px",
+            borderRadius: "13px",
+            border: isActive
+              ? "1px solid rgba(56,189,248,0.55)"
+              : "1px solid rgba(255,255,255,0.10)",
+            background: isActive
+              ? "linear-gradient(135deg, rgba(56,189,248,0.16), rgba(168,85,247,0.10))"
+              : "rgba(255,255,255,0.04)",
+            color: "white",
+            cursor: "pointer",
+            textAlign: "center",
+            fontSize: "1rem",
+            boxShadow: isActive ? "0 10px 26px rgba(56,189,248,0.12)" : "none",
+          }}
+          title={conversation.title}
+          aria-label={`Open conversation ${conversation.title}`}
+        >
+          💬
+        </button>
+      );
+    }
+
+    if (isEditing) {
+      return (
+        <div
+          style={{
+            display: "flex",
+            gap: "6px",
+            alignItems: "stretch",
+            minWidth: 0,
+          }}
+        >
+          <input
+            value={editingConversationTitle}
+            onChange={(event) =>
+              setEditingConversationTitle(event.target.value)
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter")
+                void saveConversationTitle(conversation.id);
+              if (event.key === "Escape") cancelRenameConversation();
+            }}
+            autoFocus
+            maxLength={80}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: "10px 12px",
+              borderRadius: "13px",
+              border: "1px solid rgba(56,189,248,0.55)",
+              background: "rgba(15,23,42,0.82)",
+              color: "white",
+              outline: "none",
+              fontSize: "0.9rem",
+              boxShadow: "0 10px 26px rgba(56,189,248,0.12)",
+            }}
+            aria-label={`Rename conversation ${conversation.title}`}
+          />
+
+          <button
+            onClick={() => void saveConversationTitle(conversation.id)}
+            disabled={!editingConversationTitle.trim()}
+            style={{
+              padding: "10px 11px",
+              borderRadius: "13px",
+              border: "1px solid rgba(34,197,94,0.28)",
+              background: editingConversationTitle.trim()
+                ? "rgba(34,197,94,0.14)"
+                : "rgba(255,255,255,0.04)",
+              color: editingConversationTitle.trim()
+                ? "rgba(187,247,208,0.95)"
+                : "rgba(255,255,255,0.4)",
+              cursor: editingConversationTitle.trim()
+                ? "pointer"
+                : "not-allowed",
+              flexShrink: 0,
+            }}
+            aria-label="Save conversation name"
+            title="Save name"
+          >
+            ✓
+          </button>
+
+          <button
+            onClick={cancelRenameConversation}
+            style={{
+              padding: "10px 11px",
+              borderRadius: "13px",
+              border: "1px solid rgba(255,255,255,0.10)",
+              background: "rgba(255,255,255,0.04)",
+              color: "rgba(255,255,255,0.72)",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+            aria-label="Cancel renaming conversation"
+            title="Cancel"
+          >
+            ×
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        style={{
+          display: "flex",
+          gap: "6px",
+          alignItems: "stretch",
+          minWidth: 0,
+        }}
+      >
+        <button
+          onClick={() => handleLoadConversation(conversation.id)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            textAlign: "left",
+            padding: "10px 12px",
+            borderRadius: "13px",
+            border: isActive
+              ? "1px solid rgba(56,189,248,0.55)"
+              : "1px solid rgba(255,255,255,0.10)",
+            background: isActive
+              ? "linear-gradient(135deg, rgba(56,189,248,0.16), rgba(168,85,247,0.10))"
+              : "rgba(255,255,255,0.04)",
+            color: "white",
+            cursor: "pointer",
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            textOverflow: "ellipsis",
+            fontSize: "0.9rem",
+            boxShadow: isActive ? "0 10px 26px rgba(56,189,248,0.12)" : "none",
+          }}
+          title={conversation.title}
+        >
+          {conversation.title}
+        </button>
+
+        <button
+          onClick={() => beginRenameConversation(conversation)}
+          style={{
+            padding: "10px 11px",
+            borderRadius: "13px",
+            border: "1px solid rgba(56,189,248,0.18)",
+            background: "rgba(56,189,248,0.08)",
+            color: "rgba(186,230,253,0.9)",
+            cursor: "pointer",
+            fontSize: "0.85rem",
+            flexShrink: 0,
+          }}
+          aria-label={`Rename conversation ${conversation.title}`}
+          title="Rename conversation"
+        >
+          ✎
+        </button>
+
+        <button
+          onClick={() => handleDeleteConversation(conversation.id)}
+          style={{
+            padding: "10px 12px",
+            borderRadius: "13px",
+            border: "1px solid rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.04)",
+            color: "rgba(255,255,255,0.72)",
+            cursor: "pointer",
+            fontSize: "0.85rem",
+            flexShrink: 0,
+          }}
+          aria-label={`Delete conversation ${conversation.title}`}
+          title="Delete conversation"
+        >
+          ×
+        </button>
+      </div>
+    );
+  };
+
   const SidebarContent = () => (
     <>
       <div
@@ -772,65 +1005,7 @@ export default function HomePage() {
         )}
 
         {conversations.map((conversation) => (
-          <div
-            key={conversation.id}
-            style={{
-              display: "flex",
-              gap: "6px",
-              alignItems: "stretch",
-              minWidth: 0,
-            }}
-          >
-            <button
-              onClick={() => handleLoadConversation(conversation.id)}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                textAlign: "left",
-                padding: "10px 12px",
-                borderRadius: "13px",
-                border:
-                  activeConversationId === conversation.id
-                    ? "1px solid rgba(56,189,248,0.55)"
-                    : "1px solid rgba(255,255,255,0.10)",
-                background:
-                  activeConversationId === conversation.id
-                    ? "linear-gradient(135deg, rgba(56,189,248,0.16), rgba(168,85,247,0.10))"
-                    : "rgba(255,255,255,0.04)",
-                color: "white",
-                cursor: "pointer",
-                overflow: "hidden",
-                whiteSpace: "nowrap",
-                textOverflow: "ellipsis",
-                fontSize: "0.9rem",
-                boxShadow:
-                  activeConversationId === conversation.id
-                    ? "0 10px 26px rgba(56,189,248,0.12)"
-                    : "none",
-              }}
-              title={conversation.title}
-            >
-              {conversation.title}
-            </button>
-
-            <button
-              onClick={() => handleDeleteConversation(conversation.id)}
-              style={{
-                padding: "10px 12px",
-                borderRadius: "13px",
-                border: "1px solid rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.04)",
-                color: "rgba(255,255,255,0.72)",
-                cursor: "pointer",
-                fontSize: "0.85rem",
-                flexShrink: 0,
-              }}
-              aria-label={`Delete conversation ${conversation.title}`}
-              title="Delete conversation"
-            >
-              ×
-            </button>
-          </div>
+          <ConversationRow key={conversation.id} conversation={conversation} />
         ))}
       </div>
     </>
@@ -1173,63 +1348,10 @@ export default function HomePage() {
                 )}
 
                 {conversations.map((conversation) => (
-                  <div
+                  <ConversationRow
                     key={conversation.id}
-                    style={{
-                      display: "flex",
-                      gap: "6px",
-                      alignItems: "stretch",
-                      minWidth: 0,
-                    }}
-                  >
-                    <button
-                      onClick={() => handleLoadConversation(conversation.id)}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        textAlign: "left",
-                        padding: "10px 12px",
-                        borderRadius: "13px",
-                        border:
-                          activeConversationId === conversation.id
-                            ? "1px solid rgba(56,189,248,0.55)"
-                            : "1px solid rgba(255,255,255,0.10)",
-                        background:
-                          activeConversationId === conversation.id
-                            ? "linear-gradient(135deg, rgba(56,189,248,0.16), rgba(168,85,247,0.10))"
-                            : "rgba(255,255,255,0.04)",
-                        color: "white",
-                        cursor: "pointer",
-                        overflow: "hidden",
-                        whiteSpace: "nowrap",
-                        textOverflow: "ellipsis",
-                        boxShadow:
-                          activeConversationId === conversation.id
-                            ? "0 10px 26px rgba(56,189,248,0.12)"
-                            : "none",
-                      }}
-                      title={conversation.title}
-                    >
-                      {conversation.title}
-                    </button>
-
-                    <button
-                      onClick={() => handleDeleteConversation(conversation.id)}
-                      style={{
-                        padding: "10px 12px",
-                        borderRadius: "13px",
-                        border: "1px solid rgba(255,255,255,0.10)",
-                        background: "rgba(255,255,255,0.04)",
-                        color: "rgba(255,255,255,0.72)",
-                        cursor: "pointer",
-                        flexShrink: 0,
-                      }}
-                      aria-label={`Delete conversation ${conversation.title}`}
-                      title="Delete conversation"
-                    >
-                      ×
-                    </button>
-                  </div>
+                    conversation={conversation}
+                  />
                 ))}
               </div>
             )}
@@ -1246,35 +1368,11 @@ export default function HomePage() {
                 }}
               >
                 {conversations.map((conversation) => (
-                  <button
+                  <ConversationRow
                     key={conversation.id}
-                    onClick={() => handleLoadConversation(conversation.id)}
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      borderRadius: "13px",
-                      border:
-                        activeConversationId === conversation.id
-                          ? "1px solid rgba(56,189,248,0.55)"
-                          : "1px solid rgba(255,255,255,0.10)",
-                      background:
-                        activeConversationId === conversation.id
-                          ? "linear-gradient(135deg, rgba(56,189,248,0.16), rgba(168,85,247,0.10))"
-                          : "rgba(255,255,255,0.04)",
-                      color: "white",
-                      cursor: "pointer",
-                      textAlign: "center",
-                      fontSize: "1rem",
-                      boxShadow:
-                        activeConversationId === conversation.id
-                          ? "0 10px 26px rgba(56,189,248,0.12)"
-                          : "none",
-                    }}
-                    title={conversation.title}
-                    aria-label={`Open conversation ${conversation.title}`}
-                  >
-                    💬
-                  </button>
+                    conversation={conversation}
+                    compact
+                  />
                 ))}
               </div>
             )}

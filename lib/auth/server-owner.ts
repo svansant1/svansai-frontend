@@ -17,10 +17,11 @@ function bearerToken(req: Request): string | null {
 export async function verifyOwnerRequest(req: Request): Promise<OwnerAuthResult> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const ownerId = process.env.OWNER_USER_ID;
+  const ownerId = process.env.OWNER_USER_ID?.trim();
+  const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
   const token = bearerToken(req);
 
-  if (!url || !serviceKey || !ownerId) {
+  if (!url || !serviceKey || (!ownerId && !ownerEmail)) {
     return { authorized: false, reason: "misconfigured" };
   }
 
@@ -32,7 +33,9 @@ export async function verifyOwnerRequest(req: Request): Promise<OwnerAuthResult>
   const { data, error } = await supabase.auth.getUser(token);
 
   if (error || !data.user) return { authorized: false, reason: "invalid_token" };
-  if (data.user.id !== ownerId) return { authorized: false, reason: "not_owner" };
+  const emailMatches = ownerEmail && data.user.email?.toLowerCase() === ownerEmail;
+  const idMatches = ownerId && data.user.id === ownerId;
+  if (!idMatches && !emailMatches) return { authorized: false, reason: "not_owner" };
 
   return { authorized: true, userId: data.user.id };
 }
