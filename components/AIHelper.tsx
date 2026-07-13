@@ -1518,6 +1518,29 @@ export default function AIHelper({
               >
                 Voice Profile
               </button>
+              {starterQuoteMode === "off" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStarterQuoteMode("ask");
+                    setStarterQuoteDismissed(false);
+                    setStarterQuoteAccepted(false);
+                  }}
+                  style={{
+                    marginLeft: "8px",
+                    padding: "7px 12px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(168,85,247,0.28)",
+                    background: "rgba(168,85,247,0.10)",
+                    color: "#ddd6fe",
+                    cursor: "pointer",
+                    fontWeight: 800,
+                  }}
+                  title="Turn starter quotes back on"
+                >
+                  Quotes off — turn on
+                </button>
+              )}
               {showVoiceProfile && (
                 <div
                   style={{
@@ -1669,7 +1692,13 @@ export default function AIHelper({
                         <button
                           key={mode}
                           type="button"
-                          onClick={() => setStarterQuoteMode(mode)}
+                          onClick={() => {
+                            setStarterQuoteMode(mode);
+                            if (mode !== "off") {
+                              setStarterQuoteDismissed(false);
+                              setStarterQuoteAccepted(mode === "show");
+                            }
+                          }}
                           style={{
                             padding: "6px 10px",
                             borderRadius: "999px",
