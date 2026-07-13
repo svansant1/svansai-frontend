@@ -68,6 +68,11 @@ import {
   type UserMemory,
 } from "@/lib/personalization/structured-memory";
 import { applyCritique, type RuntimeTelemetry } from "@/lib/platform/telemetry";
+import {
+  extractChecklistFromImages,
+  handleChecklistRequest,
+  shouldExtractChecklistFromImages,
+} from "@/lib/ai/checklist-state";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
@@ -215,9 +220,7 @@ const LIVE_INFO_PATTERNS = [
 function needsLiveSearch(message: string): boolean {
   const lower = message.toLowerCase();
 
-  return LIVE_INFO_PATTERNS.some((pattern) =>
-    lower.includes(pattern),
-  );
+  return LIVE_INFO_PATTERNS.some((pattern) => lower.includes(pattern));
 }
 
 const CONVERSATION_STYLE_RULES = `
@@ -314,7 +317,8 @@ function isTextLikeAttachment(file?: AttachedFile) {
     file.type === "application/json" ||
     file.type === "application/csv" ||
     file.type === "application/vnd.ms-excel" ||
-    file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.type ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
     file.type === "text/csv" ||
     file.type === "text/tab-separated-values" ||
     file.type === "text/x-python" ||
@@ -338,7 +342,8 @@ function isDataAttachment(file?: AttachedFile) {
     file.type === "text/tab-separated-values" ||
     file.type === "application/csv" ||
     file.type === "application/vnd.ms-excel" ||
-    file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.type ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
     /\.(csv|tsv|xlsx)$/i.test(file.name)
   );
 }
@@ -380,7 +385,11 @@ function detectMessageIntent(message: string): MessageIntent {
     return "question";
   }
 
-  if (/^(hi|hey|hello|yo|good morning|good afternoon|good evening)\b/.test(normalized)) {
+  if (
+    /^(hi|hey|hello|yo|good morning|good afternoon|good evening)\b/.test(
+      normalized,
+    )
+  ) {
     return "greeting";
   }
 
@@ -388,11 +397,15 @@ function detectMessageIntent(message: string): MessageIntent {
     return "thanks";
   }
 
-  if (/^(yes|yeah|yep|ok|okay|sounds good|got it|that works)\b/.test(normalized)) {
+  if (
+    /^(yes|yeah|yep|ok|okay|sounds good|got it|that works)\b/.test(normalized)
+  ) {
     return "agreement";
   }
 
-  if (/^(no|nope|nah|not really|that is wrong|that's wrong)\b/.test(normalized)) {
+  if (
+    /^(no|nope|nah|not really|that is wrong|that's wrong)\b/.test(normalized)
+  ) {
     return "disagreement";
   }
 
@@ -413,7 +426,9 @@ function looksLikeCodeFragment(message: string): boolean {
   return (
     /^[A-Za-z_$][\w$]*\s*=\s*.+$/.test(trimmed) ||
     /^[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\s*=/.test(trimmed) ||
-    /^(const|let|var|if|for|while|return|class|def|import|from)\b/.test(trimmed) ||
+    /^(const|let|var|if|for|while|return|class|def|import|from)\b/.test(
+      trimmed,
+    ) ||
     /[{}();]/.test(trimmed) ||
     trimmed.includes("=>")
   );
@@ -496,7 +511,11 @@ function isConversationRecallRequest(message: string): boolean {
     );
   const writingRequest = isWritingReviewRequest(message);
 
-  return !writingRequest && explicitRecallAction && (explicitHistoryTarget || explicitQuestionCollection);
+  return (
+    !writingRequest &&
+    explicitRecallAction &&
+    (explicitHistoryTarget || explicitQuestionCollection)
+  );
 }
 
 function extractAnswerLetter(text: string): string | null {
@@ -521,9 +540,10 @@ function buildConversationRecallResponse(
 ): string | null {
   if (!isConversationRecallRequest(latestUserMessage)) return null;
 
-  const wantsLettersOnly = /\b(just|only)\b.*\bletter|letter answer|letters only/i.test(
-    latestUserMessage,
-  );
+  const wantsLettersOnly =
+    /\b(just|only)\b.*\bletter|letter answer|letters only/i.test(
+      latestUserMessage,
+    );
   const wantsQuestions = /\bquestions?\b/i.test(latestUserMessage);
   const answeredQuestions: Array<{
     question: string;
@@ -547,7 +567,9 @@ function buildConversationRecallResponse(
       .slice(i + 1)
       .find((candidate) => candidate.role === "assistant");
 
-    const answerLetter = assistant ? extractAnswerLetter(assistant.content) : null;
+    const answerLetter = assistant
+      ? extractAnswerLetter(assistant.content)
+      : null;
     const looksLikeQuestion =
       message.content.includes("?") ||
       /\b(correct answer|multiple choice|class [abcde]|option [abcde]|checkbox|radio button|osi|subnet|address|switch|mac)\b/i.test(
@@ -657,8 +679,10 @@ function shouldSaveAnswerPattern(
   if (isHardStall(response)) return false;
   if (hasCannedResponsePattern(response)) return false;
   if (normalized.includes("i couldn't generate a strong answer")) return false;
-  if (normalized.includes("i can’t help with unauthorized access")) return false;
-  if (normalized.includes("i can't help with unauthorized access")) return false;
+  if (normalized.includes("i can’t help with unauthorized access"))
+    return false;
+  if (normalized.includes("i can't help with unauthorized access"))
+    return false;
 
   return (
     context.conversationIntent === "project_identity" ||
@@ -695,7 +719,9 @@ function containsHarmfulTechnicalOutput(text: string): boolean {
       normalized.includes("netcat"));
 
   if (isSafetyRefusal(text) && !refusalWithOperationalDetail) return false;
-  return HARMFUL_TECHNICAL_OUTPUT_PATTERNS.some((pattern) => pattern.test(text));
+  return HARMFUL_TECHNICAL_OUTPUT_PATTERNS.some((pattern) =>
+    pattern.test(text),
+  );
 }
 
 function getProjectModuleAnswer(message: string): string | null {
@@ -710,15 +736,24 @@ function getProjectModuleAnswer(message: string): string | null {
     return "Sandbox should be the isolated testing space, Debugger should inspect failures and explain what broke, Shield should watch for risk and enforce safety rules, and SVANS-AI should coordinate the conversation across all of them. In practice: Sandbox runs experiments, Debugger turns the results into fixes, Shield blocks unsafe paths, and SVANS-AI explains the next best action.";
   }
 
-  if (normalized.includes("what is shield for") || /\bwhat (is|does).*\bshield\b/.test(normalized)) {
+  if (
+    normalized.includes("what is shield for") ||
+    /\bwhat (is|does).*\bshield\b/.test(normalized)
+  ) {
     return "Shield is the protection layer. It should focus on safety checks, risky prompt detection, secure defaults, and guardrails around cybersecurity requests, user data, and production actions.";
   }
 
-  if (normalized.includes("what is debugger for") || /\bwhat (is|does).*\bdebugger\b/.test(normalized)) {
+  if (
+    normalized.includes("what is debugger for") ||
+    /\bwhat (is|does).*\bdebugger\b/.test(normalized)
+  ) {
     return "Debugger is the diagnosis layer. It should inspect errors, trace why something failed, explain the likely cause, and suggest the smallest practical fix.";
   }
 
-  if (normalized.includes("what is sandbox for") || /\bwhat (is|does).*\bsandbox\b/.test(normalized)) {
+  if (
+    normalized.includes("what is sandbox for") ||
+    /\bwhat (is|does).*\bsandbox\b/.test(normalized)
+  ) {
     return "Sandbox is the isolated experiment layer. It should let SVANS-AI test ideas, simulations, prompts, and code-like reasoning without treating the experiment as production truth.";
   }
 
@@ -823,7 +858,10 @@ function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {
     return ["gemini", "openai", "anthropic"];
   }
 
-  if (context.responseMode === "debug" || context.conversationState.taskRoute === "debug") {
+  if (
+    context.responseMode === "debug" ||
+    context.conversationState.taskRoute === "debug"
+  ) {
     return ["openai", "anthropic", "gemini"];
   }
 
@@ -843,7 +881,10 @@ function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {
     return ["anthropic", "openai", "gemini"];
   }
 
-  if (context.questionType === "writing" || context.responseStyle === "conversation") {
+  if (
+    context.questionType === "writing" ||
+    context.responseStyle === "conversation"
+  ) {
     return ["anthropic", "openai", "gemini"];
   }
 
@@ -1034,7 +1075,9 @@ Live search was attempted but no reliable current information could be verified.
     const position = `File ${index + 1} of ${attachedFiles.length}`;
     const understood = await understandAttachedFile(file);
     if (understood.kind === "image") {
-      fileContextParts.push(`${position}: image "${file.name}" (${file.type}). Analyze it together with the other numbered images.`);
+      fileContextParts.push(
+        `${position}: image "${file.name}" (${file.type}). Analyze it together with the other numbered images.`,
+      );
     } else if (understood.kind === "pdf") {
       fileContextParts.push(
         understood.extractedText
@@ -1042,14 +1085,31 @@ Live search was attempted but no reliable current information could be verified.
           : `${position}: PDF "${file.name}". ${understood.error ?? "No text could be extracted."}`,
       );
     } else if (understood.kind === "text") {
-      fileContextParts.push(`${position}: text/code file "${file.name}" (${file.type}). Contents:\n\n${understood.extractedText.slice(0, 20_000)}`);
+      fileContextParts.push(
+        `${position}: text/code file "${file.name}" (${file.type}). Contents:\n\n${understood.extractedText.slice(0, 20_000)}`,
+      );
     } else if (understood.kind === "data") {
-      fileContextParts.push(`${position}: structured data file "${file.name}" (${file.type}). Use this data summary as primary evidence:\n\n${understood.extractedText.slice(0, 20_000)}`);
+      fileContextParts.push(
+        `${position}: structured data file "${file.name}" (${file.type}). Use this data summary as primary evidence:\n\n${understood.extractedText.slice(0, 20_000)}`,
+      );
     } else {
-      fileContextParts.push(`${position}: unsupported file "${file.name}" (${file.type}).`);
+      fileContextParts.push(
+        `${position}: unsupported file "${file.name}" (${file.type}).`,
+      );
     }
   }
   const fileContext = fileContextParts.join("\n\n").slice(0, 100_000);
+
+  if (shouldExtractChecklistFromImages(latestUserMessage, attachedFiles)) {
+    await extractChecklistFromImages(sid, latestUserMessage, attachedFiles);
+  }
+
+  const checklistResponse = handleChecklistRequest(
+    latestUserMessage,
+    sid,
+    messages,
+  );
+  if (checklistResponse) return checklistResponse;
 
   if (fileContext) {
     questionType = await detectQuestionType(
@@ -1074,7 +1134,9 @@ Task:
 Re-check the previous question, identify the correct answer, and respond in the correction recovery format.
 `.trim();
 
-    questionType = await detectQuestionType(previousUserMessage || latestUserMessage);
+    questionType = await detectQuestionType(
+      previousUserMessage || latestUserMessage,
+    );
   } else if (roleplaySimulation) {
     effectiveMessage = `
 The conversation is an active roleplay or simulation.
@@ -1092,7 +1154,11 @@ Keep the simulation non-operational. Do not include real attack commands, exploi
 
 ${mythosState ? buildMythosContext(mythosState) : ""}
 `.trim();
-  } else if ((conversationState.isShortFollowUp || isContextDependentFollowUp(latestUserMessage)) && lastAssistantMessage) {
+  } else if (
+    (conversationState.isShortFollowUp ||
+      isContextDependentFollowUp(latestUserMessage)) &&
+    lastAssistantMessage
+  ) {
     effectiveMessage = `
 User follow-up:
 ${latestUserMessage}
@@ -1117,11 +1183,16 @@ ${lastAssistantMessage}
       ? `${previousUserMessage}\n${latestUserMessage}`
       : latestUserMessage;
 
-  const retrieval = codeFragment || roleplaySimulation
-    ? []
-    : await getRetrievedKnowledge(retrievalQuery);
+  const retrieval =
+    codeFragment || roleplaySimulation
+      ? []
+      : await getRetrievedKnowledge(retrievalQuery);
 
-  if (!codeFragment && !roleplaySimulation && (retrieval.length === 0 || (retrieval[0]?.score ?? 0) < 0.5)) {
+  if (
+    !codeFragment &&
+    !roleplaySimulation &&
+    (retrieval.length === 0 || (retrieval[0]?.score ?? 0) < 0.5)
+  ) {
     void queueLearningNeed({
       question: retrievalQuery,
       questionType,
@@ -1141,16 +1212,16 @@ ${lastAssistantMessage}
     followUpIntent,
     lastAssistantMessage,
     effectiveMessage: [
-  effectiveMessage,
-	  formatConversationState(conversationState),
-	  formatWritingProfile(writingProfile),
-	  formatUserMemories(userMemories),
-	  fileContext,
-  liveSearchContext,
-]
-  .filter(Boolean)
-  .join("\n\n")
-  .trim(),
+      effectiveMessage,
+      formatConversationState(conversationState),
+      formatWritingProfile(writingProfile),
+      formatUserMemories(userMemories),
+      fileContext,
+      liveSearchContext,
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .trim(),
     memory,
     retrieval,
     attachedFiles,
@@ -1164,7 +1235,10 @@ ${lastAssistantMessage}
     userMemories,
   };
 
-  const { response, critique } = await generateBestResponse(context, runtimeTelemetry);
+  const { response, critique } = await generateBestResponse(
+    context,
+    runtimeTelemetry,
+  );
   if (runtimeTelemetry) applyCritique(runtimeTelemetry, critique);
 
   if (shouldLearnFromResponse(critique)) {
@@ -1179,7 +1253,11 @@ ${lastAssistantMessage}
     });
   }
 
-  if (response && shouldLearnFromResponse(critique) && shouldSaveAnswerPattern(response, context)) {
+  if (
+    response &&
+    shouldLearnFromResponse(critique) &&
+    shouldSaveAnswerPattern(response, context)
+  ) {
     void storeLearnedFallback({
       question: latestUserMessage,
       answer: response,
@@ -1254,12 +1332,14 @@ Runtime instructions:
 ${basePrompt}
 `.trim();
 
-  const retryPrompt = buildRetryPrompt(`
+  const retryPrompt = buildRetryPrompt(
+    `
 ${basePrompt}
 
 The first response was weak or incomplete. Try again with a cleaner, more direct answer.
 If this is a correction request, re-check the previous question and answer instead of repeating yourself.
-`.trim());
+`.trim(),
+  );
 
   const baseSystemInstruction = buildSystemInstruction(
     context.questionType,
@@ -1282,7 +1362,8 @@ ${CORRECTION_RECOVERY_RULES}
   const plan = buildProviderPlan(context);
   if (runtimeTelemetry) runtimeTelemetry.providerPlan = plan;
   console.log("[SVANS-AI] Provider plan:", plan);
-  let bestRejected: { response: string; critique: ResponseCritique } | null = null;
+  let bestRejected: { response: string; critique: ResponseCritique } | null =
+    null;
 
   for (const provider of plan) {
     console.log("[SVANS-AI] Trying provider:", provider);
@@ -1331,7 +1412,10 @@ ${CORRECTION_RECOVERY_RULES}
         return firstCandidate.result;
       }
       if (firstCandidate.result) {
-        bestRejected = chooseBetterRejected(bestRejected, firstCandidate.result);
+        bestRejected = chooseBetterRejected(
+          bestRejected,
+          firstCandidate.result,
+        );
       }
 
       const critiqueInstruction = firstCandidate.result
@@ -1383,14 +1467,18 @@ ${CORRECTION_RECOVERY_RULES}
         return secondCandidate.result;
       }
       if (secondCandidate.result) {
-        bestRejected = chooseBetterRejected(bestRejected, secondCandidate.result);
+        bestRejected = chooseBetterRejected(
+          bestRejected,
+          secondCandidate.result,
+        );
       }
     } catch (error) {
       console.error("[SVANS-AI] Provider loop error:", provider, error);
       if (runtimeTelemetry) {
         runtimeTelemetry.providerFailures.push({
           provider,
-          reason: error instanceof Error ? error.message : "unknown provider error",
+          reason:
+            error instanceof Error ? error.message : "unknown provider error",
         });
       }
     }
@@ -1507,7 +1595,9 @@ function extractDirectWritingRevision(text: string, original: string): string {
 
   while (
     candidate.length &&
-    /^(here(?:'s| is)|i(?:'ve| have) refined|refined version)/i.test(candidate[0].trim())
+    /^(here(?:'s| is)|i(?:'ve| have) refined|refined version)/i.test(
+      candidate[0].trim(),
+    )
   ) {
     candidate = candidate.slice(1);
   }
@@ -1523,14 +1613,21 @@ function extractDirectWritingRevision(text: string, original: string): string {
   const salutation = original.match(
     /\b((?:good morning|good afternoon|good evening|hello|hi|dear)\s*,?\s+[A-Z][a-z]+,?)/i,
   )?.[1];
-  if (salutation && !normalizeText(revision).includes(normalizeText(salutation))) {
+  if (
+    salutation &&
+    !normalizeText(revision).includes(normalizeText(salutation))
+  ) {
     revision = `${salutation}\n\n${revision}`;
   }
   return revision;
 }
 
-function isRawRetrievalEcho(text: string, context: ExtendedChatContext): boolean {
-  if (explicitlyRequestsStoredKnowledge(context.latestUserMessage)) return false;
+function isRawRetrievalEcho(
+  text: string,
+  context: ExtendedChatContext,
+): boolean {
+  if (explicitlyRequestsStoredKnowledge(context.latestUserMessage))
+    return false;
 
   const normalizedResponse = normalizeText(text);
 
@@ -1628,11 +1725,19 @@ function finalFallback(context: ExtendedChatContext): string {
   }
 
   if (intent === "statement") {
-    if (/\b(no bullets|without bullets|do not use bullets|dont use bullets)\b/i.test(message)) {
+    if (
+      /\b(no bullets|without bullets|do not use bullets|dont use bullets)\b/i.test(
+        message,
+      )
+    ) {
       return "Got it. I’ll keep this chat natural and stay away from bullets unless you ask for them.";
     }
 
-    if (/\b(not up to par|repeats|repetitive|fake|top tier|openai|anthropic)\b/i.test(message)) {
+    if (
+      /\b(not up to par|repeats|repetitive|fake|top tier|openai|anthropic)\b/i.test(
+        message,
+      )
+    ) {
       return "The real fix is to give SVANS-AI a stronger conversation layer before it calls the model: track the current goal, resolve short follow-ups, enforce style preferences, reject repetitive drafts, and only learn from answers that pass a quality check. That turns it from a prompt wrapper into an assistant that understands the thread it is inside.";
     }
 
@@ -1649,7 +1754,11 @@ function finalFallback(context: ExtendedChatContext): string {
     return "SVANS-AI is the assistant layer that coordinates the experience. Shield protects, Debugger diagnoses, Sandbox isolates experiments, and SVANS-AI turns those pieces into a useful conversation and next action.";
   }
 
-  if (/\b(repeating itself|repeats|repetitive|same answer|same template)\b/i.test(message)) {
+  if (
+    /\b(repeating itself|repeats|repetitive|same answer|same template)\b/i.test(
+      message,
+    )
+  ) {
     return "Your AI keeps repeating itself because it is probably answering each turn without enough live conversation state. The practical fix is to track what the user wants, what style they requested, what was already said, and what patterns to avoid before generating the next answer. Then add a critic that rejects drafts using the same structure or canned phrases, and only save useful lessons instead of storing every response.";
   }
 
