@@ -13,6 +13,10 @@ export type ChecklistItem = {
 type ChecklistState = {
   items: ChecklistItem[];
   source: "image" | "text";
+  sourceImage?: {
+    type: string;
+    base64: string;
+  };
   updatedAt: number;
 };
 
@@ -30,6 +34,8 @@ const ACTIVE_LIST_REQUEST =
   /\b(show|send|give|list|display)\b.*\b(list|checklist|updated list)\b|\b(updated list|active list|current list)\b/i;
 const VISIBLE_COMPLETED_REQUEST =
   /\b(all|everything|anything|what)\b.*\b(finished|done|completed|crossed|checked)\b/i;
+
+const SIMPLE_ITEM_PATTERN = /^[a-z0-9][a-z0-9 .#-]{0,40}$/i;
 
 function normalizeLabel(value: string) {
   return value
@@ -116,6 +122,35 @@ function parseChecklistFromText(text: string): ChecklistItem[] {
   return dedupeItems(items);
 }
 
+function parseSimpleTypedList(text: string): ChecklistItem[] {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.includes("?")) return [];
+  if (
+    /\b(add|sum|multiply|divide|subtract|average|mean|total)\b/i.test(trimmed)
+  ) {
+    return [];
+  }
+
+  const parts = trimmed
+    .split(/[\n,;|]+|\s+(?:and)\s+/i)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (parts.length < 2) return [];
+  if (!parts.every((part) => SIMPLE_ITEM_PATTERN.test(part))) return [];
+
+  return dedupeItems(parts.map((label) => ({ label, status: "pending" })));
+}
+
+function looksLikeChecklistSetup(message: string, messages: ChatMessage[]) {
+  const recentText = messages
+    .slice(-6)
+    .map((item) => item.content)
+    .join(" ");
+
+  return LIST_CONTEXT_TERMS.test(`${recentText} ${message}`);
+}
+
 function getState(sessionId: string) {
   return checklistSessions.get(sessionId);
 }
@@ -124,12 +159,14 @@ function setState(
   sessionId: string,
   items: ChecklistItem[],
   source: ChecklistState["source"],
+  sourceImage?: ChecklistState["sourceImage"],
 ) {
   const deduped = dedupeItems(items);
   if (!deduped.length) return null;
   const state: ChecklistState = {
     items: deduped,
     source,
+    sourceImage,
     updatedAt: Date.now(),
   };
   checklistSessions.set(sessionId, state);
@@ -151,6 +188,19 @@ function hydrateStateFromMessages(sessionId: string, messages: ChatMessage[]) {
 
     const items = parseChecklistFromText(message.content);
     if (items.length) return setState(sessionId, items, "text");
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+
+    const items = parseSimpleTypedList(message.content);
+    if (
+      items.length &&
+      looksLikeChecklistSetup(message.content, messages.slice(0, index))
+    ) {
+      return setState(sessionId, items, "text");
+    }
   }
 
   return null;
@@ -181,6 +231,26 @@ function formatPending(items: ChecklistItem[]) {
   return pending.map((item) => `- ${item.label}`).join("\n");
 }
 
+function imageMarkerForState(state: ChecklistState) {
+  if (!state.sourceImage) return "";
+
+  const completedLines = state.items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.status === "completed")
+    .map(({ index }) => {
+      const y = Math.round(((index + 1) / (state.items.length + 1)) * 1000);
+      return `<line x1="90" y1="${y}" x2="910" y2="${y}" stroke="#ef4444" stroke-width="28" stroke-linecap="round" opacity="0.88" />`;
+    })
+    .join("");
+
+  if (!completedLines) return "";
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000"><image href="data:${state.sourceImage.type};base64,${state.sourceImage.base64}" x="0" y="0" width="1000" height="1000" preserveAspectRatio="xMidYMid meet" />${completedLines}</svg>`;
+  const base64 = Buffer.from(svg, "utf-8").toString("base64");
+
+  return `\n\n[[SVANS_IMAGE:image/svg+xml:updated-checklist.svg:${base64}]]`;
+}
+
 function extractTargetText(message: string) {
   const cleaned = message
     .replace(COMPLETE_COMMAND, "")
@@ -205,6 +275,21 @@ function splitTargets(targetText: string) {
     .filter(Boolean);
 
   return [...new Set([...numberTargets, ...textTargets])];
+}
+
+function allTargetsMatchState(state: ChecklistState, targets: string[]) {
+  const itemKeys = state.items.map((item) => normalizeLabel(item.label));
+  return targets
+    .map(normalizeLabel)
+    .filter(Boolean)
+    .every((target) =>
+      itemKeys.some(
+        (itemKey) =>
+          itemKey === target ||
+          itemKey.includes(target) ||
+          target.includes(itemKey),
+      ),
+    );
 }
 
 function markTargetsCompleted(state: ChecklistState, targets: string[]) {
@@ -282,7 +367,10 @@ ${message}
 
   if (!extracted) return null;
   const items = parseExtractedItems(extracted);
-  return setState(sessionId, items, "image");
+  return setState(sessionId, items, "image", {
+    type: images[0].type,
+    base64: images[0].base64,
+  });
 }
 
 export function handleChecklistRequest(
@@ -290,8 +378,19 @@ export function handleChecklistRequest(
   sessionId: string,
   messages: ChatMessage[] = [],
 ): string | null {
-  const state =
+  let state =
     getState(sessionId) ?? hydrateStateFromMessages(sessionId, messages);
+
+  if (!state) {
+    const typedItems = parseSimpleTypedList(message);
+    if (typedItems.length && looksLikeChecklistSetup(message, messages)) {
+      state = setState(sessionId, typedItems, "text");
+      if (state) {
+        return `Got it — I created an active checklist from those items.\n\nCurrent list:\n\n${formatChecklist(state.items)}\n\nSend the completed items, and I’ll cross them off.`;
+      }
+    }
+  }
+
   if (!state) return null;
 
   if (COMPLETED_REQUEST.test(message)) {
@@ -303,14 +402,42 @@ export function handleChecklistRequest(
   }
 
   if (ACTIVE_LIST_REQUEST.test(message)) {
-    return `Here’s the current list:\n\n${formatChecklist(state.items)}`;
+    return `Here’s the current list:\n\n${formatChecklist(state.items)}${imageMarkerForState(state)}`;
+  }
+
+  const simpleTargets = parseSimpleTypedList(message).map((item) => item.label);
+  if (
+    simpleTargets.length &&
+    allTargetsMatchState(state, simpleTargets) &&
+    !ACTIVE_LIST_REQUEST.test(message) &&
+    !PENDING_REQUEST.test(message) &&
+    !COMPLETED_REQUEST.test(message)
+  ) {
+    const { changed, updatedItems } = markTargetsCompleted(
+      state,
+      simpleTargets,
+    );
+    if (changed) {
+      checklistSessions.set(sessionId, {
+        ...state,
+        items: updatedItems,
+        updatedAt: Date.now(),
+      });
+
+      return `Done — I marked those completed.\n\nUpdated list:\n\n${formatChecklist(updatedItems)}${imageMarkerForState(
+        {
+          ...state,
+          items: updatedItems,
+        },
+      )}`;
+    }
   }
 
   if (!COMPLETE_COMMAND.test(message)) return null;
 
   const targets = splitTargets(extractTargetText(message));
   if (!targets.length && VISIBLE_COMPLETED_REQUEST.test(message)) {
-    return `Here’s the current list with completed items crossed out:\n\n${formatChecklist(state.items)}`;
+    return `Here’s the current list with completed items crossed out:\n\n${formatChecklist(state.items)}${imageMarkerForState(state)}`;
   }
 
   if (!targets.length) {
@@ -328,5 +455,10 @@ export function handleChecklistRequest(
     updatedAt: Date.now(),
   });
 
-  return `Done — I crossed that off.\n\nUpdated list:\n\n${formatChecklist(updatedItems)}`;
+  return `Done — I crossed that off.\n\nUpdated list:\n\n${formatChecklist(updatedItems)}${imageMarkerForState(
+    {
+      ...state,
+      items: updatedItems,
+    },
+  )}`;
 }

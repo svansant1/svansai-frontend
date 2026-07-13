@@ -36,8 +36,17 @@ type AttachedFile = {
 };
 
 type ResponseMode = "auto" | "direct" | "guide" | "tutor" | "build" | "debug";
-type WritingContext = "general" | "casual" | "professional" | "academic" | "sensitive";
-type MemoryCategory = "writing_preference" | "learning_progress" | "personal_preference" | "project_context";
+type WritingContext =
+  | "general"
+  | "casual"
+  | "professional"
+  | "academic"
+  | "sensitive";
+type MemoryCategory =
+  | "writing_preference"
+  | "learning_progress"
+  | "personal_preference"
+  | "project_context";
 type ProfileMemory = { id: string; category: MemoryCategory; summary: string };
 type StarterQuoteMode = "show" | "ask" | "off";
 
@@ -94,11 +103,23 @@ const RESPONSE_MODES: Array<{
   title: string;
 }> = [
   { id: "auto", label: "Auto", title: "Let SVANS-AI choose the best style" },
-  { id: "direct", label: "Direct", title: "Answer first, then explain briefly" },
+  {
+    id: "direct",
+    label: "Direct",
+    title: "Answer first, then explain briefly",
+  },
   { id: "guide", label: "Guide", title: "Show how to get the answer" },
   { id: "tutor", label: "Tutor", title: "Hint and coach before revealing" },
-  { id: "build", label: "Build", title: "Plan, implement, and verify project changes" },
-  { id: "debug", label: "Debug", title: "Diagnose problems and find the smallest fix" },
+  {
+    id: "build",
+    label: "Build",
+    title: "Plan, implement, and verify project changes",
+  },
+  {
+    id: "debug",
+    label: "Debug",
+    title: "Diagnose problems and find the smallest fix",
+  },
 ];
 
 const STARTER_QUOTES = [
@@ -115,7 +136,9 @@ function getStarterQuote() {
 }
 
 function formatLabel(value: string) {
-  return value.replace(/[_-]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return value
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function isImageType(type: string) {
@@ -142,6 +165,23 @@ function readBrowserFile(file: File): Promise<AttachedFile> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+function extractAssistantImage(content: string) {
+  const markerPattern =
+    /\n?\n?\[\[SVANS_IMAGE:([^:\]]+):([^:\]]+):([A-Za-z0-9+/=]+)\]\]/;
+  const match = content.match(markerPattern);
+  if (!match) return { content, image: null };
+
+  const [, type, name, base64] = match;
+  return {
+    content: content.replace(markerPattern, "").trim(),
+    image: {
+      filePreview: `data:${type};base64,${base64}`,
+      fileName: name || "updated-checklist.svg",
+      fileType: type || "image/svg+xml",
+    },
+  };
 }
 
 function renderInlineMarkdown(text: string) {
@@ -430,14 +470,20 @@ export default function AIHelper({
   const [preserveSlang, setPreserveSlang] = useState(true);
   const [voiceStatus, setVoiceStatus] = useState("");
   const [profileMemories, setProfileMemories] = useState<ProfileMemory[]>([]);
-  const [memoryCategory, setMemoryCategory] = useState<MemoryCategory>("personal_preference");
+  const [memoryCategory, setMemoryCategory] = useState<MemoryCategory>(
+    "personal_preference",
+  );
   const [memorySummary, setMemorySummary] = useState("");
-  const [starterQuoteMode, setStarterQuoteMode] = useState<StarterQuoteMode>(() => {
-    if (typeof window === "undefined") return "ask";
-    const value = localStorage.getItem("svansai-starter-quote-mode");
-    if (value === "show" || value === "ask" || value === "off") return value;
-    return localStorage.getItem("SVANS-AI-show-starter-quote") === "false" ? "off" : "ask";
-  });
+  const [starterQuoteMode, setStarterQuoteMode] = useState<StarterQuoteMode>(
+    () => {
+      if (typeof window === "undefined") return "ask";
+      const value = localStorage.getItem("svansai-starter-quote-mode");
+      if (value === "show" || value === "ask" || value === "off") return value;
+      return localStorage.getItem("SVANS-AI-show-starter-quote") === "false"
+        ? "off"
+        : "ask";
+    },
+  );
   const [starterQuoteAccepted, setStarterQuoteAccepted] = useState(false);
   const [starterQuoteDismissed, setStarterQuoteDismissed] = useState(false);
   const attachedFile = attachedFiles[0] ?? null;
@@ -516,7 +562,10 @@ export default function AIHelper({
     } else if (normalized.includes("sandbox") || normalized.includes("build")) {
       setResponseMode("build");
       setInput((current) => current || "Help me test this safely in Sandbox.");
-    } else if (normalized.includes("shield") || normalized.includes("protect")) {
+    } else if (
+      normalized.includes("shield") ||
+      normalized.includes("protect")
+    ) {
       setInput((current) => current || "Check this for safety and risk.");
     } else if (normalized.includes("teaching")) {
       setResponseMode("tutor");
@@ -624,7 +673,9 @@ export default function AIHelper({
         ...(samples ? { samples } : {}),
       }),
     });
-    setVoiceStatus(response.ok ? "Voice profile saved." : "Could not save the profile.");
+    setVoiceStatus(
+      response.ok ? "Voice profile saved." : "Could not save the profile.",
+    );
     if (response.ok) setVoiceSample("");
   };
 
@@ -635,8 +686,14 @@ export default function AIHelper({
     if (!token) return onRequestLogin();
     const response = await fetch("/api/profile/memory", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ category: memoryCategory, summary: memorySummary }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        category: memoryCategory,
+        summary: memorySummary,
+      }),
     });
     if (response.ok) {
       setMemorySummary("");
@@ -649,11 +706,17 @@ export default function AIHelper({
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) return;
-    const response = await fetch(`/api/profile/memory${id ? `?id=${encodeURIComponent(id)}` : ""}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (response.ok) setProfileMemories((current) => id ? current.filter((memory) => memory.id !== id) : []);
+    const response = await fetch(
+      `/api/profile/memory${id ? `?id=${encodeURIComponent(id)}` : ""}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    if (response.ok)
+      setProfileMemories((current) =>
+        id ? current.filter((memory) => memory.id !== id) : [],
+      );
   };
 
   const checkPasswordMode = (svResponse: string) => {
@@ -690,26 +753,43 @@ export default function AIHelper({
     }
 
     const invalid = selected.find((file) => {
-      const acceptedExtension = /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|csv|tsv|xlsx)$/i.test(file.name);
-      return (!ACCEPTED_TYPES.includes(file.type) && !acceptedExtension) || file.size > MAX_FILE_MB * 1024 * 1024;
+      const acceptedExtension =
+        /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|csv|tsv|xlsx)$/i.test(
+          file.name,
+        );
+      return (
+        (!ACCEPTED_TYPES.includes(file.type) && !acceptedExtension) ||
+        file.size > MAX_FILE_MB * 1024 * 1024
+      );
     });
     if (invalid) {
-      setFileError(`${invalid.name} is unsupported or larger than ${MAX_FILE_MB}MB.`);
+      setFileError(
+        `${invalid.name} is unsupported or larger than ${MAX_FILE_MB}MB.`,
+      );
       return;
     }
 
-    const totalBytes = [...attachedFiles, ...selected].reduce((sum, file) => sum + file.size, 0);
+    const totalBytes = [...attachedFiles, ...selected].reduce(
+      (sum, file) => sum + file.size,
+      0,
+    );
     if (totalBytes > MAX_TOTAL_FILE_MB * 1024 * 1024) {
-      setFileError(`Combined attachments cannot exceed ${MAX_TOTAL_FILE_MB}MB.`);
+      setFileError(
+        `Combined attachments cannot exceed ${MAX_TOTAL_FILE_MB}MB.`,
+      );
       return;
     }
 
     const converted = await Promise.all(selected.map(readBrowserFile));
-    setAttachedFiles((current) => [...current, ...converted].slice(0, MAX_ATTACHMENTS));
+    setAttachedFiles((current) =>
+      [...current, ...converted].slice(0, MAX_ATTACHMENTS),
+    );
   };
 
   const removeAttachment = (index: number) => {
-    setAttachedFiles((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setAttachedFiles((current) =>
+      current.filter((_, itemIndex) => itemIndex !== index),
+    );
     setFileError("");
   };
 
@@ -763,7 +843,9 @@ export default function AIHelper({
       role: "user",
       content:
         input.trim() ||
-        (attachedFiles.length ? `[Attached: ${attachedFiles.map((file) => file.name).join(", ")}]` : ""),
+        (attachedFiles.length
+          ? `[Attached: ${attachedFiles.map((file) => file.name).join(", ")}]`
+          : ""),
       filePreview: attachedFile?.dataUrl,
       fileName: attachedFile?.name,
       fileType: attachedFile?.type,
@@ -828,16 +910,23 @@ export default function AIHelper({
       const replySource =
         data?.text ?? data?.response ?? data?.answer ?? data?.message ?? "";
 
-      const reply =
+      const rawReply =
         typeof replySource === "string" && replySource.trim()
           ? replySource.trim()
           : "I processed that but didn't generate a response. Try sending it again.";
+      const assistantImage = extractAssistantImage(rawReply);
+      const reply = assistantImage.content || "Done.";
 
       checkPasswordMode(reply);
 
       const finalMessages = [
         ...nextMessages,
-        { role: "assistant" as const, content: reply, orchestration: data?.orchestration },
+        {
+          role: "assistant" as const,
+          content: reply,
+          orchestration: data?.orchestration,
+          ...(assistantImage.image ?? {}),
+        },
       ];
 
       setMessages(finalMessages);
@@ -877,13 +966,18 @@ export default function AIHelper({
         const dataUrl = event.target?.result;
         if (typeof dataUrl !== "string") return;
 
-        setAttachedFiles((current) => [...current, {
-          name: "pasted-image.png",
-          type: file.type,
-          base64: dataUrl.split(",")[1] || "",
-          dataUrl,
-          size: file.size,
-        }].slice(0, MAX_ATTACHMENTS));
+        setAttachedFiles((current) =>
+          [
+            ...current,
+            {
+              name: "pasted-image.png",
+              type: file.type,
+              base64: dataUrl.split(",")[1] || "",
+              dataUrl,
+              size: file.size,
+            },
+          ].slice(0, MAX_ATTACHMENTS),
+        );
       };
 
       reader.readAsDataURL(file);
@@ -974,45 +1068,118 @@ export default function AIHelper({
         }}
       >
         <AnimatePresence initial={false}>
-          {!conversationId && starterQuoteMode !== "off" && !starterQuoteDismissed && messages.length <= 1 && (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              style={{
-                marginBottom: "12px",
-                padding: "14px 16px",
-                borderRadius: "16px",
-                background: "linear-gradient(135deg, rgba(56,189,248,0.13), rgba(168,85,247,0.1))",
-                border: "1px solid rgba(125,211,252,0.18)",
-                color: "white",
-              }}
-            >
-              <div style={{ color: "#7dd3fc", fontSize: "0.78rem", fontWeight: 900, letterSpacing: "0.08em", marginBottom: "6px" }}>
-                SVANS-AI STARTER QUOTE
-              </div>
-              {starterQuoteMode === "ask" && !starterQuoteAccepted ? (
-                <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>Would you like to start off with a quote?</div>
-              ) : (
-                <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>“{getStarterQuote()}”</div>
-              )}
-              <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
-                {starterQuoteMode === "ask" && !starterQuoteAccepted && (
-                  <button type="button" onClick={() => setStarterQuoteAccepted(true)} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(125,211,252,0.28)", background: "rgba(56,189,248,0.14)", color: "white", cursor: "pointer" }}>
-                    Show quote
-                  </button>
+          {!conversationId &&
+            starterQuoteMode !== "off" &&
+            !starterQuoteDismissed &&
+            messages.length <= 1 && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                style={{
+                  marginBottom: "12px",
+                  padding: "14px 16px",
+                  borderRadius: "16px",
+                  background:
+                    "linear-gradient(135deg, rgba(56,189,248,0.13), rgba(168,85,247,0.1))",
+                  border: "1px solid rgba(125,211,252,0.18)",
+                  color: "white",
+                }}
+              >
+                <div
+                  style={{
+                    color: "#7dd3fc",
+                    fontSize: "0.78rem",
+                    fontWeight: 900,
+                    letterSpacing: "0.08em",
+                    marginBottom: "6px",
+                  }}
+                >
+                  SVANS-AI STARTER QUOTE
+                </div>
+                {starterQuoteMode === "ask" && !starterQuoteAccepted ? (
+                  <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>
+                    Would you like to start off with a quote?
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>
+                    “{getStarterQuote()}”
+                  </div>
                 )}
-                <button type="button" onClick={() => setStarterQuoteDismissed(true)} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.06)", color: "white", cursor: "pointer" }}>
-                  Start chat
-                </button>
-                <button type="button" onClick={() => { setStarterQuoteMode("show"); setStarterQuoteAccepted(true); }} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.75)", cursor: "pointer" }}>
-                  Always show
-                </button>
-                <button type="button" onClick={() => { setStarterQuoteMode("off"); setStarterQuoteDismissed(true); }} style={{ padding: "6px 10px", borderRadius: "999px", border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.75)", cursor: "pointer" }}>
-                  Don’t show quotes
-                </button>
-              </div>
-            </motion.div>
-          )}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    marginTop: "10px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {starterQuoteMode === "ask" && !starterQuoteAccepted && (
+                    <button
+                      type="button"
+                      onClick={() => setStarterQuoteAccepted(true)}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: "999px",
+                        border: "1px solid rgba(125,211,252,0.28)",
+                        background: "rgba(56,189,248,0.14)",
+                        color: "white",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Show quote
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setStarterQuoteDismissed(true)}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(255,255,255,0.16)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "white",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Start chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStarterQuoteMode("show");
+                      setStarterQuoteAccepted(true);
+                    }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(255,255,255,0.16)",
+                      background: "rgba(255,255,255,0.03)",
+                      color: "rgba(255,255,255,0.75)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Always show
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStarterQuoteMode("off");
+                      setStarterQuoteDismissed(true);
+                    }}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(255,255,255,0.16)",
+                      background: "rgba(255,255,255,0.03)",
+                      color: "rgba(255,255,255,0.75)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Don’t show quotes
+                  </button>
+                </div>
+              </motion.div>
+            )}
           {messages.map((msg, i) => (
             <motion.div
               key={`${msg.role}-${i}-${msg.content.slice(0, 16)}`}
@@ -1063,21 +1230,37 @@ export default function AIHelper({
                 </strong>
 
                 {msg.role === "assistant" && msg.orchestration && (
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}>
-                    {[...(msg.orchestration.recommendedModules ?? []), ...(msg.orchestration.capabilities ?? [])]
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "6px",
+                      flexWrap: "wrap",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    {[
+                      ...(msg.orchestration.recommendedModules ?? []),
+                      ...(msg.orchestration.capabilities ?? []),
+                    ]
                       .slice(0, 8)
                       .map((item) => (
-                        <button key={`${i}-${item}`} type="button" onClick={() => handleModuleBadgeClick(item)} title={`Use ${formatLabel(item)}`} style={{
-                          fontSize: "0.68rem",
-                          letterSpacing: "0.04em",
-                          padding: "3px 7px",
-                          borderRadius: "999px",
-                          color: "#bae6fd",
-                          border: "1px solid rgba(125,211,252,0.22)",
-                          background: "rgba(56,189,248,0.08)",
-                          fontWeight: 800,
-                          cursor: "pointer",
-                        }}>
+                        <button
+                          key={`${i}-${item}`}
+                          type="button"
+                          onClick={() => handleModuleBadgeClick(item)}
+                          title={`Use ${formatLabel(item)}`}
+                          style={{
+                            fontSize: "0.68rem",
+                            letterSpacing: "0.04em",
+                            padding: "3px 7px",
+                            borderRadius: "999px",
+                            color: "#bae6fd",
+                            border: "1px solid rgba(125,211,252,0.22)",
+                            background: "rgba(56,189,248,0.08)",
+                            fontWeight: 800,
+                            cursor: "pointer",
+                          }}
+                        >
                           {formatLabel(item)}
                         </button>
                       ))}
@@ -1178,19 +1361,126 @@ export default function AIHelper({
         }}
       >
         {attachedFiles.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: "8px", marginBottom: "10px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile
+                ? "1fr"
+                : "repeat(2, minmax(0, 1fr))",
+              gap: "8px",
+              marginBottom: "10px",
+            }}
+          >
             {attachedFiles.map((file, index) => (
-              <div key={`${file.name}-${index}`} style={{ display: "flex", alignItems: "center", gap: "10px", background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.2)", borderRadius: "14px", padding: "8px 10px", minWidth: 0 }}>
-                {isImageType(file.type) ? <img src={file.dataUrl} alt={file.name} style={{ width: "42px", height: "42px", borderRadius: "8px", objectFit: "cover" }} /> : <span style={{ fontSize: "1.4rem" }}>{isPdfType(file.type) ? "📄" : "📎"}</span>}
+              <div
+                key={`${file.name}-${index}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  background: "rgba(56,189,248,0.08)",
+                  border: "1px solid rgba(56,189,248,0.2)",
+                  borderRadius: "14px",
+                  padding: "8px 10px",
+                  minWidth: 0,
+                }}
+              >
+                {isImageType(file.type) ? (
+                  <img
+                    src={file.dataUrl}
+                    alt={file.name}
+                    style={{
+                      width: "42px",
+                      height: "42px",
+                      borderRadius: "8px",
+                      objectFit: "cover",
+                    }}
+                  />
+                ) : (
+                  <span style={{ fontSize: "1.4rem" }}>
+                    {isPdfType(file.type) ? "📄" : "📎"}
+                  </span>
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: "#7dd3fc", fontSize: "0.68rem", fontWeight: 900 }}>FILE {index + 1}</div>
-                  <div style={{ color: "white", fontSize: "0.82rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</div>
-                  <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "0.7rem" }}>{(file.size / 1024).toFixed(0)} KB</div>
+                  <div
+                    style={{
+                      color: "#7dd3fc",
+                      fontSize: "0.68rem",
+                      fontWeight: 900,
+                    }}
+                  >
+                    FILE {index + 1}
+                  </div>
+                  <div
+                    style={{
+                      color: "white",
+                      fontSize: "0.82rem",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {file.name}
+                  </div>
+                  <div
+                    style={{
+                      color: "rgba(255,255,255,0.45)",
+                      fontSize: "0.7rem",
+                    }}
+                  >
+                    {(file.size / 1024).toFixed(0)} KB
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: "3px" }}>
-                  <button type="button" disabled={index === 0} onClick={() => moveAttachment(index, -1)} aria-label={`Move ${file.name} earlier`} style={{ background: "transparent", border: 0, color: "white", cursor: index === 0 ? "default" : "pointer", opacity: index === 0 ? 0.3 : 1 }}>←</button>
-                  <button type="button" disabled={index === attachedFiles.length - 1} onClick={() => moveAttachment(index, 1)} aria-label={`Move ${file.name} later`} style={{ background: "transparent", border: 0, color: "white", cursor: index === attachedFiles.length - 1 ? "default" : "pointer", opacity: index === attachedFiles.length - 1 ? 0.3 : 1 }}>→</button>
-                  <button type="button" onClick={() => removeAttachment(index)} aria-label={`Remove ${file.name}`} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: "999px", color: "white", cursor: "pointer", width: "28px", height: "28px" }}>×</button>
+                  <button
+                    type="button"
+                    disabled={index === 0}
+                    onClick={() => moveAttachment(index, -1)}
+                    aria-label={`Move ${file.name} earlier`}
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      color: "white",
+                      cursor: index === 0 ? "default" : "pointer",
+                      opacity: index === 0 ? 0.3 : 1,
+                    }}
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    disabled={index === attachedFiles.length - 1}
+                    onClick={() => moveAttachment(index, 1)}
+                    aria-label={`Move ${file.name} later`}
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      color: "white",
+                      cursor:
+                        index === attachedFiles.length - 1
+                          ? "default"
+                          : "pointer",
+                      opacity: index === attachedFiles.length - 1 ? 0.3 : 1,
+                    }}
+                  >
+                    →
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(index)}
+                    aria-label={`Remove ${file.name}`}
+                    style={{
+                      background: "rgba(255,255,255,0.08)",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      borderRadius: "999px",
+                      color: "white",
+                      cursor: "pointer",
+                      width: "28px",
+                      height: "28px",
+                    }}
+                  >
+                    ×
+                  </button>
                 </div>
               </div>
             ))}
@@ -1229,46 +1519,282 @@ export default function AIHelper({
                 Voice Profile
               </button>
               {showVoiceProfile && (
-                <div style={{ marginTop: "8px", padding: "12px", borderRadius: "14px", background: "rgba(15,23,42,0.55)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
-                    <select value={voiceContext} onChange={(event) => setVoiceContext(event.target.value as WritingContext)} style={{ padding: "8px", borderRadius: "9px", background: "#0f172a", color: "white" }}>
-                      {(["general", "casual", "professional", "academic", "sensitive"] as const).map((context) => <option key={context} value={context}>{context}</option>)}
+                <div
+                  style={{
+                    marginTop: "8px",
+                    padding: "12px",
+                    borderRadius: "14px",
+                    background: "rgba(15,23,42,0.55)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      flexWrap: "wrap",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <select
+                      value={voiceContext}
+                      onChange={(event) =>
+                        setVoiceContext(event.target.value as WritingContext)
+                      }
+                      style={{
+                        padding: "8px",
+                        borderRadius: "9px",
+                        background: "#0f172a",
+                        color: "white",
+                      }}
+                    >
+                      {(
+                        [
+                          "general",
+                          "casual",
+                          "professional",
+                          "academic",
+                          "sensitive",
+                        ] as const
+                      ).map((context) => (
+                        <option key={context} value={context}>
+                          {context}
+                        </option>
+                      ))}
                     </select>
-                    <label><input type="checkbox" checked={preserveVoice} onChange={(event) => setPreserveVoice(event.target.checked)} /> Preserve my voice</label>
-                    <label><input type="checkbox" checked={correctEnglish} onChange={(event) => setCorrectEnglish(event.target.checked)} /> Correct English</label>
-                    <label><input type="checkbox" checked={preserveSlang} onChange={(event) => setPreserveSlang(event.target.checked)} /> Keep intentional slang</label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={preserveVoice}
+                        onChange={(event) =>
+                          setPreserveVoice(event.target.checked)
+                        }
+                      />{" "}
+                      Preserve my voice
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={correctEnglish}
+                        onChange={(event) =>
+                          setCorrectEnglish(event.target.checked)
+                        }
+                      />{" "}
+                      Correct English
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={preserveSlang}
+                        onChange={(event) =>
+                          setPreserveSlang(event.target.checked)
+                        }
+                      />{" "}
+                      Keep intentional slang
+                    </label>
                   </div>
-                  <input value={toneNotes} onChange={(event) => setToneNotes(event.target.value)} placeholder="Tone notes, such as warm, direct, and concise" style={{ width: "100%", padding: "9px", marginBottom: "8px", borderRadius: "9px", boxSizing: "border-box" }} />
-                  <textarea value={voiceSample} onChange={(event) => setVoiceSample(event.target.value)} placeholder="Optional approved writing sample (20+ characters)" style={{ width: "100%", minHeight: "70px", padding: "9px", borderRadius: "9px", boxSizing: "border-box" }} />
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px" }}>
-                    <button type="button" onClick={saveVoiceProfile} style={{ padding: "8px 12px", borderRadius: "9px", border: 0, background: "#38bdf8", color: "#020617", fontWeight: 900, cursor: "pointer" }}>Save profile</button>
-                    <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.7)" }}>{voiceStatus}</span>
+                  <input
+                    value={toneNotes}
+                    onChange={(event) => setToneNotes(event.target.value)}
+                    placeholder="Tone notes, such as warm, direct, and concise"
+                    style={{
+                      width: "100%",
+                      padding: "9px",
+                      marginBottom: "8px",
+                      borderRadius: "9px",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <textarea
+                    value={voiceSample}
+                    onChange={(event) => setVoiceSample(event.target.value)}
+                    placeholder="Optional approved writing sample (20+ characters)"
+                    style={{
+                      width: "100%",
+                      minHeight: "70px",
+                      padding: "9px",
+                      borderRadius: "9px",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      marginTop: "8px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={saveVoiceProfile}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: "9px",
+                        border: 0,
+                        background: "#38bdf8",
+                        color: "#020617",
+                        fontWeight: 900,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Save profile
+                    </button>
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "rgba(255,255,255,0.7)",
+                      }}
+                    >
+                      {voiceStatus}
+                    </span>
                   </div>
-                  <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+                  <div
+                    style={{
+                      marginTop: "14px",
+                      paddingTop: "12px",
+                      borderTop: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                  >
                     <strong>Starter quote</strong>
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0 12px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        flexWrap: "wrap",
+                        margin: "8px 0 12px",
+                      }}
+                    >
                       {(["ask", "show", "off"] as const).map((mode) => (
-                        <button key={mode} type="button" onClick={() => setStarterQuoteMode(mode)} style={{ padding: "6px 10px", borderRadius: "999px", border: starterQuoteMode === mode ? "1px solid rgba(56,189,248,0.58)" : "1px solid rgba(255,255,255,0.14)", background: starterQuoteMode === mode ? "rgba(56,189,248,0.16)" : "rgba(255,255,255,0.04)", color: "white", cursor: "pointer" }}>
-                          {mode === "ask" ? "Ask first" : mode === "show" ? "Always show" : "Off"}
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setStarterQuoteMode(mode)}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: "999px",
+                            border:
+                              starterQuoteMode === mode
+                                ? "1px solid rgba(56,189,248,0.58)"
+                                : "1px solid rgba(255,255,255,0.14)",
+                            background:
+                              starterQuoteMode === mode
+                                ? "rgba(56,189,248,0.16)"
+                                : "rgba(255,255,255,0.04)",
+                            color: "white",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {mode === "ask"
+                            ? "Ask first"
+                            : mode === "show"
+                              ? "Always show"
+                              : "Off"}
                         </button>
                       ))}
                     </div>
                     <strong>User-controlled memory</strong>
-                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
-                      <select value={memoryCategory} onChange={(event) => setMemoryCategory(event.target.value as MemoryCategory)} style={{ padding: "8px", borderRadius: "9px", background: "#0f172a", color: "white" }}>
-                        <option value="writing_preference">Writing preference</option>
-                        <option value="learning_progress">Learning progress</option>
-                        <option value="personal_preference">Personal preference</option>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        marginTop: "8px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <select
+                        value={memoryCategory}
+                        onChange={(event) =>
+                          setMemoryCategory(
+                            event.target.value as MemoryCategory,
+                          )
+                        }
+                        style={{
+                          padding: "8px",
+                          borderRadius: "9px",
+                          background: "#0f172a",
+                          color: "white",
+                        }}
+                      >
+                        <option value="writing_preference">
+                          Writing preference
+                        </option>
+                        <option value="learning_progress">
+                          Learning progress
+                        </option>
+                        <option value="personal_preference">
+                          Personal preference
+                        </option>
                         <option value="project_context">Project context</option>
                       </select>
-                      <input value={memorySummary} onChange={(event) => setMemorySummary(event.target.value)} placeholder="What should SVANS-AI remember?" style={{ flex: 1, minWidth: "220px", padding: "8px", borderRadius: "9px" }} />
-                      <button type="button" onClick={addProfileMemory} style={{ padding: "8px 12px", borderRadius: "9px", cursor: "pointer" }}>Remember</button>
-                      {profileMemories.length > 0 && <button type="button" onClick={() => deleteProfileMemory()} style={{ padding: "8px 12px", borderRadius: "9px", cursor: "pointer" }}>Clear all</button>}
+                      <input
+                        value={memorySummary}
+                        onChange={(event) =>
+                          setMemorySummary(event.target.value)
+                        }
+                        placeholder="What should SVANS-AI remember?"
+                        style={{
+                          flex: 1,
+                          minWidth: "220px",
+                          padding: "8px",
+                          borderRadius: "9px",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={addProfileMemory}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: "9px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Remember
+                      </button>
+                      {profileMemories.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => deleteProfileMemory()}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: "9px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Clear all
+                        </button>
+                      )}
                     </div>
                     {profileMemories.map((memory) => (
-                      <div key={memory.id} style={{ display: "flex", justifyContent: "space-between", gap: "8px", marginTop: "7px", fontSize: "0.82rem" }}>
-                        <span><strong>{memory.category.replaceAll("_", " ")}:</strong> {memory.summary}</span>
-                        <button type="button" onClick={() => deleteProfileMemory(memory.id)} aria-label="Delete memory" style={{ border: 0, background: "transparent", color: "#fca5a5", cursor: "pointer" }}>Delete</button>
+                      <div
+                        key={memory.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          marginTop: "7px",
+                          fontSize: "0.82rem",
+                        }}
+                      >
+                        <span>
+                          <strong>
+                            {memory.category.replaceAll("_", " ")}:
+                          </strong>{" "}
+                          {memory.summary}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => deleteProfileMemory(memory.id)}
+                          aria-label="Delete memory"
+                          style={{
+                            border: 0,
+                            background: "transparent",
+                            color: "#fca5a5",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Delete
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1290,7 +1816,9 @@ export default function AIHelper({
                 marginBottom: isMobile ? "12px" : "10px",
               }}
             >
-              {RESPONSE_MODES.filter((mode) => showAdvancedModes || mode.id === "auto").map((mode) => {
+              {RESPONSE_MODES.filter(
+                (mode) => showAdvancedModes || mode.id === "auto",
+              ).map((mode) => {
                 const active = responseMode === mode.id;
 
                 return (
