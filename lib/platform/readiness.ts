@@ -30,6 +30,7 @@ const OPTIONAL_ENV = [
   "GITHUB_TOKEN",
   "GITHUB_OWNER",
   "GITHUB_REPO",
+  "SVANSAI_API_KEY",
   "SVANSAI_INTERNAL_API_KEY",
   "SVANSAI_CORS_ORIGINS",
 ];
@@ -43,7 +44,9 @@ function envCheck(name: string, required: boolean): ReadinessCheck {
   return {
     name,
     status: required ? "missing" : "warning",
-    detail: required ? "Required for production." : "Optional feature is disabled until configured.",
+    detail: required
+      ? "Required for production."
+      : "Optional feature is disabled until configured.",
   };
 }
 
@@ -54,14 +57,17 @@ function ownerIdentityCheck(): ReadinessCheck {
     return {
       name: "OWNER_USER_ID or OWNER_EMAIL",
       status: "ok",
-      detail: ownerId ? "Owner user ID is configured." : "Owner email is configured.",
+      detail: ownerId
+        ? "Owner user ID is configured."
+        : "Owner email is configured.",
     };
   }
 
   return {
     name: "OWNER_USER_ID or OWNER_EMAIL",
     status: "missing",
-    detail: "Required for owner/admin controls. Configure either OWNER_USER_ID or OWNER_EMAIL.",
+    detail:
+      "Required for owner/admin controls. Configure either OWNER_USER_ID or OWNER_EMAIL.",
   };
 }
 
@@ -73,7 +79,8 @@ async function checkSupabaseTable(table: string): Promise<ReadinessCheck> {
     return {
       name: `supabase:${table}`,
       status: "missing",
-      detail: "Supabase URL/service key missing, so table readiness could not be checked.",
+      detail:
+        "Supabase URL/service key missing, so table readiness could not be checked.",
     };
   }
 
@@ -81,7 +88,9 @@ async function checkSupabaseTable(table: string): Promise<ReadinessCheck> {
     const supabase = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { error } = await supabase.from(table).select("*", { count: "exact", head: true });
+    const { error } = await supabase
+      .from(table)
+      .select("*", { count: "exact", head: true });
 
     if (error) {
       return {
@@ -100,7 +109,10 @@ async function checkSupabaseTable(table: string): Promise<ReadinessCheck> {
     return {
       name: `supabase:${table}`,
       status: "missing",
-      detail: error instanceof Error ? error.message : "Unknown Supabase readiness error.",
+      detail:
+        error instanceof Error
+          ? error.message
+          : "Unknown Supabase readiness error.",
     };
   }
 }

@@ -11,7 +11,8 @@
     "test:attachments": "node scripts/attachment-regression.mjs",
     "test:guards": "node scripts/quality-guards-regression.mjs",
     "test:profile-memory": "node scripts/profile-memory-regression.mjs",
-    "readiness": "node scripts/readiness-check.mjs"
+    "readiness": "node scripts/readiness-check.mjs",
+    "generate:api-key": "node scripts/generate-svansai-api-key.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.49.0",

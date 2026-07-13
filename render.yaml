@@ -30,6 +30,10 @@ services:
         sync: false
       - key: OWNER_USER_ID
         sync: false
+      - key: SVANSAI_API_KEY
+        sync: false
+      - key: SVANSAI_CORS_ORIGINS
+        sync: false
 
   # Cron job — runs self-monitor every 6 hours automatically
   - type: cron
