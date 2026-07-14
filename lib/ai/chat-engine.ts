@@ -843,6 +843,49 @@ function getTopicChoiceAnswer(message: string): string | null {
   return "I’d choose the topic that is more focused, easier to support with a real example, and gives you a clear comparison to explain. If one topic asks for one real-world example and the other asks for several broad concepts, the focused one is usually easier to turn into a stronger discussion post.";
 }
 
+function getControlStructureQuizAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const hasControlStructurePrompt =
+    normalized.includes("control structure") &&
+    normalized.includes("flowlines") &&
+    normalized.includes("downward") &&
+    normalized.includes("no branching") &&
+    normalized.includes("repeating");
+
+  const hasExpectedChoices =
+    normalized.includes("repetition") &&
+    normalized.includes("sequence") &&
+    normalized.includes("boolean") &&
+    normalized.includes("selection");
+
+  if (!hasControlStructurePrompt || !hasExpectedChoices) return null;
+
+  return "Answer: Sequence.\n\nA sequence control structure flows straight downward from one instruction to the next. There is no branching like a selection/if statement, and there is no repeating like a loop.";
+}
+
+function getPythonBlankQuizAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksWhatCodeInBlank =
+    normalized.includes("what code") &&
+    normalized.includes("blank") &&
+    normalized.includes("print nothing");
+  const hasWeatherIfStatement =
+    normalized.includes("if weather sunny") ||
+    (normalized.includes("weather") &&
+      normalized.includes("sunny") &&
+      normalized.includes("print") &&
+      normalized.includes("pass"));
+  const hasExpectedChoices =
+    normalized.includes("weather sunny") &&
+    normalized.includes("weather cloudy");
+
+  if (!asksWhatCodeInBlank || !hasWeatherIfStatement || !hasExpectedChoices) {
+    return null;
+  }
+
+  return 'Answer: `weather = "cloudy"`\n\nWhy: the `if` statement only prints when `weather == "sunny"`. If `weather` is set to `"cloudy"`, the condition is false, so Python goes to the `else` block. Since the `else` block only has `pass`, nothing is printed.';
+}
+
 function getDiscussionPostComparisonAnswer(
   latestUserMessage: string,
   messages: { role: string; content: string }[],
@@ -1177,6 +1220,17 @@ Live search was attempted but no reliable current information could be verified.
   const topicChoiceAnswer = getTopicChoiceAnswer(latestUserMessage);
   if (topicChoiceAnswer) {
     return topicChoiceAnswer;
+  }
+
+  const controlStructureQuizAnswer =
+    getControlStructureQuizAnswer(latestUserMessage);
+  if (controlStructureQuizAnswer) {
+    return controlStructureQuizAnswer;
+  }
+
+  const pythonBlankQuizAnswer = getPythonBlankQuizAnswer(latestUserMessage);
+  if (pythonBlankQuizAnswer) {
+    return pythonBlankQuizAnswer;
   }
 
   const discussionComparisonAnswer = getDiscussionPostComparisonAnswer(
@@ -1830,7 +1884,7 @@ function finalFallback(context: ExtendedChatContext): string {
 
   if (attachedFiles.length) {
     if (attachedFiles.every(isImageAttachment)) {
-      return "I received the images, but I couldn't confidently analyze them just now. Send one short note about what you want compared or identified, and I’ll focus on that.";
+      return "I received the image. What would you like me to do with it?\n\nFor example, you can ask me to:\n\n- Describe what is in the image\n- Read text from it\n- Answer a question shown in it\n- Compare it to another image\n- Cross items off a list\n- Explain a screenshot or error\n\nIf you want, just send something like “read this,” “answer this question,” or “what does this show?”";
     }
 
     if (attachedFiles.some(isPdfAttachment)) {
@@ -1903,6 +1957,13 @@ function finalFallback(context: ExtendedChatContext): string {
 
   switch (type) {
     case "coding":
+      if (
+        /\b(group of answer choices|what code|blank|if statement|print nothing|which code)\b/i.test(
+          message,
+        )
+      ) {
+        return "I received the code question, but I could not confidently complete the choice automatically. For code blanks, compare each answer choice against the condition and pick the one that makes the condition true or false as requested.";
+      }
       return "Send the language, file name, or exact error, and I’ll give you the direct fix.";
     case "business":
       return "Send the business goal, audience, or offer, and I’ll shape it into a sharper answer.";

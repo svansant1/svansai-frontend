@@ -852,7 +852,9 @@ export default function AIHelper({
       content:
         input.trim() ||
         (attachedFiles.length
-          ? `[Attached: ${attachedFiles.map((file) => file.name).join(", ")}]`
+          ? attachedFiles.every((file) => isImageType(file.type))
+            ? `Please analyze this image. [Attached: ${attachedFiles.map((file) => file.name).join(", ")}]`
+            : `[Attached: ${attachedFiles.map((file) => file.name).join(", ")}]`
           : ""),
       filePreview: attachedFile?.dataUrl,
       fileName: attachedFile?.name,
