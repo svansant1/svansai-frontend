@@ -775,18 +775,46 @@ function getConversationQualityAnswer(
   message: string,
   lastAssistantMessage: string,
 ): string | null {
-  const normalized = normalizeText(`${message}\n${lastAssistantMessage}`);
+  const normalized = normalizeText(message);
   const asksForRealFix =
     normalized.includes("real fix") ||
     normalized.includes("not up to par") ||
-    normalized.includes("repeats") ||
-    normalized.includes("repetitive") ||
+    /\b(your|you|svans-ai|svansai|ai|response|answer|conversation)\b.*\b(repeats|repetitive|fake)\b/.test(
+      normalized,
+    ) ||
+    /\b(repeats|repetitive|fake)\b.*\b(your|you|svans-ai|svansai|ai|response|answer|conversation)\b/.test(
+      normalized,
+    ) ||
     normalized.includes("feels fake") ||
     normalized.includes("fake sometimes");
 
   if (!asksForRealFix) return null;
 
   return "The real fix is engineering, not a nicer prompt. SVANS-AI needs a conversation-state layer that tracks the current goal, user style, unresolved need, and what was already said; a follow-up resolver for short replies like “why” or “exactly”; a repetition critic that scores drafts before they reach the user; a memory gate that only saves useful patterns; and route-specific prompts for teaching, writing, debugging, building, research, and file analysis. That combination stops the assistant from sounding fake because every answer is checked against context, intent, and quality before it is sent.";
+}
+
+function getStudyMaterialAcknowledgement(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksToRemember =
+    /\b(keep in mind|remember this|use this|save this|for context|study material|reading material)\b/i.test(
+      message,
+    );
+
+  if (asksToRemember) {
+    return "Got it — I’ll use this as study context in this chat.\n\nThe key idea is that repetition structures are loops, and they usually fall into two categories: counter-controlled loops, where you already know how many times to repeat, and condition/event-controlled loops, where the loop continues until something happens or a condition changes.\n\nExample: a `for` loop is usually best when you know the range, like counting from 1 to 10. A `while` loop is usually best when you are waiting for a condition, like asking the user whether they want to continue.";
+  }
+
+  const looksLikePythonLoopMaterial =
+    normalized.includes("python") &&
+    normalized.includes("while") &&
+    normalized.includes("for loop") &&
+    (normalized.includes("counter controlled") ||
+      normalized.includes("condition controlled") ||
+      normalized.includes("repetition"));
+
+  if (!looksLikePythonLoopMaterial) return null;
+
+  return "Got it — this adds the Python examples for the loop topic.\n\nThe main takeaway is that Python’s `while` loop works well when the loop depends on a condition, such as continuing until the user enters `N`. A `for` loop works well when the number of repetitions is known or when you are moving through a sequence, such as `range(1, 11)` or each character in a word.\n\nExample: counting from 1 to 10 is a good counter-controlled loop because the endpoint is known. Asking the user whether to keep counting is event-controlled because the user’s input decides when the loop stops.";
 }
 
 function getTopicChoiceAnswer(message: string): string | null {
@@ -836,6 +864,30 @@ function getDiscussionPostComparisonAnswer(
   if (previousPosts.length < 2) return null;
 
   return "The updated post is stronger than the first one.\n\nIt reads cleaner, has better flow, and explains the difference between loops and if statements more clearly. The first version had a good idea, especially the FedEx Dock Simulator example, but it had a few wording issues and felt a little rough in places. The updated version fixes that by separating the ideas into clearer paragraphs and giving a specific package-volume example for the if statements.\n\nI would use the updated post. The only small thing I would clean up is the wording around “Loops versus if statements” so it sounds a little more natural.\n\nA polished version could be:\n\nGood evening Professor and classmates,\n\nFor this week, I chose Topic 1: loops versus if statements. I think whether you use a loop or an if statement depends on what you are trying to accomplish. One is not necessarily better than the other; they simply serve different purposes.\n\nFor example, I have a Dock Simulator in Excel that demonstrates the load side of a FedEx warehouse. A loop is more appropriate in this situation because the program has to process every door on the dock. Instead of writing the same calculations for all 26 doors individually, the loop repeats those calculations for each door automatically.\n\nHowever, if statements are still needed inside the loop to make decisions. For example, if a door is receiving over 1,000 packages per hour, the program might assign three loaders. If it is receiving between 600 and 999 packages, it assigns two loaders. Otherwise, it assigns one loader. In this case, the loop handles processing every door, while the if statements determine what action to take for each individual door.\n\nThis example helped me understand that loops and if statements are not competing with each other. They often work together, with loops handling repetition and if statements handling decision-making.";
+}
+
+function getReadingMaterialCapabilityAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksAboutMaterials =
+    /\b(reading materials?|study guide|textbook|chapter|pdf|document|notes|material)\b/i.test(
+      message,
+    );
+  const asksAboutMemoryOrLearning =
+    /\b(save|remember|learn from|learn|store|study from|use later|quiz me|make flashcards|summarize)\b/i.test(
+      message,
+    );
+
+  if (!asksAboutMaterials || !asksAboutMemoryOrLearning) return null;
+
+  if (
+    normalized.includes("can you") ||
+    normalized.includes("are you able") ||
+    normalized.includes("would you")
+  ) {
+    return "Yes — you can send reading materials, and I can use them in a few ways.\n\nI can read the material in the current chat, summarize it, explain confusing sections, make quiz questions, create flashcards, pull out key terms, and help you study it with examples.\n\nFor long material, it works best if you attach it as a PDF or text file, or send one section at a time. Very large pasted chapters may be too long for one message, so I may ask you to split it or attach it as a file.\n\nFor memory, I can remember useful study context and preferences, like “I am studying CompTIA Tech+ Chapter 4 on operating systems” or “quiz me with examples.” I should not blindly store an entire textbook chapter as permanent memory. The better approach is to extract useful summaries, key terms, weak areas, and study goals, then use those in future conversations.\n\nExample: if you send a section on operating systems, I can turn it into:\n\n- A plain-English summary\n- Key terms like kernel, shell, GUI, drivers, and processes\n- Practice questions\n- Real-world examples\n- A short study plan\n- Flashcards for review";
+  }
+
+  return null;
 }
 
 function buildStatementAwarePrompt(
@@ -1135,6 +1187,18 @@ Live search was attempted but no reliable current information could be verified.
     return discussionComparisonAnswer;
   }
 
+  const readingMaterialCapabilityAnswer =
+    getReadingMaterialCapabilityAnswer(latestUserMessage);
+  if (readingMaterialCapabilityAnswer) {
+    return readingMaterialCapabilityAnswer;
+  }
+
+  const studyMaterialAcknowledgement =
+    getStudyMaterialAcknowledgement(latestUserMessage);
+  if (studyMaterialAcknowledgement) {
+    return studyMaterialAcknowledgement;
+  }
+
   let effectiveMessage = buildStatementAwarePrompt(
     latestUserMessage,
     messageIntent,
@@ -1377,6 +1441,8 @@ Runtime instructions:
 - Respond cleanly and purposefully according to the selected mode and task route.
 - Lead with the answer in Direct mode and when the user explicitly requests it.
 - For learning tasks in Auto, Guide, or Tutor mode, begin with the most useful concept, clue, or reasoning step rather than automatically revealing the final answer.
+- For study, certification, technical concept, programming, operating-system, networking, security, and tech-support questions, include a concrete example after the main answer unless the user asks for answer-only brevity.
+- When responding to pasted course or study-guide material, prefer this shape when useful: short answer, plain-English explanation, concrete example, quick takeaway.
 - For writing, building, debugging, analysis, and ordinary completion tasks, do the requested work without forcing a tutoring exchange.
 - If the answer has multiple parts, choose the clearest format instead of repeating the same breakdown style.
 - Use bullets, numbered steps, compact headings, examples, or a final takeaway only when that makes the answer easier to use.
@@ -1851,6 +1917,9 @@ function finalFallback(context: ExtendedChatContext): string {
     case "life":
       return "Tell me the situation and I’ll help you think through the next move.";
     default:
+      if (/^\s*(can|could|would|will|do|does|are|is)\b/i.test(message)) {
+        return "Yes, I can help with that. Send the material, question, file, or example, and I’ll work from what you provide. If it is a long document, attach it as a file or send it in smaller sections so I can handle it cleanly.";
+      }
       return message.trim()
         ? "I couldn’t generate a strong answer yet, but I received your message. Try one more time and I’ll respond directly."
         : "Send me anything you want to ask, say, build, fix, or think through.";

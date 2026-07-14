@@ -198,7 +198,10 @@ export async function POST(req: Request) {
     if (invalidMessage) {
       return json(
         req,
-        { error: "Invalid chat message.", requestId },
+        {
+          error: `One message is too long. Keep each pasted message under ${MAX_MESSAGE_CHARS.toLocaleString()} characters, split it into smaller parts, or attach it as a file.`,
+          requestId,
+        },
         { status: 400, headers: { "x-svansai-request-id": requestId } },
       );
     }

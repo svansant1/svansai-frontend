@@ -67,6 +67,7 @@ const GUEST_LIMIT = 5;
 const MAX_FILE_MB = 10;
 const MAX_ATTACHMENTS = 10;
 const MAX_TOTAL_FILE_MB = 40;
+const MAX_MESSAGE_CHARS = 30_000;
 
 const PASSWORD_PROMPT = "enter owner password:";
 const PASSWORD_SUCCESS = "owner mode enabled";
@@ -831,6 +832,13 @@ export default function AIHelper({
   const handleSend = async () => {
     if ((!input.trim() && attachedFiles.length === 0) || loading) return;
 
+    if (input.length > MAX_MESSAGE_CHARS) {
+      setFileError(
+        `That paste is too long for one message (${input.length.toLocaleString()} characters). Split it into smaller parts or attach it as a .txt/PDF file. Example: "Summarize the OS components section" or "Make 10 quiz questions from this section."`,
+      );
+      return;
+    }
+
     const userCount = messages.filter((m) => m.role === "user").length;
 
     if (!user && userCount >= GUEST_LIMIT && !loginDismissed) {
@@ -903,7 +911,20 @@ export default function AIHelper({
         body: JSON.stringify(body),
       });
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (typeof errorData?.error === "string") {
+            errorMessage = errorData.error;
+          } else if (typeof errorData?.text === "string") {
+            errorMessage = errorData.text;
+          }
+        } catch {
+          // keep the HTTP fallback
+        }
+        throw new Error(errorMessage);
+      }
 
       const data = await response.json();
 
@@ -935,14 +956,19 @@ export default function AIHelper({
       onMessagesChangeRef.current?.(finalMessages);
     } catch (error) {
       console.error("SEND_ERROR:", error);
+      const message =
+        error instanceof Error &&
+        error.message &&
+        !/^HTTP \d+$/i.test(error.message)
+          ? error.message
+          : "Something interrupted my response. Please send it again and I'll pick right back up.";
 
       setIsPasswordMode(false);
       setMessages([
         ...nextMessages,
         {
           role: "assistant",
-          content:
-            "Something interrupted my response. Please send it again and I'll pick right back up.",
+          content: message,
         },
       ]);
       notifyThinking(false, "Still here.");
@@ -952,6 +978,13 @@ export default function AIHelper({
   };
 
   const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedText = e.clipboardData.getData("text");
+    if (pastedText && input.length + pastedText.length > MAX_MESSAGE_CHARS) {
+      setFileError(
+        `That paste is larger than one chat message can handle. Split it into smaller parts or attach it as a .txt/PDF file. Example: "Explain the kernel with an example" or "Quiz me on file systems."`,
+      );
+    }
+
     const items = e.clipboardData.items;
 
     for (let i = 0; i < items.length; i += 1) {
