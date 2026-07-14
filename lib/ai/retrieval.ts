@@ -117,7 +117,11 @@ function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
 }
 
-function scoreTextMatch(query: string, text: string, tags: string[] = []): number {
+function scoreTextMatch(
+  query: string,
+  text: string,
+  tags: string[] = [],
+): number {
   const qTokens = unique(tokenize(query));
   const textBlob = `${text} ${tags.join(" ")}`.toLowerCase();
   const textTokens = new Set(tokenize(textBlob));
@@ -130,7 +134,9 @@ function scoreTextMatch(query: string, text: string, tags: string[] = []): numbe
   }
 
   const phraseBoost =
-    textBlob.includes(query.toLowerCase().trim()) && query.trim().length > 4 ? 0.25 : 0;
+    textBlob.includes(query.toLowerCase().trim()) && query.trim().length > 4
+      ? 0.25
+      : 0;
 
   return Math.min(1, overlap / Math.max(qTokens.length, 1) + phraseBoost);
 }
@@ -184,7 +190,40 @@ function boostSelfKnowledge(query: string, item: RetrievalItem): number {
   return 0.1;
 }
 
-function toRetrievalItem(row: KnowledgeRow, query: string): RetrievalItem | null {
+function isSelfKnowledgeQuery(query: string): boolean {
+  const q = query.toLowerCase();
+  return [
+    "svans-ai",
+    "svansai",
+    "yourself",
+    "your code",
+    "how do you work",
+    "how you work",
+    "what do you use",
+    "what models",
+    "what provider",
+    "fallback",
+    "why did you fail",
+    "why fallback",
+    "architecture",
+    "chat engine",
+    "memory",
+    "retrieval",
+    "self improvement",
+    "self-improve",
+    "self analysis",
+    "self-analysis",
+    "owner mode",
+    "shield",
+    "debugger",
+    "sandbox",
+  ].some((term) => q.includes(term));
+}
+
+function toRetrievalItem(
+  row: KnowledgeRow,
+  query: string,
+): RetrievalItem | null {
   const title = row.title?.trim() || "Knowledge Entry";
   const source = row.source?.trim() || "knowledge";
   const snippet = row.snippet?.trim() || "";
@@ -210,12 +249,12 @@ function rankItems(query: string, items: RetrievalItem[]): RetrievalItem[] {
       const baseScore = scoreTextMatch(
         query,
         `${item.title} ${item.snippet}`,
-        item.tags ?? []
+        item.tags ?? [],
       );
 
       let boosted = Math.min(
         1,
-        Math.max(item.score ?? 0, baseScore) + boostSelfKnowledge(query, item)
+        Math.max(item.score ?? 0, baseScore) + boostSelfKnowledge(query, item),
       );
 
       // Give learned knowledge a small boost for repeated future use
@@ -229,7 +268,10 @@ function rankItems(query: string, items: RetrievalItem[]): RetrievalItem[] {
 }
 
 async function getSystemKnowledge(query: string): Promise<RetrievalItem[]> {
-  return rankItems(query, SYSTEM_KNOWLEDGE).filter((item) => item.score >= 0.18);
+  if (!isSelfKnowledgeQuery(query)) return [];
+  return rankItems(query, SYSTEM_KNOWLEDGE).filter(
+    (item) => item.score >= 0.18,
+  );
 }
 
 async function getSupabaseKnowledge(query: string): Promise<RetrievalItem[]> {
@@ -267,7 +309,9 @@ function dedupeItems(items: RetrievalItem[]): RetrievalItem[] {
   return result;
 }
 
-export async function getRetrievedKnowledge(query: string): Promise<RetrievalItem[]> {
+export async function getRetrievedKnowledge(
+  query: string,
+): Promise<RetrievalItem[]> {
   const cleanedQuery = query.trim();
   if (!cleanedQuery) return [];
 

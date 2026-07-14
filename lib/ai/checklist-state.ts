@@ -34,6 +34,8 @@ const ACTIVE_LIST_REQUEST =
   /\b(show|send|give|list|display)\b.*\b(list|checklist|updated list)\b|\b(updated list|active list|current list)\b/i;
 const VISIBLE_COMPLETED_REQUEST =
   /\b(all|everything|anything|what)\b.*\b(finished|done|completed|crossed|checked)\b/i;
+const WRITING_REVIEW_REQUEST =
+  /\b(look over|review|revise|rewrite|compare|discussion|post|paragraph|essay|draft|professor|classmates)\b/i;
 
 const SIMPLE_ITEM_PATTERN = /^[a-z0-9][a-z0-9 .#-]{0,40}$/i;
 
@@ -125,6 +127,7 @@ function parseChecklistFromText(text: string): ChecklistItem[] {
 function parseSimpleTypedList(text: string): ChecklistItem[] {
   const trimmed = text.trim();
   if (!trimmed || trimmed.includes("?")) return [];
+  if (WRITING_REVIEW_REQUEST.test(trimmed)) return [];
   if (
     /\b(add|sum|multiply|divide|subtract|average|mean|total)\b/i.test(trimmed)
   ) {
@@ -143,12 +146,20 @@ function parseSimpleTypedList(text: string): ChecklistItem[] {
 }
 
 function looksLikeChecklistSetup(message: string, messages: ChatMessage[]) {
+  if (WRITING_REVIEW_REQUEST.test(message)) return false;
+
   const recentText = messages
     .slice(-6)
     .map((item) => item.content)
     .join(" ");
 
-  return LIST_CONTEXT_TERMS.test(`${recentText} ${message}`);
+  if (WRITING_REVIEW_REQUEST.test(recentText)) return false;
+
+  return (
+    /\b(list|checklist|cross|crossed|check off|mark off|completed|complete|finished|done|pending|remaining)\b/i.test(
+      `${recentText} ${message}`,
+    ) && !/\b(discussion|post|paragraph|essay|draft)\b/i.test(recentText)
+  );
 }
 
 function getState(sessionId: string) {
@@ -378,6 +389,15 @@ export function handleChecklistRequest(
   sessionId: string,
   messages: ChatMessage[] = [],
 ): string | null {
+  if (WRITING_REVIEW_REQUEST.test(message)) return null;
+  if (
+    !/\b(list|checklist|cross|crossed|check off|mark off|completed|complete|finished|done|pending|remaining|left|unfinished|updated list)\b/i.test(
+      message,
+    )
+  ) {
+    return null;
+  }
+
   let state =
     getState(sessionId) ?? hydrateStateFromMessages(sessionId, messages);
 

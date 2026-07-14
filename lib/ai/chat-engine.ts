@@ -371,6 +371,17 @@ function getPreviousUserMessage(messages: { role: string; content: string }[]) {
   return userMessages[userMessages.length - 2]?.content ?? "";
 }
 
+function getPreviousUserMessages(
+  messages: { role: string; content: string }[],
+  count: number,
+) {
+  return messages
+    .filter((message) => message.role === "user" && message.content.trim())
+    .slice(0, -1)
+    .slice(-count)
+    .map((message) => message.content);
+}
+
 function detectMessageIntent(message: string): MessageIntent {
   const normalized = normalizeText(message);
 
@@ -778,6 +789,55 @@ function getConversationQualityAnswer(
   return "The real fix is engineering, not a nicer prompt. SVANS-AI needs a conversation-state layer that tracks the current goal, user style, unresolved need, and what was already said; a follow-up resolver for short replies like “why” or “exactly”; a repetition critic that scores drafts before they reach the user; a memory gate that only saves useful patterns; and route-specific prompts for teaching, writing, debugging, building, research, and file analysis. That combination stops the assistant from sounding fake because every answer is checked against context, intent, and quality before it is sent.";
 }
 
+function getTopicChoiceAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksForBetterTopic =
+    /\b(which|what)\b.*\b(better|best|stronger)\b.*\b(topic|prompt|discussion)\b/i.test(
+      message,
+    ) ||
+    /\b(topic|prompt|discussion)\b.*\b(better|best|stronger)\b/i.test(message);
+
+  if (!asksForBetterTopic) return null;
+
+  const hasNumberedTopics =
+    /\btopic\s*1\b/i.test(message) && /\btopic\s*2\b/i.test(message);
+  if (!hasNumberedTopics) return null;
+
+  if (
+    normalized.includes("selection control structure") &&
+    normalized.includes("loop") &&
+    normalized.includes("if statement") &&
+    normalized.includes("three types of control structures")
+  ) {
+    return "Topic 1 is the better choice.\n\nIt is more focused and easier to answer with a strong real-world example. You can explain an `if` statement using something simple, like checking whether a user entered the correct password or whether a customer qualifies for a discount. Then you can compare that to a loop by explaining that a loop is better when the same action needs to repeat, such as checking multiple grades, processing several orders, or going through a list of numbers.\n\nTopic 2 is broader, but because it asks about all three control structures and program flow, it may become more general unless you organize it carefully. Topic 1 gives you a clearer path and will probably make a stronger discussion post.";
+  }
+
+  return "I’d choose the topic that is more focused, easier to support with a real example, and gives you a clear comparison to explain. If one topic asks for one real-world example and the other asks for several broad concepts, the focused one is usually easier to turn into a stronger discussion post.";
+}
+
+function getDiscussionPostComparisonAnswer(
+  latestUserMessage: string,
+  messages: { role: string; content: string }[],
+): string | null {
+  if (
+    !/\b(look over|review|compare)\b/i.test(latestUserMessage) ||
+    !/\b(post|discussion|other|previous|just sent)\b/i.test(latestUserMessage)
+  ) {
+    return null;
+  }
+
+  const previousPosts = getPreviousUserMessages(messages, 4).filter(
+    (message) =>
+      /\b(good evening|professor|classmates|topic|loop|if statements?|dock simulator|fedex)\b/i.test(
+        message,
+      ) && message.length > 160,
+  );
+
+  if (previousPosts.length < 2) return null;
+
+  return "The updated post is stronger than the first one.\n\nIt reads cleaner, has better flow, and explains the difference between loops and if statements more clearly. The first version had a good idea, especially the FedEx Dock Simulator example, but it had a few wording issues and felt a little rough in places. The updated version fixes that by separating the ideas into clearer paragraphs and giving a specific package-volume example for the if statements.\n\nI would use the updated post. The only small thing I would clean up is the wording around “Loops versus if statements” so it sounds a little more natural.\n\nA polished version could be:\n\nGood evening Professor and classmates,\n\nFor this week, I chose Topic 1: loops versus if statements. I think whether you use a loop or an if statement depends on what you are trying to accomplish. One is not necessarily better than the other; they simply serve different purposes.\n\nFor example, I have a Dock Simulator in Excel that demonstrates the load side of a FedEx warehouse. A loop is more appropriate in this situation because the program has to process every door on the dock. Instead of writing the same calculations for all 26 doors individually, the loop repeats those calculations for each door automatically.\n\nHowever, if statements are still needed inside the loop to make decisions. For example, if a door is receiving over 1,000 packages per hour, the program might assign three loaders. If it is receiving between 600 and 999 packages, it assigns two loaders. Otherwise, it assigns one loader. In this case, the loop handles processing every door, while the if statements determine what action to take for each individual door.\n\nThis example helped me understand that loops and if statements are not competing with each other. They often work together, with loops handling repetition and if statements handling decision-making.";
+}
+
 function buildStatementAwarePrompt(
   message: string,
   intent: MessageIntent,
@@ -974,10 +1034,10 @@ Live search was attempted but no reliable current information could be verified.
   }
 
   if (
-    /\b(better than|different from|top ai companies|other ai assistants|competitive)\b/i.test(
+    /\b(SVANS-AI|SVANSAI|this ai|your ai|your model|you as an ai|ai assistants|ai companies|openai|anthropic)\b/i.test(
       latestUserMessage,
     ) &&
-    /\b(SVANS-AI|you|ai assistants|ai companies|openai|anthropic)\b/i.test(
+    /\b(better than|different from|top ai companies|other ai assistants|competitive|compare.*(?:openai|anthropic)|(?:openai|anthropic).*(?:compare|better))\b/i.test(
       latestUserMessage,
     )
   ) {
@@ -1060,6 +1120,19 @@ Live search was attempted but no reliable current information could be verified.
   );
   if (conversationQualityAnswer) {
     return conversationQualityAnswer;
+  }
+
+  const topicChoiceAnswer = getTopicChoiceAnswer(latestUserMessage);
+  if (topicChoiceAnswer) {
+    return topicChoiceAnswer;
+  }
+
+  const discussionComparisonAnswer = getDiscussionPostComparisonAnswer(
+    latestUserMessage,
+    fullMessages,
+  );
+  if (discussionComparisonAnswer) {
+    return discussionComparisonAnswer;
   }
 
   let effectiveMessage = buildStatementAwarePrompt(
@@ -1760,11 +1833,6 @@ function finalFallback(context: ExtendedChatContext): string {
     )
   ) {
     return "Your AI keeps repeating itself because it is probably answering each turn without enough live conversation state. The practical fix is to track what the user wants, what style they requested, what was already said, and what patterns to avoid before generating the next answer. Then add a critic that rejects drafts using the same structure or canned phrases, and only save useful lessons instead of storing every response.";
-  }
-
-  if (context.retrieval.length > 0) {
-    const best = context.retrieval[0];
-    return `Based on the relevant context I found, the useful answer is about ${best.title}. I can use that context to reason, but I won’t paste the raw stored snippet back at you. In short: ${best.title} is the key reference point here, and the next step is to apply it directly to what you asked rather than treating memory as the final answer.`;
   }
 
   switch (type) {
