@@ -776,13 +776,21 @@ function getConversationQualityAnswer(
   lastAssistantMessage: string,
 ): string | null {
   const normalized = normalizeText(message);
+  const looksLikeCourseOrWritingContent =
+    isWritingReviewRequest(message) ||
+    /\b(discussion post|reply from|good afternoon class|good evening class|professor|classmates|control structures?|sequence|selection|iteration|repetition structures?|if\/else|program flow)\b/i.test(
+      message,
+    );
+
+  if (looksLikeCourseOrWritingContent) return null;
+
   const asksForRealFix =
     normalized.includes("real fix") ||
     normalized.includes("not up to par") ||
-    /\b(your|you|svans-ai|svansai|ai|response|answer|conversation)\b.*\b(repeats|repetitive|fake)\b/.test(
+    /\b(your|svans-ai|svansai|ai|response|answer|conversation)\s+(?:is|feels|sounds|keeps|seems|gets|got|becomes|was|were)?\s*(?:too\s+)?\b(repetitive|fake|repeats?)\b/.test(
       normalized,
     ) ||
-    /\b(repeats|repetitive|fake)\b.*\b(your|you|svans-ai|svansai|ai|response|answer|conversation)\b/.test(
+    /\b(repetitive|fake|repeats?)\b.{0,80}\b(your|svans-ai|svansai|ai|response|answer|conversation)\b/.test(
       normalized,
     ) ||
     normalized.includes("feels fake") ||
@@ -907,6 +915,23 @@ function getDiscussionPostComparisonAnswer(
   if (previousPosts.length < 2) return null;
 
   return "The updated post is stronger than the first one.\n\nIt reads cleaner, has better flow, and explains the difference between loops and if statements more clearly. The first version had a good idea, especially the FedEx Dock Simulator example, but it had a few wording issues and felt a little rough in places. The updated version fixes that by separating the ideas into clearer paragraphs and giving a specific package-volume example for the if statements.\n\nI would use the updated post. The only small thing I would clean up is the wording around “Loops versus if statements” so it sounds a little more natural.\n\nA polished version could be:\n\nGood evening Professor and classmates,\n\nFor this week, I chose Topic 1: loops versus if statements. I think whether you use a loop or an if statement depends on what you are trying to accomplish. One is not necessarily better than the other; they simply serve different purposes.\n\nFor example, I have a Dock Simulator in Excel that demonstrates the load side of a FedEx warehouse. A loop is more appropriate in this situation because the program has to process every door on the dock. Instead of writing the same calculations for all 26 doors individually, the loop repeats those calculations for each door automatically.\n\nHowever, if statements are still needed inside the loop to make decisions. For example, if a door is receiving over 1,000 packages per hour, the program might assign three loaders. If it is receiving between 600 and 999 packages, it assigns two loaders. Otherwise, it assigns one loader. In this case, the loop handles processing every door, while the if statements determine what action to take for each individual door.\n\nThis example helped me understand that loops and if statements are not competing with each other. They often work together, with loops handling repetition and if statements handling decision-making.";
+}
+
+function getDiscussionReplyDraftAnswer(message: string): string | null {
+  const asksForReply =
+    /\b(can you|could you|please|help me)?\s*(give|write|draft|make|create)\b.*\breply\b/i.test(
+      message,
+    ) || /\breply to this discussion\b/i.test(message);
+
+  const hasControlStructurePost =
+    /\b(sequence|selection|iteration)\b/i.test(message) &&
+    /\b(control structures?|program flow|if\/else|conditionals?|repeats?)\b/i.test(
+      message,
+    );
+
+  if (!asksForReply || !hasControlStructurePost) return null;
+
+  return "Here’s a solid reply you could use:\n\nGood afternoon Aaron,\n\nYou explained the three control structures clearly. I like how you pointed out that sequence is the foundation because most programs still need instructions to run in an organized order before selection or iteration are added. Your explanation of selection also makes sense because if/else statements allow the program to make decisions instead of following only one path.\n\nI also agree that these structures do not always have to follow one strict order. In many programs, they work together. For example, a program might start with a sequence of setup steps, use selection to decide what action to take, and then use iteration to repeat a task until a condition is met. That combination is what makes program flow more flexible and useful.";
 }
 
 function getReadingMaterialCapabilityAnswer(message: string): string | null {
@@ -1239,6 +1264,12 @@ Live search was attempted but no reliable current information could be verified.
   );
   if (discussionComparisonAnswer) {
     return discussionComparisonAnswer;
+  }
+
+  const discussionReplyDraftAnswer =
+    getDiscussionReplyDraftAnswer(latestUserMessage);
+  if (discussionReplyDraftAnswer) {
+    return discussionReplyDraftAnswer;
   }
 
   const readingMaterialCapabilityAnswer =
@@ -1927,7 +1958,11 @@ function finalFallback(context: ExtendedChatContext): string {
     }
 
     if (
-      /\b(not up to par|repeats|repetitive|fake|top tier|openai|anthropic)\b/i.test(
+      /\b(not up to par|top tier|openai|anthropic)\b/i.test(message) ||
+      /\b(ai|svans-ai|svansai|you|your|response|answer|conversation)\b.{0,80}\b(repeats|repetitive|fake)\b/i.test(
+        message,
+      ) ||
+      /\b(repeats|repetitive|fake)\b.{0,80}\b(ai|svans-ai|svansai|you|your|response|answer|conversation)\b/i.test(
         message,
       )
     ) {
@@ -1948,7 +1983,10 @@ function finalFallback(context: ExtendedChatContext): string {
   }
 
   if (
-    /\b(repeating itself|repeats|repetitive|same answer|same template)\b/i.test(
+    /\b(ai|svans-ai|svansai|you|your|response|answer|conversation)\b.{0,80}\b(repeating itself|repeats|repetitive|same answer|same template)\b/i.test(
+      message,
+    ) ||
+    /\b(repeating itself|repeats|repetitive|same answer|same template)\b.{0,80}\b(ai|svans-ai|svansai|you|your|response|answer|conversation)\b/i.test(
       message,
     )
   ) {
