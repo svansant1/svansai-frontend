@@ -1,7 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ProviderName } from "@/lib/ai/providers/router";
 import type { ResponseCritique } from "@/lib/ai/response-critic";
-import type { PlatformCapability, PlatformModule, TaskRoute } from "@/lib/platform/orchestrator";
+import type {
+  PlatformCapability,
+  PlatformModule,
+  TaskRoute,
+} from "@/lib/platform/orchestrator";
 import { SVANSAI_PROMPT_VERSION } from "@/lib/platform/feature-flags";
 
 export type RuntimeTelemetry = {
@@ -13,6 +17,9 @@ export type RuntimeTelemetry = {
   qualityScore?: number;
   qualityReasons: string[];
   fallbackUsed: boolean;
+  liveSearchAttempted: boolean;
+  liveSearchResults: number;
+  liveSearchFailureReason?: string;
 };
 
 export type ConversationAnalyticsEvent = {
@@ -41,7 +48,9 @@ export function createRequestId(): string {
   return `sv_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export function createRuntimeTelemetry(requestId = createRequestId()): RuntimeTelemetry {
+export function createRuntimeTelemetry(
+  requestId = createRequestId(),
+): RuntimeTelemetry {
   return {
     requestId,
     providerPlan: [],
@@ -49,10 +58,15 @@ export function createRuntimeTelemetry(requestId = createRequestId()): RuntimeTe
     providerFailures: [],
     qualityReasons: [],
     fallbackUsed: false,
+    liveSearchAttempted: false,
+    liveSearchResults: 0,
   };
 }
 
-export function applyCritique(telemetry: RuntimeTelemetry, critique: ResponseCritique) {
+export function applyCritique(
+  telemetry: RuntimeTelemetry,
+  critique: ResponseCritique,
+) {
   telemetry.qualityScore = critique.score;
   telemetry.qualityReasons = critique.reasons;
 }
@@ -61,10 +75,14 @@ function serverClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
-export async function logConversationAnalytics(event: ConversationAnalyticsEvent): Promise<void> {
+export async function logConversationAnalytics(
+  event: ConversationAnalyticsEvent,
+): Promise<void> {
   const supabase = serverClient();
   if (!supabase) return;
 

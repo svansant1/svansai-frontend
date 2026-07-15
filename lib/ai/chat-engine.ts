@@ -215,12 +215,29 @@ const LIVE_INFO_PATTERNS = [
   "price",
   "live",
   "breaking",
+  "website",
+  "site",
+  "webpage",
+  "web page",
+  "url",
+  "domain",
+  "look up",
+  "lookup",
+  "search",
+  "browse",
+  "internet",
+  "online",
 ];
 
 function needsLiveSearch(message: string): boolean {
   const lower = message.toLowerCase();
 
-  return LIVE_INFO_PATTERNS.some((pattern) => lower.includes(pattern));
+  return (
+    LIVE_INFO_PATTERNS.some((pattern) => lower.includes(pattern)) ||
+    /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z]{2,})(?:\/[^\s]*)?\b/i.test(
+      message,
+    )
+  );
 }
 
 const CONVERSATION_STYLE_RULES = `
@@ -1108,7 +1125,15 @@ export async function generateChatResponse(
   if (shouldSearchLive) {
     console.log("[SVANS-AI] Running live web search...");
 
-    const liveResults = await searchLiveWeb(latestUserMessage);
+    const liveSearch = await searchLiveWeb(latestUserMessage);
+    const liveResults = liveSearch.results;
+
+    if (runtimeTelemetry) {
+      runtimeTelemetry.liveSearchAttempted = liveSearch.status.attempted;
+      runtimeTelemetry.liveSearchResults = liveSearch.status.resultCount;
+      runtimeTelemetry.liveSearchFailureReason =
+        liveSearch.status.failureReason;
+    }
 
     if (liveResults.length > 0) {
       liveSearchContext = `
@@ -1125,6 +1150,7 @@ Content: ${r.content}
   .join("\n")}
 
 Live web answer rules:
+- You have been given live web search results for this request. Do not claim you cannot access the internet or browse.
 - Cite live claims with bracketed source numbers, for example [1] or [2].
 - Only make current/live claims that are supported by the listed results.
 - If the results conflict or are thin, say what is verified and what remains uncertain.
@@ -1133,6 +1159,7 @@ Live web answer rules:
     } else {
       liveSearchContext = `
 Live search was attempted but no reliable current information could be verified.
+Do not claim you have no browsing ability. Say that live search did not return enough reliable results for this specific request, then ask for a URL, screenshot, or more detail if needed.
 `;
     }
   }
