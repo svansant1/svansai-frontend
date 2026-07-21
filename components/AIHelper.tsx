@@ -65,9 +65,11 @@ type AIHelperProps = {
 
 const GUEST_LIMIT = 5;
 const MAX_FILE_MB = 10;
-const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENTS = 30;
 const MAX_TOTAL_FILE_MB = 40;
 const MAX_MESSAGE_CHARS = 30_000;
+const ACCEPTED_EXTENSION_PATTERN =
+  /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|txt|json|html|css|csv|tsv|xlsx|pdf)$/i;
 
 const PASSWORD_PROMPT = "enter owner password:";
 const PASSWORD_SUCCESS = "owner mode enabled";
@@ -151,13 +153,16 @@ function isPdfType(type: string) {
 }
 
 function readBrowserFile(file: File): Promise<AttachedFile> {
+  const browserFile = file as File & { webkitRelativePath?: string };
+  const displayName = browserFile.webkitRelativePath || file.name;
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onerror = () => reject(new Error(`Could not read ${displayName}.`));
     reader.onload = () => {
       const dataUrl = String(reader.result ?? "");
       resolve({
-        name: file.name,
+        name: displayName,
         type: file.type || "text/plain",
         base64: dataUrl.split(",")[1] || "",
         dataUrl,
@@ -491,6 +496,7 @@ export default function AIHelper({
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const passwordInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -745,29 +751,44 @@ export default function AIHelper({
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setFileError("");
-    const selected = Array.from(e.target.files ?? []);
+    const rawSelected = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!selected.length) return;
+    if (!rawSelected.length) return;
+
+    const validSelected = rawSelected.filter((file) => {
+      const acceptedExtension = ACCEPTED_EXTENSION_PATTERN.test(file.name);
+      return (
+        (ACCEPTED_TYPES.includes(file.type) || acceptedExtension) &&
+        file.size <= MAX_FILE_MB * 1024 * 1024
+      );
+    });
+
+    if (!validSelected.length) {
+      setFileError(
+        `No supported files were found. Supported folder files include code, text, markdown, PDFs, images, CSV/TSV, JSON, HTML/CSS, and Excel files up to ${MAX_FILE_MB}MB each.`,
+      );
+      return;
+    }
+
+    const selected = validSelected.slice(
+      0,
+      Math.max(0, MAX_ATTACHMENTS - attachedFiles.length),
+    );
+
+    if (!selected.length) {
+      setFileError(`You can attach up to ${MAX_ATTACHMENTS} files.`);
+      return;
+    }
+
     if (attachedFiles.length + selected.length > MAX_ATTACHMENTS) {
       setFileError(`You can attach up to ${MAX_ATTACHMENTS} files.`);
       return;
     }
 
-    const invalid = selected.find((file) => {
-      const acceptedExtension =
-        /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|csv|tsv|xlsx)$/i.test(
-          file.name,
-        );
-      return (
-        (!ACCEPTED_TYPES.includes(file.type) && !acceptedExtension) ||
-        file.size > MAX_FILE_MB * 1024 * 1024
-      );
-    });
-    if (invalid) {
+    if (rawSelected.length !== validSelected.length) {
       setFileError(
-        `${invalid.name} is unsupported or larger than ${MAX_FILE_MB}MB.`,
+        `Added ${selected.length} supported file${selected.length === 1 ? "" : "s"}. Skipped ${rawSelected.length - validSelected.length} unsupported or oversized item${rawSelected.length - validSelected.length === 1 ? "" : "s"}.`,
       );
-      return;
     }
 
     const totalBytes = [...attachedFiles, ...selected].reduce(
@@ -785,6 +806,15 @@ export default function AIHelper({
     setAttachedFiles((current) =>
       [...current, ...converted].slice(0, MAX_ATTACHMENTS),
     );
+
+    if (
+      rawSelected.length > selected.length &&
+      rawSelected.length === validSelected.length
+    ) {
+      setFileError(
+        `Added the first ${selected.length} supported files. Folder review is limited to ${MAX_ATTACHMENTS} files per message.`,
+      );
+    }
   };
 
   const removeAttachment = (index: number) => {
@@ -2029,37 +2059,75 @@ export default function AIHelper({
               multiple
               accept={
                 ACCEPTED_TYPES.join(",") +
-                ",.py,.ts,.tsx,.js,.jsx,.java,.c,.cpp,.cs,.go,.rb,.rs,.swift,.kt,.md,.csv,.tsv,.xlsx"
+                ",.py,.ts,.tsx,.js,.jsx,.java,.c,.cpp,.cs,.go,.rb,.rs,.swift,.kt,.md,.txt,.json,.html,.css,.csv,.tsv,.xlsx,.pdf"
               }
               onChange={handleFileSelect}
               style={{ display: "none" }}
             />
+            <input
+              ref={folderInputRef}
+              type="file"
+              multiple
+              accept={
+                ACCEPTED_TYPES.join(",") +
+                ",.py,.ts,.tsx,.js,.jsx,.java,.c,.cpp,.cs,.go,.rb,.rs,.swift,.kt,.md,.txt,.json,.html,.css,.csv,.tsv,.xlsx,.pdf"
+              }
+              onChange={handleFileSelect}
+              style={{ display: "none" }}
+              {...{ webkitdirectory: "", directory: "" }}
+            />
 
             {!isPasswordMode && (
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={loading}
-                title="Attach file"
-                style={{
-                  padding: isMobile ? "14px 18px" : "12px 16px",
-                  borderRadius: "16px",
-                  backgroundColor: attachedFile
-                    ? "rgba(56,189,248,0.2)"
-                    : "rgba(255,255,255,0.06)",
-                  border: attachedFile
-                    ? "1px solid rgba(56,189,248,0.4)"
-                    : "1px solid rgba(255,255,255,0.12)",
-                  color: "white",
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontSize: "1.1rem",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                📎
-              </button>
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading}
+                  title="Attach file"
+                  style={{
+                    padding: isMobile ? "14px 18px" : "12px 16px",
+                    borderRadius: "16px",
+                    backgroundColor: attachedFile
+                      ? "rgba(56,189,248,0.2)"
+                      : "rgba(255,255,255,0.06)",
+                    border: attachedFile
+                      ? "1px solid rgba(56,189,248,0.4)"
+                      : "1px solid rgba(255,255,255,0.12)",
+                    color: "white",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    fontSize: "1.1rem",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  📎
+                </button>
+                <button
+                  onClick={() => folderInputRef.current?.click()}
+                  disabled={loading}
+                  title="Attach folder"
+                  style={{
+                    padding: isMobile ? "14px 18px" : "12px 16px",
+                    borderRadius: "16px",
+                    backgroundColor: attachedFile
+                      ? "rgba(56,189,248,0.2)"
+                      : "rgba(255,255,255,0.06)",
+                    border: attachedFile
+                      ? "1px solid rgba(56,189,248,0.4)"
+                      : "1px solid rgba(255,255,255,0.12)",
+                    color: "white",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    fontSize: "1.1rem",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  🗂️
+                </button>
+              </>
             )}
 
             <button

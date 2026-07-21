@@ -13,7 +13,7 @@ import { createRequestId } from "@/lib/platform/telemetry";
 const MAX_REQUEST_BYTES = 55 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 40 * 1024 * 1024;
-const MAX_FILES = 10;
+const MAX_FILES = 30;
 const MAX_MESSAGES = 250;
 const MAX_MESSAGE_CHARS = 30_000;
 

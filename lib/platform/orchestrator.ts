@@ -77,7 +77,7 @@ function chooseRoute(
   )
     return "debug";
   if (
-    /\b(phishing|malware|unsafe|threat|bypass|unauthorized|security risk)\b/.test(
+    /\b(phishing|malware|unsafe|threat|bypass|unauthorized|security risk|scam|fraud|fake site|legit|legitimate|trustworthy)\b/.test(
       normalized,
     )
   )
@@ -131,7 +131,7 @@ function capabilitiesForRequest(
   )
     capabilities.add("writing");
   if (
-    /\b(latest|current|today|news|research|sources|look up|lookup|search|browse|internet|online|website|site|webpage|web page|url|domain)\b/.test(
+    /\b(latest|current|today|news|research|sources|look up|lookup|search|browse|internet|online|website|site|webpage|web page|url|domain|scam|fraud|legit|legitimate|trustworthy|reputation|reviews|complaints|bbb)\b/.test(
       normalized,
     ) ||
     /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z]{2,})(?:\/[^\s]*)?\b/i.test(

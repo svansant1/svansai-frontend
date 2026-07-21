@@ -46,7 +46,7 @@ import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
 import { generateWithGemini } from "@/lib/ai/providers/gemini";
 import type { AttachedFile } from "@/lib/ai/file-types";
 import { understandAttachedFile } from "@/lib/ai/file-understanding";
-import { searchLiveWeb } from "@/lib/ai/live-search";
+import { extractSearchDomain, searchLiveWeb } from "@/lib/ai/live-search";
 import { enforceLiveCitations } from "@/lib/ai/citation-guard";
 import {
   buildConversationState,
@@ -238,6 +238,32 @@ function needsLiveSearch(message: string): boolean {
       message,
     )
   );
+}
+
+function isSiteSafetyCheck(message: string): boolean {
+  const normalized = normalizeText(message);
+  return (
+    Boolean(extractSearchDomain(message)) &&
+    /\b(scam|legit|legitimate|safe|unsafe|trustworthy|fraud|fake|bbb|better business bureau|google safe browsing|review|complaint|complaints|reputation|check out|checks out)\b/i.test(
+      normalized,
+    )
+  );
+}
+
+function buildSiteSafetySearchQueries(message: string): string[] {
+  const domain = extractSearchDomain(message);
+  if (!domain) return [message];
+
+  return [
+    `${domain} scam reviews complaints BBB`,
+    `${domain} Better Business Bureau`,
+    `${domain} Trustpilot reviews scam`,
+    `${domain} Reddit scam reviews`,
+    `${domain} domain age whois`,
+    `${domain} Google Safe Browsing transparency report`,
+    `${domain} contact address refund policy reviews`,
+    `site:${domain} ${domain}`,
+  ];
 }
 
 const CONVERSATION_STYLE_RULES = `
@@ -438,7 +464,7 @@ function detectMessageIntent(message: string): MessageIntent {
   }
 
   if (
-    /^(make|write|rewrite|build|create|fix|change|update|explain|show|tell|give|help|find|summarize|analyze)\b/.test(
+    /^(make|write|rewrite|build|create|fix|change|update|explain|show|tell|give|help|find|summarize|analyze|complete|fill|output|print|choose|select)\b/.test(
       normalized,
     )
   ) {
@@ -513,16 +539,46 @@ function isWritingReviewRequest(message: string): boolean {
 function shouldBypassCyberRefusalForWritingReview(message: string): boolean {
   const normalized = normalizeText(message);
   const defensiveContext =
+    normalized.includes("armor") ||
+    normalized.includes("browser") ||
+    normalized.includes("block") ||
+    normalized.includes("detect") ||
+    normalized.includes("diagnose") ||
+    normalized.includes("evidence") ||
     normalized.includes("firewall") ||
+    normalized.includes("guardian") ||
     normalized.includes("honeypot") ||
+    normalized.includes("isolate") ||
     normalized.includes("deception") ||
     normalized.includes("defense") ||
     normalized.includes("defensive") ||
+    normalized.includes("privacy") ||
+    normalized.includes("protect") ||
+    normalized.includes("protected") ||
+    normalized.includes("protection") ||
+    normalized.includes("quarantine") ||
+    normalized.includes("risk") ||
+    normalized.includes("safe") ||
+    normalized.includes("safety") ||
+    normalized.includes("sandbox") ||
+    normalized.includes("scan") ||
+    normalized.includes("secure") ||
+    normalized.includes("security") ||
     normalized.includes("security controls") ||
+    normalized.includes("telemetry") ||
     normalized.includes("network security") ||
     normalized.includes("discussion");
 
-  return isWritingReviewRequest(message) && defensiveContext;
+  return (
+    defensiveContext &&
+    (isWritingReviewRequest(message) ||
+      normalized.includes("what do you think") ||
+      normalized.includes("architecture") ||
+      normalized.includes("vos") ||
+      normalized.includes("sv browser") ||
+      normalized.includes("svansai guide") ||
+      normalized.includes("web armor"))
+  );
 }
 
 function isConversationRecallRequest(message: string): boolean {
@@ -911,6 +967,72 @@ function getPythonBlankQuizAnswer(message: string): string | null {
   return 'Answer: `weather = "cloudy"`\n\nWhy: the `if` statement only prints when `weather == "sunny"`. If `weather` is set to `"cloudy"`, the condition is false, so Python goes to the `else` block. Since the `else` block only has `pass`, nothing is printed.';
 }
 
+function getPythonConditionFillAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksToCompleteCondition =
+    /\bcomplete\b.*\bif-?else\b/i.test(message) ||
+    normalized.includes("your code goes here") ||
+    normalized.includes("if your code goes here");
+  const hasGreaterThanPrompt =
+    normalized.includes("greater than -50") &&
+    normalized.includes("-50 or less") &&
+    normalized.includes("user num");
+
+  if (!asksToCompleteCondition || !hasGreaterThanPrompt) return null;
+
+  return "Use this condition:\n\n```python\nuser_num > -50\n```\n\nCompleted code:\n\n```python\nuser_num = int(input())\n\nif user_num > -50:\n    print('Greater than -50')\nelse:\n    print('-50 or less')\n```\n\nWhy: `>` means “greater than,” so the `if` branch runs only when `user_num` is greater than `-50`. Otherwise, Python runs the `else` branch.";
+}
+
+function getPythonIfElseWriteAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksToWriteIfElse =
+    /\bwrite\b.*\bif-?else statement\b/i.test(message) ||
+    /\bcreate\b.*\bif-?else statement\b/i.test(message) ||
+    /\bmake\b.*\bif-?else statement\b/i.test(message);
+  const hasAtLeastPrompt =
+    normalized.includes("at least 49") &&
+    normalized.includes("less than 49") &&
+    normalized.includes("user val");
+
+  if (!asksToWriteIfElse || !hasAtLeastPrompt) return null;
+
+  return "Use `>=` because “at least 49” means 49 or greater.\n\n```python\nuser_val = int(input())\n\nif user_val >= 49:\n    print('At least 49')\nelse:\n    print('Less than 49')\n```\n\nExample: if `user_val` is `50`, the condition `user_val >= 49` is true, so it outputs `At least 49`.";
+}
+
+function getPythonFinalValueQuizAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksFinalValue =
+    normalized.includes("final value") &&
+    normalized.includes("employee bonus") &&
+    normalized.includes("num sales");
+  const hasBonusBranches =
+    /if\s+num_sales\s*==\s*0/i.test(message) &&
+    /employee_bonus\s*=\s*0/i.test(message) &&
+    /elif\s+num_sales\s*==\s*1/i.test(message) &&
+    /employee_bonus\s*=\s*2/i.test(message) &&
+    /elif\s+num_sales\s*==\s*2/i.test(message) &&
+    /employee_bonus\s*=\s*5/i.test(message) &&
+    /else\s*:/i.test(message) &&
+    /employee_bonus\s*=\s*10/i.test(message);
+
+  if (!asksFinalValue || !hasBonusBranches) return null;
+
+  const requestedValues = Array.from(
+    message.matchAll(/num_sales\s+is\s+(-?\d+)/gi),
+  ).map((match) => Number(match[1]));
+
+  const values = requestedValues.length > 0 ? requestedValues : [2, 0, 7];
+  const rows = values.map((numSales) => {
+    const bonus =
+      numSales === 0 ? 0 : numSales === 1 ? 2 : numSales === 2 ? 5 : 10;
+    return `- If \`num_sales\` is ${numSales}, \`employee_bonus\` is ${bonus}.`;
+  });
+
+  return `Final values:\n\n${rows.join(
+    "\n",
+  )}\n\nWhy: Python checks the conditions from top to bottom. Once it finds the first true condition, it runs that branch and skips the rest. If none of the listed conditions match, it uses the \`else\` branch.`;
+}
+
 function getDiscussionPostComparisonAnswer(
   latestUserMessage: string,
   messages: { role: string; content: string }[],
@@ -973,6 +1095,30 @@ function getReadingMaterialCapabilityAnswer(message: string): string | null {
   }
 
   return null;
+}
+
+function getLocalPathAccessAnswer(message: string): string | null {
+  const trimmed = message.trim();
+  const looksLikeWindowsPath =
+    /^[a-z]:\\[^<>:"|?*]+/i.test(trimmed) ||
+    /^\\\\[^<>:"|?*]+\\[^<>:"|?*]+/i.test(trimmed);
+
+  if (!looksLikeWindowsPath) return null;
+
+  return "I can help review that folder, but I can’t read a Windows path just because you paste it here.\n\nUse the folder upload button 🗂️ and select that folder. Then I can inspect the supported files you choose, keep their folder paths, and give you improvement suggestions.\n\nFor direct C-drive access by path, SVANS-AI should use a local VOS desktop bridge with explicit permission levels:\n\n- Ask each time: SVANS-AI asks before reading any file or folder.\n- Selected folder: SVANS-AI can read only the folder you approve.\n- Trusted workspace: SVANS-AI can read and suggest edits inside a specific approved project folder.\n- Full local access: owner-only, temporary, clearly visible, and logged.\n\nThe public web chat should not get full-drive access. That keeps your computer safer while still letting SVANS-AI work deeply with your local projects through VOS.";
+}
+
+function getFilesystemPermissionModelAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksAboutPermissions =
+    /\b(permission|access|full access|some access|ask for access|c drive|filesystem|file system|folders?)\b/i.test(
+      normalized,
+    ) &&
+    /\b(add|have|give|allow|grant|ask|permission|access)\b/i.test(normalized);
+
+  if (!asksAboutPermissions) return null;
+
+  return "Yes — that is the right direction, but it should be permissioned through the local VOS desktop app, not the public web chat.\n\nA good permission model would be:\n\n- No access: SVANS-AI can only read uploaded files.\n- Ask each time: SVANS-AI asks before reading a specific file or folder.\n- Selected folder access: you approve one folder, like `VOS Identity`, and SVANS-AI can inspect supported files inside it.\n- Trusted workspace access: SVANS-AI can read and suggest edits only inside an approved project folder.\n- Full local access: owner-only, temporary, highly visible, logged, and easy to revoke.\n\nFor safety, every permission should show exactly what SVANS-AI can read, whether it can write changes, how long the permission lasts, and a visible activity log. The safest default is read-only selected-folder access, then require a separate approval before writing or modifying files.";
 }
 
 function buildStatementAwarePrompt(
@@ -1125,14 +1271,39 @@ export async function generateChatResponse(
   if (shouldSearchLive) {
     console.log("[SVANS-AI] Running live web search...");
 
-    const liveSearch = await searchLiveWeb(latestUserMessage);
-    const liveResults = liveSearch.results;
+    const siteSafetyCheck = isSiteSafetyCheck(latestUserMessage);
+    const liveSearches = siteSafetyCheck
+      ? await Promise.all(
+          buildSiteSafetySearchQueries(latestUserMessage).map((query) =>
+            searchLiveWeb(query, { domainMode: "none", maxResults: 3 }),
+          ),
+        )
+      : [await searchLiveWeb(latestUserMessage)];
+
+    const seenLiveUrls = new Set<string>();
+    const liveResults = liveSearches
+      .flatMap((item) => item.results)
+      .filter((result) => {
+        if (seenLiveUrls.has(result.url)) return false;
+        seenLiveUrls.add(result.url);
+        return true;
+      })
+      .slice(0, siteSafetyCheck ? 18 : 5)
+      .map((result, index) => ({ ...result, sourceNumber: index + 1 }));
+
+    const liveSearchAttempted = liveSearches.some(
+      (item) => item.status.attempted,
+    );
+    const liveSearchFailureReason = liveSearches
+      .map((item) => item.status.failureReason)
+      .filter(Boolean)
+      .join("; ");
 
     if (runtimeTelemetry) {
-      runtimeTelemetry.liveSearchAttempted = liveSearch.status.attempted;
-      runtimeTelemetry.liveSearchResults = liveSearch.status.resultCount;
+      runtimeTelemetry.liveSearchAttempted = liveSearchAttempted;
+      runtimeTelemetry.liveSearchResults = liveResults.length;
       runtimeTelemetry.liveSearchFailureReason =
-        liveSearch.status.failureReason;
+        liveSearchFailureReason || undefined;
     }
 
     if (liveResults.length > 0) {
@@ -1155,6 +1326,20 @@ Live web answer rules:
 - Only make current/live claims that are supported by the listed results.
 - If the results conflict or are thin, say what is verified and what remains uncertain.
 - End with a short "Sources" list using the source numbers and URLs.
+${
+  siteSafetyCheck
+    ? `
+Site safety / scam-check rules:
+- Treat the website's own Terms, Privacy Policy, product pages, and marketing claims as low-trust evidence.
+- Do not say "no strong scam indicators" if the only supportive evidence comes from the site itself.
+- Prioritize independent evidence: BBB, Google Safe Browsing/transparency pages, scam-report sites, reputable reviews, domain-age/WHOIS references, payment/refund complaints, Reddit/community reports, and security-vendor pages.
+- Produce a risk verdict such as Low, Caution, High risk, or Inconclusive.
+- Include a compact checklist covering external reputation, domain/age signals, contact/business identity, payment/refund risk, policy quality, and technical/security signals.
+- If evidence suggests Google, BBB, reviewers, or security sources flag the site, say that clearly and recommend not purchasing or entering payment details unless the user can independently verify the business.
+- Recommend safe next steps: verify through official BBB/Google transparency pages, use a credit card or disposable card only if proceeding, avoid debit/crypto/wire payments, and do not download files from the site.
+`
+    : ""
+}
 `;
     } else {
       liveSearchContext = `
@@ -1285,6 +1470,23 @@ Do not claim you have no browsing ability. Say that live search did not return e
     return pythonBlankQuizAnswer;
   }
 
+  const pythonConditionFillAnswer =
+    getPythonConditionFillAnswer(latestUserMessage);
+  if (pythonConditionFillAnswer) {
+    return pythonConditionFillAnswer;
+  }
+
+  const pythonIfElseWriteAnswer = getPythonIfElseWriteAnswer(latestUserMessage);
+  if (pythonIfElseWriteAnswer) {
+    return pythonIfElseWriteAnswer;
+  }
+
+  const pythonFinalValueQuizAnswer =
+    getPythonFinalValueQuizAnswer(latestUserMessage);
+  if (pythonFinalValueQuizAnswer) {
+    return pythonFinalValueQuizAnswer;
+  }
+
   const discussionComparisonAnswer = getDiscussionPostComparisonAnswer(
     latestUserMessage,
     fullMessages,
@@ -1303,6 +1505,19 @@ Do not claim you have no browsing ability. Say that live search did not return e
     getReadingMaterialCapabilityAnswer(latestUserMessage);
   if (readingMaterialCapabilityAnswer) {
     return readingMaterialCapabilityAnswer;
+  }
+
+  if (attachedFiles.length === 0) {
+    const localPathAccessAnswer = getLocalPathAccessAnswer(latestUserMessage);
+    if (localPathAccessAnswer) {
+      return localPathAccessAnswer;
+    }
+  }
+
+  const filesystemPermissionModelAnswer =
+    getFilesystemPermissionModelAnswer(latestUserMessage);
+  if (filesystemPermissionModelAnswer) {
+    return filesystemPermissionModelAnswer;
   }
 
   const studyMaterialAcknowledgement =
@@ -2023,11 +2238,11 @@ function finalFallback(context: ExtendedChatContext): string {
   switch (type) {
     case "coding":
       if (
-        /\b(group of answer choices|what code|blank|if statement|print nothing|which code)\b/i.test(
+        /\b(final value|what value|given value|group of answer choices|what code|blank|if statement|elif|else|print nothing|which code)\b/i.test(
           message,
         )
       ) {
-        return "I received the code question, but I could not confidently complete the choice automatically. For code blanks, compare each answer choice against the condition and pick the one that makes the condition true or false as requested.";
+        return "For this kind of code question, trace the conditions from top to bottom and stop at the first true branch. If no `if` or `elif` condition matches, use the `else` branch. Paste the exact code and values again if you want me to calculate each one directly.";
       }
       return "Send the language, file name, or exact error, and I’ll give you the direct fix.";
     case "business":

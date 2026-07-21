@@ -22,7 +22,12 @@ type TavilyResponse = {
   results?: TavilyResult[];
 };
 
-function extractSearchDomain(query: string): string | null {
+export type LiveSearchOptions = {
+  domainMode?: "include" | "none";
+  maxResults?: number;
+};
+
+export function extractSearchDomain(query: string): string | null {
   const match = query.match(
     /\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z]{2,})(?:\.[a-z]{2,})?)(?:\/[^\s]*)?\b/i,
   );
@@ -38,6 +43,7 @@ function extractSearchDomain(query: string): string | null {
  */
 export async function searchLiveWeb(
   query: string,
+  options: LiveSearchOptions = {},
 ): Promise<{ results: LiveSearchResult[]; status: LiveSearchStatus }> {
   const apiKey = process.env.TAVILY_API_KEY;
 
@@ -55,9 +61,12 @@ export async function searchLiveWeb(
 
   try {
     const domain = extractSearchDomain(query);
+    const domainMode = options.domainMode ?? "include";
+    const maxResults = options.maxResults ?? 5;
 
     console.log("[SVANSAI] Tavily live search request:", {
       domain,
+      domainMode,
       hasApiKey: Boolean(apiKey),
     });
 
@@ -70,8 +79,10 @@ export async function searchLiveWeb(
       body: JSON.stringify({
         query,
         search_depth: "advanced",
-        max_results: 5,
-        ...(domain ? { include_domains: [domain] } : {}),
+        max_results: maxResults,
+        ...(domain && domainMode === "include"
+          ? { include_domains: [domain] }
+          : {}),
         include_answer: false,
         include_raw_content: false,
       }),
@@ -99,7 +110,7 @@ export async function searchLiveWeb(
         seen.add(result.url);
         return true;
       })
-      .slice(0, 5)
+      .slice(0, maxResults)
       .map((result, index) => ({
         title: (result.title ?? "Untitled").slice(0, 180),
         url: result.url ?? "",
@@ -113,6 +124,7 @@ export async function searchLiveWeb(
     console.log("[SVANSAI] Tavily live search results:", {
       count: results.length,
       domain,
+      domainMode,
     });
 
     return {
