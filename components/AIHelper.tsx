@@ -526,6 +526,16 @@ export default function AIHelper({
     onMessagesChangeRef.current = onMessagesChange;
   }, [onMessagesChange]);
 
+  useEffect(() => {
+    if (!/^Added\b/.test(fileError)) return;
+
+    const timer = window.setTimeout(() => {
+      setFileError((current) => (/^Added\b/.test(current) ? "" : current));
+    }, 5000);
+
+    return () => window.clearTimeout(timer);
+  }, [fileError]);
+
   const sessionId = useMemo(() => {
     if (typeof window === "undefined") return "ssr";
 
@@ -923,6 +933,7 @@ export default function AIHelper({
 
     setAttachedFiles([]);
     setShowAttachmentDetails(false);
+    setFileError("");
     setLoading(true);
 
     notifyThinking(
