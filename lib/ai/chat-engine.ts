@@ -944,6 +944,29 @@ function getControlStructureQuizAnswer(message: string): string | null {
   return "Answer: Sequence.\n\nA sequence control structure flows straight downward from one instruction to the next. There is no branching like a selection/if statement, and there is no repeating like a loop.";
 }
 
+function getKnownMultipleChoiceQuizAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const hasAnswerChoices =
+    normalized.includes("group of answer choices") ||
+    normalized.includes("answer choices") ||
+    /\n\s*[A-D][.)]\s+/i.test(message);
+
+  if (!hasAnswerChoices) return null;
+
+  if (
+    normalized.includes("ubuntu linux") &&
+    normalized.includes("applications are installed") &&
+    normalized.includes("windows store") &&
+    normalized.includes("dock") &&
+    normalized.includes("apps list") &&
+    normalized.includes("dash pane")
+  ) {
+    return "Correct answer: Apps list.\n\nIn Ubuntu Linux, installed applications can be viewed from the Apps list/applications overview. The Dock mainly shows favorites and running apps, while Windows Store is for Windows. Dash pane is older Ubuntu terminology and is not the best answer here.";
+  }
+
+  return null;
+}
+
 function getPythonBlankQuizAnswer(message: string): string | null {
   const normalized = normalizeText(message);
   const asksWhatCodeInBlank =
@@ -1463,6 +1486,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
     getControlStructureQuizAnswer(latestUserMessage);
   if (controlStructureQuizAnswer) {
     return controlStructureQuizAnswer;
+  }
+
+  const knownMultipleChoiceQuizAnswer =
+    getKnownMultipleChoiceQuizAnswer(latestUserMessage);
+  if (knownMultipleChoiceQuizAnswer) {
+    return knownMultipleChoiceQuizAnswer;
   }
 
   const pythonBlankQuizAnswer = getPythonBlankQuizAnswer(latestUserMessage);
@@ -2258,6 +2287,13 @@ function finalFallback(context: ExtendedChatContext): string {
     case "life":
       return "Tell me the situation and I’ll help you think through the next move.";
     default:
+      if (
+        /\b(group of answer choices|answer choices|multiple choice)\b/i.test(
+          message,
+        )
+      ) {
+        return "I see this is a multiple-choice question, but I could not confidently select the answer from my local rules. I would still work it this way: identify the key term in the question, eliminate choices that belong to another system or feature, then choose the option that directly matches the wording. If you resend it, I’ll answer it directly.";
+      }
       if (/^\s*(can|could|would|will|do|does|are|is)\b/i.test(message)) {
         return "Yes, I can help with that. Send the material, question, file, or example, and I’ll work from what you provide. If it is a long document, attach it as a file or send it in smaller sections so I can handle it cleanly.";
       }
