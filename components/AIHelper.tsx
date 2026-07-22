@@ -492,7 +492,27 @@ export default function AIHelper({
   );
   const [starterQuoteAccepted, setStarterQuoteAccepted] = useState(false);
   const [starterQuoteDismissed, setStarterQuoteDismissed] = useState(false);
+  const [showAttachmentDetails, setShowAttachmentDetails] = useState(false);
   const attachedFile = attachedFiles[0] ?? null;
+  const attachmentTotalKb = Math.round(
+    attachedFiles.reduce((sum, file) => sum + file.size, 0) / 1024,
+  );
+  const attachedFolderNames = Array.from(
+    new Set(
+      attachedFiles
+        .filter((file) => /[\\/]/.test(file.name))
+        .map((file) => file.name.split(/[\\/]/)[0])
+        .filter(Boolean),
+    ),
+  );
+  const attachmentSummaryLabel =
+    attachedFolderNames.length === 1
+      ? attachedFolderNames[0]
+      : attachedFolderNames.length > 1
+        ? `${attachedFolderNames.length} folders`
+        : attachedFiles.length === 1
+          ? attachedFiles[0]?.name
+          : `${attachedFiles.length} files`;
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -806,6 +826,7 @@ export default function AIHelper({
     setAttachedFiles((current) =>
       [...current, ...converted].slice(0, MAX_ATTACHMENTS),
     );
+    setShowAttachmentDetails(false);
 
     if (
       rawSelected.length > selected.length &&
@@ -901,6 +922,7 @@ export default function AIHelper({
     const filesToSend = attachedFiles;
 
     setAttachedFiles([]);
+    setShowAttachmentDetails(false);
     setLoading(true);
 
     notifyThinking(
@@ -1428,127 +1450,185 @@ export default function AIHelper({
         {attachedFiles.length > 0 && (
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: isMobile
-                ? "1fr"
-                : "repeat(2, minmax(0, 1fr))",
+              display: "flex",
+              flexDirection: "column",
               gap: "8px",
               marginBottom: "10px",
             }}
           >
-            {attachedFiles.map((file, index) => (
-              <div
-                key={`${file.name}-${index}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  background: "rgba(56,189,248,0.08)",
-                  border: "1px solid rgba(56,189,248,0.2)",
-                  borderRadius: "14px",
-                  padding: "8px 10px",
-                  minWidth: 0,
-                }}
-              >
-                {isImageType(file.type) ? (
-                  <img
-                    src={file.dataUrl}
-                    alt={file.name}
-                    style={{
-                      width: "42px",
-                      height: "42px",
-                      borderRadius: "8px",
-                      objectFit: "cover",
-                    }}
-                  />
-                ) : (
-                  <span style={{ fontSize: "1.4rem" }}>
-                    {isPdfType(file.type) ? "📄" : "📎"}
-                  </span>
-                )}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      color: "#7dd3fc",
-                      fontSize: "0.68rem",
-                      fontWeight: 900,
-                    }}
-                  >
-                    FILE {index + 1}
-                  </div>
-                  <div
-                    style={{
-                      color: "white",
-                      fontSize: "0.82rem",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {file.name}
-                  </div>
-                  <div
-                    style={{
-                      color: "rgba(255,255,255,0.45)",
-                      fontSize: "0.7rem",
-                    }}
-                  >
-                    {(file.size / 1024).toFixed(0)} KB
-                  </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                background: "rgba(56,189,248,0.08)",
+                border: "1px solid rgba(56,189,248,0.22)",
+                borderRadius: "14px",
+                padding: "9px 12px",
+                minWidth: 0,
+              }}
+            >
+              <span style={{ fontSize: "1.35rem" }}>
+                {attachedFolderNames.length ? "🗂️" : "📎"}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    color: "#7dd3fc",
+                    fontSize: "0.68rem",
+                    fontWeight: 900,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {attachedFolderNames.length ? "Folder ready" : "Files ready"}
                 </div>
-                <div style={{ display: "flex", gap: "3px" }}>
-                  <button
-                    type="button"
-                    disabled={index === 0}
-                    onClick={() => moveAttachment(index, -1)}
-                    aria-label={`Move ${file.name} earlier`}
-                    style={{
-                      background: "transparent",
-                      border: 0,
-                      color: "white",
-                      cursor: index === 0 ? "default" : "pointer",
-                      opacity: index === 0 ? 0.3 : 1,
-                    }}
-                  >
-                    ←
-                  </button>
-                  <button
-                    type="button"
-                    disabled={index === attachedFiles.length - 1}
-                    onClick={() => moveAttachment(index, 1)}
-                    aria-label={`Move ${file.name} later`}
-                    style={{
-                      background: "transparent",
-                      border: 0,
-                      color: "white",
-                      cursor:
-                        index === attachedFiles.length - 1
-                          ? "default"
-                          : "pointer",
-                      opacity: index === attachedFiles.length - 1 ? 0.3 : 1,
-                    }}
-                  >
-                    →
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeAttachment(index)}
-                    aria-label={`Remove ${file.name}`}
-                    style={{
-                      background: "rgba(255,255,255,0.08)",
-                      border: "1px solid rgba(255,255,255,0.14)",
-                      borderRadius: "999px",
-                      color: "white",
-                      cursor: "pointer",
-                      width: "28px",
-                      height: "28px",
-                    }}
-                  >
-                    ×
-                  </button>
+                <div
+                  style={{
+                    color: "white",
+                    fontSize: "0.86rem",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {attachmentSummaryLabel}
+                </div>
+                <div
+                  style={{
+                    color: "rgba(255,255,255,0.48)",
+                    fontSize: "0.72rem",
+                  }}
+                >
+                  {attachedFiles.length} file
+                  {attachedFiles.length === 1 ? "" : "s"} • {attachmentTotalKb}{" "}
+                  KB
                 </div>
               </div>
-            ))}
+              <button
+                type="button"
+                onClick={() => setShowAttachmentDetails((current) => !current)}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: "999px",
+                  color: "white",
+                  cursor: "pointer",
+                  padding: "7px 11px",
+                  fontSize: "0.76rem",
+                  fontWeight: 800,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {showAttachmentDetails ? "Hide files" : "Show files"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttachedFiles([]);
+                  setShowAttachmentDetails(false);
+                  setFileError("");
+                }}
+                aria-label="Clear attachments"
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: "999px",
+                  color: "white",
+                  cursor: "pointer",
+                  width: "30px",
+                  height: "30px",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {showAttachmentDetails && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: isMobile
+                    ? "1fr"
+                    : "repeat(2, minmax(0, 1fr))",
+                  gap: "8px",
+                  maxHeight: isMobile ? "180px" : "220px",
+                  overflowY: "auto",
+                  paddingRight: "3px",
+                }}
+              >
+                {attachedFiles.map((file, index) => (
+                  <div
+                    key={`${file.name}-${index}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      background: "rgba(56,189,248,0.06)",
+                      border: "1px solid rgba(56,189,248,0.14)",
+                      borderRadius: "14px",
+                      padding: "8px 10px",
+                      minWidth: 0,
+                    }}
+                  >
+                    {isImageType(file.type) ? (
+                      <img
+                        src={file.dataUrl}
+                        alt={file.name}
+                        style={{
+                          width: "34px",
+                          height: "34px",
+                          borderRadius: "8px",
+                          objectFit: "cover",
+                        }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: "1.15rem" }}>
+                        {isPdfType(file.type) ? "📄" : "📎"}
+                      </span>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          color: "#7dd3fc",
+                          fontSize: "0.65rem",
+                          fontWeight: 900,
+                        }}
+                      >
+                        FILE {index + 1}
+                      </div>
+                      <div
+                        style={{
+                          color: "white",
+                          fontSize: "0.78rem",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {file.name}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(index)}
+                      aria-label={`Remove ${file.name}`}
+                      style={{
+                        background: "rgba(255,255,255,0.08)",
+                        border: "1px solid rgba(255,255,255,0.14)",
+                        borderRadius: "999px",
+                        color: "white",
+                        cursor: "pointer",
+                        width: "26px",
+                        height: "26px",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
