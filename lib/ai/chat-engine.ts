@@ -953,6 +953,56 @@ function getKnownMultipleChoiceQuizAnswer(message: string): string | null {
 
   if (!hasAnswerChoices) return null;
 
+  const answerChoices = extractAnswerChoices(message);
+  const formatKnownQuizAnswer = (
+    answer: string,
+    explanation: string,
+    wrongChoiceNote?: string,
+  ) => {
+    const letter = getChoiceLetter(answerChoices, answer);
+    return `Correct answer: ${letter ? `${letter} — ` : ""}${answer}\n\n${explanation}${
+      wrongChoiceNote ? `\n\n${wrongChoiceNote}` : ""
+    }`;
+  };
+
+  if (
+    normalized.includes("primary role of dns") ||
+    (normalized.includes("dns") &&
+      normalized.includes("translates domain names") &&
+      normalized.includes("ip addresses"))
+  ) {
+    return formatKnownQuizAnswer(
+      "Translates domain names into IP addresses",
+      "DNS stands for Domain Name System. Its main job is to translate a human-friendly website name, like `google.com`, into the IP address computers use to find that site.",
+      "The other options describe storage, hardware performance, or encryption, which are not the primary role of DNS.",
+    );
+  }
+
+  if (
+    normalized.includes("device directs traffic between networks") ||
+    (normalized.includes("directs traffic") &&
+      normalized.includes("between networks") &&
+      normalized.includes("router"))
+  ) {
+    return formatKnownQuizAnswer(
+      "Router",
+      "A router directs network traffic between different networks, such as sending traffic between a home network and the internet.",
+      "A monitor, keyboard, and printer are peripheral devices; they do not route network traffic.",
+    );
+  }
+
+  if (
+    normalized.includes("what does bandwidth measure") ||
+    (normalized.includes("bandwidth") &&
+      normalized.includes("data transfer speed"))
+  ) {
+    return formatKnownQuizAnswer(
+      "Data transfer speed",
+      "Bandwidth measures how much data can be transmitted over a network connection in a given amount of time. Higher bandwidth usually means more data can move at once.",
+      "Storage size, screen resolution, and power usage measure different things.",
+    );
+  }
+
   if (
     normalized.includes("ubuntu linux") &&
     normalized.includes("applications are installed") &&
@@ -961,10 +1011,51 @@ function getKnownMultipleChoiceQuizAnswer(message: string): string | null {
     normalized.includes("apps list") &&
     normalized.includes("dash pane")
   ) {
-    return "Correct answer: Apps list.\n\nIn Ubuntu Linux, installed applications can be viewed from the Apps list/applications overview. The Dock mainly shows favorites and running apps, while Windows Store is for Windows. Dash pane is older Ubuntu terminology and is not the best answer here.";
+    return formatKnownQuizAnswer(
+      "Apps list",
+      "In Ubuntu Linux, installed applications can be viewed from the Apps list/applications overview.",
+      "The Dock mainly shows favorites and running apps, Windows Store is for Windows, and Dash pane is older Ubuntu terminology.",
+    );
   }
 
   return null;
+}
+
+function extractAnswerChoices(message: string): string[] {
+  const lines = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const markerIndex = lines.findIndex((line) =>
+    /^(group of )?answer choices$/i.test(line),
+  );
+
+  const candidateLines =
+    markerIndex >= 0 ? lines.slice(markerIndex + 1) : lines;
+
+  return candidateLines
+    .map((line) => line.replace(/^[A-D][.)]\s*/i, "").trim())
+    .filter(
+      (line) =>
+        line.length > 0 &&
+        line.length <= 120 &&
+        !line.endsWith("?") &&
+        !/^group of answer choices$/i.test(line),
+    );
+}
+
+function getChoiceLetter(choices: string[], answer: string): string | null {
+  const normalizedAnswer = normalizeText(answer);
+  const index = choices.findIndex((choice) => {
+    const normalizedChoice = normalizeText(choice);
+    return (
+      normalizedChoice === normalizedAnswer ||
+      normalizedChoice.includes(normalizedAnswer) ||
+      normalizedAnswer.includes(normalizedChoice)
+    );
+  });
+
+  return index >= 0 ? String.fromCharCode(65 + index) : null;
 }
 
 function getPythonBlankQuizAnswer(message: string): string | null {
@@ -1054,6 +1145,21 @@ function getPythonFinalValueQuizAnswer(message: string): string | null {
   return `Final values:\n\n${rows.join(
     "\n",
   )}\n\nWhy: Python checks the conditions from top to bottom. Once it finds the first true condition, it runs that branch and skips the rest. If none of the listed conditions match, it uses the \`else\` branch.`;
+}
+
+function getPythonFunctionCompletionAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const asksToCompleteFunction =
+    /\bcomplete\b.*\bfunction definition\b/i.test(message) ||
+    normalized.includes("your solution goes here");
+  const hasMinutesToHoursPrompt =
+    normalized.includes("return the hours given minutes") ||
+    (normalized.includes("get minutes as hours") &&
+      normalized.includes("orig minutes"));
+
+  if (!asksToCompleteFunction || !hasMinutesToHoursPrompt) return null;
+
+  return "Use `return orig_minutes / 60`.\n\nCompleted function:\n\n```python\ndef get_minutes_as_hours(orig_minutes):\n    return orig_minutes / 60\n\nminutes = float(input())\nprint(get_minutes_as_hours(minutes))\n```\n\nWhy: there are 60 minutes in 1 hour, so you convert minutes to hours by dividing by 60. With input `210.0`, the function returns `3.5`.";
 }
 
 function getDiscussionPostComparisonAnswer(
@@ -1514,6 +1620,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
     getPythonFinalValueQuizAnswer(latestUserMessage);
   if (pythonFinalValueQuizAnswer) {
     return pythonFinalValueQuizAnswer;
+  }
+
+  const pythonFunctionCompletionAnswer =
+    getPythonFunctionCompletionAnswer(latestUserMessage);
+  if (pythonFunctionCompletionAnswer) {
+    return pythonFunctionCompletionAnswer;
   }
 
   const discussionComparisonAnswer = getDiscussionPostComparisonAnswer(
@@ -2273,6 +2385,14 @@ function finalFallback(context: ExtendedChatContext): string {
       ) {
         return "For this kind of code question, trace the conditions from top to bottom and stop at the first true branch. If no `if` or `elif` condition matches, use the `else` branch. Paste the exact code and values again if you want me to calculate each one directly.";
       }
+      if (
+        /\b(complete|fill|write)\b/i.test(message) &&
+        /\b(function|definition|blank|your solution goes here|your code goes here)\b/i.test(
+          message,
+        )
+      ) {
+        return "This is a code-completion question. The useful pattern is to identify what the function must return, write that expression inside the function, and make sure it is indented under `def`. For example, if the prompt says to convert minutes to hours, return `minutes / 60`.";
+      }
       return "Send the language, file name, or exact error, and I’ll give you the direct fix.";
     case "business":
       return "Send the business goal, audience, or offer, and I’ll shape it into a sharper answer.";
@@ -2292,7 +2412,7 @@ function finalFallback(context: ExtendedChatContext): string {
           message,
         )
       ) {
-        return "I see this is a multiple-choice question, but I could not confidently select the answer from my local rules. I would still work it this way: identify the key term in the question, eliminate choices that belong to another system or feature, then choose the option that directly matches the wording. If you resend it, I’ll answer it directly.";
+        return "I see this is a multiple-choice question. I do not have a confident local match for this exact one yet, so I would use elimination: find the key term in the question, remove choices that clearly belong to another category, and choose the option that directly defines or performs that term. If you want, send the course topic or textbook section with it and I can explain the reasoning more precisely.";
       }
       if (/^\s*(can|could|would|will|do|does|are|is)\b/i.test(message)) {
         return "Yes, I can help with that. Send the material, question, file, or example, and I’ll work from what you provide. If it is a long document, attach it as a file or send it in smaller sections so I can handle it cleanly.";
