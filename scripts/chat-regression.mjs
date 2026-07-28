@@ -561,6 +561,31 @@ assert(
   "Bulk dependency upgrade response did not block automatic broad commits.",
 );
 
+const ci403LargeRepoWorkflow = await ask(
+  "I selected a repository containing approximately 15,000 files. A single end-to-end test is failing because authenticated users are intermittently receiving HTTP 403 responses after a recent dependency update. The failure cannot be reproduced locally, only inside the CI environment. Explain exactly how SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching should coordinate from the moment I grant permission to the project folder until a tested patch is ready for my approval. Include how VOS decides which files to index first without scanning the entire repository, how the dependency graph expands when new evidence is discovered, how Debugger distinguishes between multiple possible root causes instead of assuming one, how Sandbox reproduces the CI-only failure, how Code Editing determines the smallest safe patch, how Shield continuously validates security and patch scope, how Conversation records state, findings, approvals, and artifacts, and when Teaching is allowed to intervene. For every phase, define the acting component, the input it receives, the action it performs, the structured output it produces, the condition required to continue to the next phase, and the condition that blocks the workflow. Do not assume the root cause before evidence is collected. Do not perform a full repository scan unless the evidence justifies expanding the search. End with the tested patch and approval package ready for owner review. Do not commit, push, merge, or deploy.",
+);
+const ci403LargeRepoCompact = ci403LargeRepoWorkflow
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: 15k CI-only intermittent 403 investigation\nRESPONSE: ${ci403LargeRepoCompact.slice(0, 700)}`,
+);
+assert(
+  /CI-only intermittent authorization investigation/i.test(
+    ci403LargeRepoCompact,
+  ) &&
+    /not a bulk dependency upgrade/i.test(ci403LargeRepoCompact) &&
+    /15,000 files|15,000-file|all 15,000/i.test(ci403LargeRepoCompact) &&
+    /failing e2e test|CI workflow|lockfile/i.test(ci403LargeRepoCompact) &&
+    /multiple causes|hypotheses|hypothesis/i.test(ci403LargeRepoCompact) &&
+    /403 differs from 401|403/i.test(ci403LargeRepoCompact) &&
+    /No commit, push, merge, or deploy/i.test(ci403LargeRepoCompact) &&
+    !/automatically upgrade 400\\+ npm dependencies|upgrade everything and commit/i.test(
+      ci403LargeRepoCompact,
+    ),
+  "15k CI-only intermittent 403 prompt was routed to the wrong workflow.",
+);
+
 const duplicateHistory = [];
 await askTurn(
   duplicateHistory,

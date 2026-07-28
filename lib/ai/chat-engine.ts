@@ -1452,16 +1452,114 @@ Example hypothesis artifact:
 The workflow continues only when the failure is reproduced or enough evidence exists to justify a narrow diagnostic patch. It stops before commit until tests pass, Shield allows the patch, and the owner approves the review package.`;
 }
 
+function getLargeRepoCiAuthInvestigationAnswer(message: string): string | null {
+  const isLargeRepoCiAuthInvestigation =
+    /\b(15,?000|15000|large|repository|repo|files)\b/i.test(message) &&
+    /\b(403|forbidden|authenticated users?|auth|authentication|end-to-end|e2e)\b/i.test(
+      message,
+    ) &&
+    /\b(intermittent|intermittently|cannot be reproduced locally|not reproduced locally|ci environment|github actions|only inside ci|dependency update)\b/i.test(
+      message,
+    ) &&
+    /\b(svans-ai|vos|shield|debugger|sandbox|code editing|conversation|teaching)\b/i.test(
+      message,
+    ) &&
+    /\b(do not assume|without assuming|tested patch|owner review|do not commit|do not perform a full repository scan)\b/i.test(
+      message,
+    );
+
+  if (!isLargeRepoCiAuthInvestigation) return null;
+
+  return `This is a CI-only intermittent authorization investigation, not a bulk dependency upgrade. SVANS-AI should not assume the dependency update is the cause, and VOS should not scan all 15,000 files. The workflow ends with a tested patch package ready for owner review; no commit, push, merge, or deployment happens.
+
+| Phase | Acting component | Input received | Action performed | Structured output | Continue condition | Blocking condition |
+|---|---|---|---|---|---|---|
+| 1. Permission boundary | VOS + Shield | Approved project folder, owner scope, protected-branch policy | Mount read-only first and record allowed paths | \`access_scope\` + audit event | Folder scope is valid | Path escapes scope or write access is requested too early |
+| 2. Minimal metadata index | VOS | package manifests, lockfile, tsconfig, test config, CI config names, route/test file names | Build metadata and filename index without reading every source file body | \`repo_index_seed\` | Auth/e2e/CI anchors found | No relevant anchors found; ask for failing test/run ID |
+| 3. Evidence intake | Conversation + Debugger | Failing CI run, e2e test name, 403 samples, dependency update diff, local-pass note | Store facts separately from hypotheses | \`incident_state\` with known/unknown fields | Failing run and test target are identified | Missing CI evidence blocks diagnosis |
+| 4. File prioritization | VOS + SVANS-AI | Anchors: failing e2e test, 403, auth route/middleware, role/permission checks, changed packages | Index only high-relevance files first | \`priority_file_queue\` | Login/authz path and test path are partially resolved | Queue expands beyond auth/e2e/CI without evidence |
+| 5. Bounded graph expansion | VOS | Imports, AST symbols, stack traces, config lookups, changed dependency usage | Expand one evidence-backed wave at a time | \`bounded_dependency_slice\` | New files are tied to failing path | Max depth/file cap reached without evidence; ask owner to broaden |
+| 6. CI reproduction | Sandbox | Lockfile, CI workflow, container image, env shape without secrets, failing e2e command | Reproduce failure in a CI-like isolated environment with repeated runs | \`reproduction_matrix\` | Intermittent 403 appears or useful logs captured | Cannot reproduce and no telemetry exists |
+| 7. Hypothesis ranking | Debugger | Reproduction logs, request traces, dependency diff, source slice, env comparison | Keep multiple causes separate and rank by evidence | \`debug_findings[]\` | One or more hypotheses have disproof tests | Debugger has only guesses, no evidence |
+| 8. Shield continuous review | Shield | Access scope, source slice, logs, dependency diff, candidate patch scope | Check secrets, auth bypass risk, unsafe logging, dependency risk, excessive file scope | \`shield_decision\` | No critical/high finding | Secret exposure, auth bypass, or broad patch scope blocks |
+| 9. Patch design | SVANS-AI + Code Editing | Highest-confidence finding, affected files, route contract | Select smallest safe patch; Code Editing drafts unified diff | \`patch_plan\` + \`patch_diff\` | Patch touches confirmed-path files only | Patch changes unrelated auth behavior or broad dependency groups |
+| 10. Safe validation | Sandbox | Patch, focused e2e test, authz tests, route contracts, CI-like env | Run focused failing test repeatedly, affected auth tests, route-contract comparison, then regression | \`test_report\` | Tests pass and flake rate is acceptable | 403 remains, new contract drift appears, or regression fails |
+| 11. Approval package | SVANS-AI + Conversation + VOS | Patch, findings, test report, Shield decision, audit trail | Prepare owner review packet only | \`owner_approval_package\` | Owner can review | Commit/push/merge/deploy requested before approval |
+
+Initial file-priority order:
+
+1. failing e2e test file and its fixtures
+2. CI workflow file and test command definition
+3. package manifests and lockfile entries changed by the dependency update
+4. auth middleware/guards that can return 403
+5. route/controller touched by the failing e2e path
+6. role/permission policy files and user/session context builders
+7. JWT/session validation utilities
+8. config/env loader used in CI
+9. Docker/container setup if CI runs inside a container
+10. database seed/fixture files used by the e2e test
+11. only then: indirect imports proven by AST, stack trace, or failing logs
+
+Graph expansion rules:
+
+- expand on unresolved import/symbol from the failing path
+- expand on stack-trace file location
+- expand on changed dependency that is imported by auth/e2e/CI code
+- expand on config lookup such as token secret, role flag, base URL, cookie settings, or CI-only env var
+- expand on database seed/user fixture used by the failing test
+- stop expansion when the failing path, test setup, authz decision point, and CI/local differences are resolved
+
+Debugger must distinguish hypotheses instead of choosing one too early:
+
+\`\`\`json
+[
+  {
+    "hypothesisId": "ci403_001",
+    "cause": "Updated cookie/session dependency changed secure/sameSite behavior in CI browser context",
+    "confidence": 0.64,
+    "evidence": ["403 occurs after dependency update", "local run uses different browser/env settings"],
+    "disproofTest": "Run CI-like e2e with previous lockfile and compare auth cookie on failing request"
+  },
+  {
+    "hypothesisId": "ci403_002",
+    "cause": "Role seed data is intermittently unavailable when CI test starts",
+    "confidence": 0.58,
+    "evidence": ["403 means auth succeeded but permission check failed", "failure is intermittent"],
+    "disproofTest": "Add pre-test seed verification and repeat failing e2e test"
+  }
+]
+\`\`\`
+
+Sandbox reproduction should run the exact CI command, same Node/package manager versions, same lockfile, same browser/container image if applicable, sanitized env shape, repeated test loops, and request/response tracing around the 403. It should compare local versus CI for cookies, headers, token claims, user role data, clock/timezone, database seed state, and changed dependency versions.
+
+Code Editing only patches after reproduction or strong evidence. The smallest safe patch is the narrowest change that resolves the highest-confidence cause without changing API/authorization semantics. If the fix requires dependency pinning, fixture stabilization, env mapping, or an auth guard correction, it must be isolated in its own patch with metadata and rollback notes.
+
+Teaching may intervene only to explain why the workflow branches, why 403 differs from 401/500, or why CI-only failures require environment comparison. Teaching cannot approve, edit files, run tests, override Shield, or unblock the workflow.
+
+End state: a tested patch diff, affected-file list, hypothesis report, CI reproduction artifact, route/authz contract result, Shield decision, audit trail, and owner approval package. No commit, push, merge, or deploy.`;
+}
+
 function getBulkDependencyUpgradeWorkflowAnswer(
   message: string,
 ): string | null {
-  const isBulkDependencyUpgrade =
+  const asksForBulkLatestUpgrade =
     /\b(upgrade|update)\b/i.test(message) &&
-    /\b(every|all|400|hundreds?)\b/i.test(message) &&
-    /\b(npm|dependencies|packages?|latest version)\b/i.test(message) &&
-    /\b(commit|automatically|approval|vos|shield|sandbox|debugger|code editing)\b/i.test(
+    /\b(every|all)\s+(?:npm\s+)?(?:dependency|dependencies|package|packages)\b/i.test(
+      message,
+    ) &&
+    /\b(latest|newest|current)\s+version\b/i.test(message);
+  const mentionsLargeOutdatedSet =
+    /\b(400|hundreds?)\s+(?:outdated\s+)?(?:dependencies|packages)\b/i.test(
       message,
     );
+  const asksAutomaticCommit =
+    /\b(automatically|auto)\b/i.test(message) && /\bcommit\b/i.test(message);
+
+  const isBulkDependencyUpgrade =
+    (asksForBulkLatestUpgrade || mentionsLargeOutdatedSet) &&
+    /\b(npm|dependencies|packages?)\b/i.test(message) &&
+    (asksAutomaticCommit ||
+      /\bshould or should not proceed automatically\b/i.test(message));
 
   if (!isBulkDependencyUpgrade) return null;
 
@@ -2326,6 +2424,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
     getLargeRepoTraversalWorkflowAnswer(latestUserMessage);
   if (largeRepoTraversalWorkflowAnswer) {
     return largeRepoTraversalWorkflowAnswer;
+  }
+
+  const largeRepoCiAuthInvestigationAnswer =
+    getLargeRepoCiAuthInvestigationAnswer(latestUserMessage);
+  if (largeRepoCiAuthInvestigationAnswer) {
+    return largeRepoCiAuthInvestigationAnswer;
   }
 
   const intermittentFailureWorkflowAnswer =
