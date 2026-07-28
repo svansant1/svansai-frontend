@@ -2055,6 +2055,18 @@ function getKnownMultipleChoiceQuizAnswer(message: string): string | null {
     );
   }
 
+  if (
+    normalized.includes("main advantage of liquid cooling") &&
+    normalized.includes("air cooling") &&
+    normalized.includes("more effective")
+  ) {
+    return formatKnownQuizAnswer(
+      "More effective",
+      "Liquid cooling is usually more effective than air cooling because liquid can move heat away from hot components more efficiently. That is why it is often used for high-performance systems that generate more heat.",
+      "`Uses less power`, `safer`, and `less expensive` are not the main advantage. Liquid cooling can cost more and may require more setup, but its cooling performance is the key benefit.",
+    );
+  }
+
   return null;
 }
 
@@ -2325,6 +2337,26 @@ Respond naturally to the statement. Acknowledge the substance of what they said,
 `.trim();
 }
 
+const providerCooldowns = new Map<ProviderName, number>();
+
+function providerCooldownRemaining(provider: ProviderName): number {
+  return Math.max(0, (providerCooldowns.get(provider) ?? 0) - Date.now());
+}
+
+function markProviderFailure(provider: ProviderName, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  const longCooldown =
+    /\b(credit|quota|billing|rate limit|429|402)\b/i.test(message);
+  providerCooldowns.set(
+    provider,
+    Date.now() + (longCooldown ? 5 * 60_000 : 30_000),
+  );
+}
+
+function markProviderHealthy(provider: ProviderName): void {
+  providerCooldowns.delete(provider);
+}
+
 async function callProvider(
   provider: ProviderName,
   args: {
@@ -2334,7 +2366,7 @@ async function callProvider(
     attachedFiles?: AttachedFile[];
   },
 ): Promise<string | null> {
-  try {
+  const call = async () => {
     switch (provider) {
       case "openai":
         return await generateWithOpenAI(args);
@@ -2345,9 +2377,21 @@ async function callProvider(
       default:
         return null;
     }
-  } catch (error) {
-    console.error("[SVANS-AI] Provider call error:", provider, error);
-    return null;
+  };
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      call(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`${provider} request timed out after 25 seconds`)),
+          25_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -3099,11 +3143,25 @@ ${CORRECTION_RECOVERY_RULES}
   const plan = buildProviderPlan(context);
   if (runtimeTelemetry) runtimeTelemetry.providerPlan = plan;
   console.log("[SVANS-AI] Provider plan:", plan);
-  let bestRejected: { response: string; critique: ResponseCritique } | null =
-    null;
+  let bestRejected: {
+    response: string;
+    critique: ResponseCritique;
+    provider: ProviderName;
+  } | null = null;
 
   for (const provider of plan) {
     console.log("[SVANS-AI] Trying provider:", provider);
+
+    const cooldownRemaining = providerCooldownRemaining(provider);
+    if (cooldownRemaining > 0) {
+      if (runtimeTelemetry) {
+        runtimeTelemetry.providerFailures.push({
+          provider,
+          reason: `Provider is temporarily paused for ${Math.ceil(cooldownRemaining / 1000)} more seconds after a recent failure.`,
+        });
+      }
+      continue;
+    }
 
     try {
       const first = await callProvider(provider, {
@@ -3120,6 +3178,17 @@ ${CORRECTION_RECOVERY_RULES}
         provider,
         cleanFirst ? cleanFirst.slice(0, 200) : "[empty]",
       );
+      if (!cleanFirst) {
+        if (runtimeTelemetry) {
+          runtimeTelemetry.providerFailures.push({
+            provider,
+            reason: "Provider returned no response or is unavailable.",
+          });
+        }
+        markProviderFailure(provider, "empty provider response");
+        continue;
+      }
+      markProviderHealthy(provider);
 
       if (containsHarmfulTechnicalOutput(cleanFirst)) {
         const response = buildCyberRiskyResponse(context.latestUserMessage);
@@ -3151,7 +3220,7 @@ ${CORRECTION_RECOVERY_RULES}
       if (firstCandidate.result) {
         bestRejected = chooseBetterRejected(
           bestRejected,
-          firstCandidate.result,
+          { ...firstCandidate.result, provider },
         );
       }
 
@@ -3175,6 +3244,17 @@ ${CORRECTION_RECOVERY_RULES}
         provider,
         cleanSecond ? cleanSecond.slice(0, 200) : "[empty]",
       );
+      if (!cleanSecond) {
+        if (runtimeTelemetry) {
+          runtimeTelemetry.providerFailures.push({
+            provider,
+            reason: "Provider retry returned no response or is unavailable.",
+          });
+        }
+        markProviderFailure(provider, "empty provider retry");
+        continue;
+      }
+      markProviderHealthy(provider);
 
       if (containsHarmfulTechnicalOutput(cleanSecond)) {
         const response = buildCyberRiskyResponse(context.latestUserMessage);
@@ -3206,11 +3286,12 @@ ${CORRECTION_RECOVERY_RULES}
       if (secondCandidate.result) {
         bestRejected = chooseBetterRejected(
           bestRejected,
-          secondCandidate.result,
+          { ...secondCandidate.result, provider },
         );
       }
     } catch (error) {
       console.error("[SVANS-AI] Provider loop error:", provider, error);
+      markProviderFailure(provider, error);
       if (runtimeTelemetry) {
         runtimeTelemetry.providerFailures.push({
           provider,
@@ -3221,16 +3302,19 @@ ${CORRECTION_RECOVERY_RULES}
     }
   }
 
-  void queueLearningNeed({
-    question: context.latestUserMessage,
-    questionType: context.questionType,
-    reason: "OpenAI and Anthropic both failed to generate a usable response.",
-    priority: 3,
-    source: "hard-fallback",
-  });
+  if (!bestRejected || bestRejected.critique.score < 0.7) {
+    void queueLearningNeed({
+      question: context.latestUserMessage,
+      questionType: context.questionType,
+      reason:
+        "All configured providers failed or returned responses that did not meet the quality threshold.",
+      priority: 3,
+      source: "hard-fallback",
+    });
+  }
 
   const response =
-    bestRejected?.critique.score && bestRejected.critique.score >= 0.85
+    bestRejected?.critique.score && bestRejected.critique.score >= 0.7
       ? bestRejected.response
       : finalFallback(context);
   const critique = critiqueResponse({
@@ -3240,8 +3324,13 @@ ${CORRECTION_RECOVERY_RULES}
     conversationState: context.conversationState,
   });
   if (runtimeTelemetry) {
-    runtimeTelemetry.providerSelected = bestRejected ? "local" : "local";
-    runtimeTelemetry.fallbackUsed = true;
+    runtimeTelemetry.providerSelected =
+      bestRejected?.critique.score && bestRejected.critique.score >= 0.7
+        ? bestRejected.provider
+        : "local";
+    runtimeTelemetry.fallbackUsed = !(
+      bestRejected?.critique.score && bestRejected.critique.score >= 0.7
+    );
     applyCritique(runtimeTelemetry, critique);
   }
   return {
@@ -3251,9 +3340,17 @@ ${CORRECTION_RECOVERY_RULES}
 }
 
 function chooseBetterRejected(
-  current: { response: string; critique: ResponseCritique } | null,
-  next: { response: string; critique: ResponseCritique },
-): { response: string; critique: ResponseCritique } {
+  current: {
+    response: string;
+    critique: ResponseCritique;
+    provider: ProviderName;
+  } | null,
+  next: {
+    response: string;
+    critique: ResponseCritique;
+    provider: ProviderName;
+  },
+): { response: string; critique: ResponseCritique; provider: ProviderName } {
   if (!current) return next;
   return next.critique.score > current.critique.score ? next : current;
 }

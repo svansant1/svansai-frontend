@@ -25,6 +25,7 @@ export async function generateWithOpenAI(
 
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
+        signal: AbortSignal.timeout(25_000),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -57,8 +58,8 @@ export async function generateWithOpenAI(
       });
 
       if (!res.ok) {
-        console.error("OPENAI_IMAGE_HTTP_ERROR:", res.status, await res.text());
-        return null;
+        const details = (await res.text()).slice(0, 500);
+        throw new Error(`OpenAI image request failed (${res.status}): ${details}`);
       }
 
       const data = await res.json();
@@ -68,6 +69,7 @@ export async function generateWithOpenAI(
 
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
+      signal: AbortSignal.timeout(25_000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -83,8 +85,8 @@ export async function generateWithOpenAI(
     });
 
     if (!res.ok) {
-      console.error("OPENAI_PROVIDER_HTTP_ERROR:", res.status, await res.text());
-      return null;
+      const details = (await res.text()).slice(0, 500);
+      throw new Error(`OpenAI request failed (${res.status}): ${details}`);
     }
 
     const data = await res.json();
@@ -92,6 +94,6 @@ export async function generateWithOpenAI(
     return text || null;
   } catch (error) {
     console.error("OPENAI_PROVIDER_ERROR:", error);
-    return null;
+    throw error;
   }
 }

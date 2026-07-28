@@ -36,6 +36,6 @@ export async function generateWithGemini(input: GeminiInput): Promise<string | n
     return text || null;
   } catch (error) {
     console.error("GEMINI_PROVIDER_ERROR:", error);
-    return null;
+    throw error;
   }
 }

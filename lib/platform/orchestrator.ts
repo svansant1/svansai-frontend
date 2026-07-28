@@ -133,7 +133,9 @@ function chooseRoute(
   if (
     mode === "guide" ||
     mode === "tutor" ||
-    /\b(teach|learn|study|quiz|homework|explain)\b/.test(normalized)
+    /\b(teach|learn|study|quiz|homework|explain|group of answer choices|answer choices|exam|test question)\b/.test(
+      normalized,
+    )
   )
     return "learn";
   return "conversation";

@@ -12,6 +12,7 @@ import { loadWritingProfile } from "@/lib/personalization/writing-profile";
 import { loadUserMemories } from "@/lib/personalization/structured-memory";
 import { orchestrateChat } from "@/lib/platform/orchestrator";
 import { createRequestId } from "@/lib/platform/telemetry";
+import { normalizeChatRequest } from "@/lib/ai/request-context";
 
 const MAX_REQUEST_BYTES = 55 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -69,14 +70,25 @@ export async function POST(req: Request) {
       ? (body.messages as ChatMessage[]).slice(-MAX_MESSAGES)
       : [];
 
-    const invalidMessage = messages.some(
-      (message) =>
-        !message ||
-        (message.role !== "user" && message.role !== "assistant") ||
-        typeof message.content !== "string" ||
-        message.content.length > MAX_MESSAGE_CHARS,
-    );
-    if (invalidMessage) {
+    if (
+      messages.some(
+        (message) =>
+          !message ||
+          (message.role !== "user" && message.role !== "assistant"),
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Every message must use the user or assistant role." },
+        { status: 400 },
+      );
+    }
+    if (messages.some((message) => typeof message.content !== "string")) {
+      return NextResponse.json(
+        { error: "Every message must contain text content." },
+        { status: 400 },
+      );
+    }
+    if (messages.some((message) => message.content.length > MAX_MESSAGE_CHARS)) {
       return NextResponse.json(
         {
           error: `One message is too long. Keep each pasted message under ${MAX_MESSAGE_CHARS.toLocaleString()} characters, split it into smaller parts, or attach it as a file.`,
@@ -84,6 +96,13 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
+    if (!messages.some((message) => message.role === "user")) {
+      return NextResponse.json(
+        { error: "At least one user message is required." },
+        { status: 400 },
+      );
+    }
+    const normalizedRequest = normalizeChatRequest(messages, body?.context);
 
     const rawFiles = Array.isArray(body?.files)
       ? body.files
@@ -167,7 +186,7 @@ export async function POST(req: Request) {
         ])
       : [null, []];
     const result = await orchestrateChat({
-      messages,
+      messages: normalizedRequest.messages,
       attachedFiles,
       sessionId,
       responseMode,

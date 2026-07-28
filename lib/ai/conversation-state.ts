@@ -109,17 +109,21 @@ function detectStyleDirective(messages: ChatMessage[]): ConversationState["style
 
 function inferGoal(messages: ChatMessage[], responseMode: ResponseMode): string {
   const latest = recentUserMessages(messages, 1)[0] || "";
-  const joined = normalize(recentUserMessages(messages, 8).join(" "));
+  const normalizedLatest = normalize(latest);
 
-  if (joined.includes("top tier") || joined.includes("openai") || joined.includes("anthropic")) {
+  if (
+    normalizedLatest.includes("top tier") ||
+    normalizedLatest.includes("openai") ||
+    normalizedLatest.includes("anthropic")
+  ) {
     return "Upgrade SVANS-AI toward top-tier conversational quality.";
   }
 
-  if (joined.includes("guide") || responseMode === "guide") {
+  if (normalizedLatest.includes("guide") || responseMode === "guide") {
     return "Guide the user through the problem with a practical next step.";
   }
 
-  if (joined.includes("tutor") || responseMode === "tutor") {
+  if (normalizedLatest.includes("tutor") || responseMode === "tutor") {
     return "Tutor the user by teaching the concept and checking understanding.";
   }
 
@@ -137,28 +141,39 @@ function inferGoal(messages: ChatMessage[], responseMode: ResponseMode): string 
 }
 
 function inferTaskRoute(messages: ChatMessage[], responseMode: ResponseMode): ConversationState["taskRoute"] {
-  const joined = normalize(recentUserMessages(messages, 8).join(" "));
+  const recent = recentUserMessages(messages, 2);
+  const latest = normalize(recent.at(-1) || "");
+  const routeText = SHORT_FOLLOW_UPS.has(latest)
+    ? normalize(recent.join(" "))
+    : latest;
 
   if (responseMode === "build") return "build";
   if (responseMode === "debug") return "debug";
 
-  if (/\b(shield|unsafe|risk|protect|security|guardrail|phishing|malware|bypass|unauthorized)\b/.test(joined)) {
+  if (/\b(shield|unsafe|risk|protect|security|guardrail|phishing|malware|bypass|unauthorized)\b/.test(routeText)) {
     return "protect";
   }
 
-  if (/\b(debug|error|bug|broken|not working|stack trace|log|fix)\b/.test(joined)) {
+  if (/\b(debug|error|bug|broken|not working|stack trace|log|fix)\b/.test(routeText)) {
     return "debug";
   }
 
-  if (/\b(build|implement|update|feature|code|component|api|deploy|project|platform)\b/.test(joined)) {
-    return "build";
-  }
-
-  if (/\b(teach|tutor|learn|study|quiz|homework|explain|guide)\b/.test(joined) || responseMode === "guide" || responseMode === "tutor") {
+  if (
+    /\b(group of answer choices|answer choices|quiz|homework|exam|test question|question \d+)\b/.test(
+      routeText,
+    ) ||
+    /\b(teach|tutor|learn|study|explain|guide)\b/.test(routeText) ||
+    responseMode === "guide" ||
+    responseMode === "tutor"
+  ) {
     return "learn";
   }
 
-  if (/\b(file|image|pdf|screenshot|analyze|review|inspect)\b/.test(joined)) {
+  if (/\b(build|implement|update|feature|code|component|api|deploy|project|platform)\b/.test(routeText)) {
+    return "build";
+  }
+
+  if (/\b(file|image|pdf|screenshot|analyze|review|inspect)\b/.test(routeText)) {
     return "analyze";
   }
 

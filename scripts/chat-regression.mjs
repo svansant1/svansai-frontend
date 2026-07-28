@@ -922,6 +922,93 @@ assert(
   "SV Browser single OOP question did not receive the known direct answer.",
 );
 
+const structuredBrowserResponse = await fetch(`${baseUrl}/api/chat`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-forwarded-for": testClientIp,
+  },
+  body: JSON.stringify({
+    sessionId: "structured-browser-regression",
+    responseMode: "direct",
+    messages: [
+      {
+        role: "user",
+        content:
+          "User task:\nGive the direct answer.\n\nSelected text:\nWhich protocol encrypts ordinary web traffic? Choices: FTP, HTTPS, SMTP, Telnet.",
+      },
+    ],
+    context: {
+      source: "sv-browser-selection",
+      pageTitle: "Knowledge Check",
+      pageUrl: "https://example.edu/courses/1/quizzes/2/take",
+      task: "Give the direct answer.",
+      selectedText:
+        "Which protocol encrypts ordinary web traffic? Group of answer choices: FTP, HTTPS, SMTP, Telnet.",
+    },
+  }),
+});
+const structuredBrowserData = await structuredBrowserResponse.json();
+assert(
+  structuredBrowserResponse.ok &&
+    !structuredBrowserData?.orchestration?.analytics?.liveSearchAttempted &&
+    !structuredBrowserData?.orchestration?.analytics?.qualityReasons?.some(
+      (reason) => /build-mode/i.test(reason),
+    ),
+  "Structured SV Browser context leaked page metadata into search or build routing.",
+);
+
+const historyIsolationResponse = await fetch(`${baseUrl}/api/chat`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-forwarded-for": testClientIp,
+  },
+  body: JSON.stringify({
+    sessionId: "history-isolation-regression",
+    responseMode: "direct",
+    messages: [
+      {
+        role: "user",
+        content: "Earlier I was working on code for my platform API.",
+      },
+      {
+        role: "assistant",
+        content: "Okay. What would you like to do next?",
+      },
+      {
+        role: "user",
+        content:
+          "Which protocol encrypts ordinary web traffic? Group of answer choices: FTP, HTTPS, SMTP, Telnet. Direct answer.",
+      },
+    ],
+  }),
+});
+const historyIsolationData = await historyIsolationResponse.json();
+assert(
+  historyIsolationResponse.ok &&
+    !historyIsolationData?.orchestration?.analytics?.qualityReasons?.some(
+      (reason) => /build-mode/i.test(reason),
+    ) &&
+    !/do not have a confident local match|use elimination/i.test(
+      String(historyIsolationData?.text || ""),
+    ),
+  "An older code/platform message contaminated the latest education turn.",
+);
+
+const liquidCoolingQuiz = await ask(
+  "Question 110 pts\nWhat is the main advantage of liquid cooling over air cooling?\nGroup of answer choices\n\nUses less power\n\nSafer\n\nMore effective\n\nLess expensive",
+);
+assert(
+  /Correct answer:\s*(?:[A-D]\s*[—-]\s*)?More effective/i.test(
+    liquidCoolingQuiz,
+  ) &&
+    !/do not have a confident local match|use elimination/i.test(
+      liquidCoolingQuiz,
+    ),
+  "Liquid cooling multiple-choice question fell back instead of answering directly.",
+);
+
 const repeatedOopBatchQuizText =
   "Question 110 pts\nAn object is a(n) _____ of a class.\nGroup of answer choices\n\nchild\n\nrelative\n\ninstitution\n\ninstantiation\n\nFlag question: Question 2\nQuestion 210 pts\nHidden variables in a class are generally marked with\nGroup of answer choices\n\noverride.\n\nprotected.\n\nleading double underscore (__) in the variable name.\n\npublic.\n\nFlag question: Question 3\nQuestion 310 pts\n_____ methods provide access to data in hidden variables.\nGroup of answer choices\n\nHidden\n\nAccessor and mutator\n\nPrivate\n\nStatic\n\nFlag question: Question 4\nQuestion 410 pts\nTo create an instance of a Shape object in Python, you might use\nGroup of answer choices\n\nnew s1 Type = Rectangle.\n\ncreate object s1 Rectangle.\n\ns1 = Rectangle().\n\ns1 = new Rectangle.\n\nFlag question: Question 5\nQuestion 510 pts\nA constructor\nGroup of answer choices\n\nis always a static member.\n\nis a method that runs when an object is created.\n\nis an instance of a class that has just been created.\n\nis a special class that executes when an object is declared.";
 const repeatedOopBatchQuiz = await ask(repeatedOopBatchQuizText, [

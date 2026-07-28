@@ -1,7 +1,7 @@
 import type { ChatMessage } from "@/lib/ai/types";
 
 const MAX_HISTORY = 20;
-const MAX_CHARS_PER_MESSAGE = 4000;
+const MAX_CHARS_PER_MESSAGE = 30_000;
 
 export function sanitizeMessages(
   messages: unknown[],

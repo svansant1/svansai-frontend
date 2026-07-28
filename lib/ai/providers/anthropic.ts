@@ -14,6 +14,7 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
     const images = (input.attachedFiles ?? []).filter((file) => file.type.startsWith("image/") && file.base64);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
+      signal: AbortSignal.timeout(25_000),
       headers: {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
@@ -40,8 +41,8 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
     });
 
     if (!res.ok) {
-      console.error("ANTHROPIC_PROVIDER_HTTP_ERROR:", res.status, await res.text());
-      return null;
+      const details = (await res.text()).slice(0, 500);
+      throw new Error(`Anthropic request failed (${res.status}): ${details}`);
     }
 
     const data = await res.json();
@@ -52,6 +53,6 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
     return text || null;
   } catch (error) {
     console.error("ANTHROPIC_PROVIDER_ERROR:", error);
-    return null;
+    throw error;
   }
 }

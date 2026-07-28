@@ -5,6 +5,14 @@ export type ChatMessage = {
   content: string;
 };
 
+export type ChatRequestContext = {
+  source: "web" | "sv-browser-selection";
+  pageTitle?: string;
+  pageUrl?: string;
+  selectedText?: string;
+  task?: string;
+};
+
 export type QuestionType =
   | "coding"
   | "business"
