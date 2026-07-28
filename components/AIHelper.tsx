@@ -8,17 +8,6 @@ import {
   getTotalViews,
 } from "@/lib/db/engagement";
 import { supabase } from "@/lib/supabase";
-import {
-  getStarterQuoteMode,
-  initializeStarterQuoteIndex,
-  quoteAt,
-  randomQuoteIndex,
-  STARTER_QUOTE_CURRENT_KEY,
-  STARTER_QUOTE_MODE_KEY,
-  STARTER_QUOTE_PREVIOUS_KEY,
-  storedQuoteIndex,
-  type StarterQuoteMode,
-} from "@/lib/ui/starter-quotes";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -500,24 +489,6 @@ export default function AIHelper({
     "personal_preference",
   );
   const [memorySummary, setMemorySummary] = useState("");
-  const [starterQuoteMode, setStarterQuoteMode] = useState<StarterQuoteMode>(
-    () => getStarterQuoteMode(),
-  );
-  const [starterQuoteAccepted, setStarterQuoteAccepted] = useState(false);
-  const [starterQuoteDismissed, setStarterQuoteDismissed] = useState(false);
-  const [starterQuoteIndex, setStarterQuoteIndex] = useState(() => {
-    if (typeof window === "undefined") return 0;
-    return (
-      storedQuoteIndex(STARTER_QUOTE_CURRENT_KEY) ??
-      initializeStarterQuoteIndex()
-    );
-  });
-  const [previousStarterQuoteIndex, setPreviousStarterQuoteIndex] = useState<
-    number | null
-  >(() => {
-    if (typeof window === "undefined") return null;
-    return storedQuoteIndex(STARTER_QUOTE_PREVIOUS_KEY);
-  });
   const [showAttachmentDetails, setShowAttachmentDetails] = useState(false);
   const attachedFile = attachedFiles[0] ?? null;
   const attachmentTotalKb = Math.round(
@@ -611,29 +582,6 @@ export default function AIHelper({
       },
     ]);
   }, [user, initialMessages, conversationId]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(STARTER_QUOTE_MODE_KEY, starterQuoteMode);
-  }, [starterQuoteMode]);
-
-  useEffect(() => {
-    if (starterQuoteMode === "off" || conversationId) return;
-
-    window.setTimeout(() => {
-      if (starterQuoteMode === "ask" && !starterQuoteAccepted) {
-        notifyMascotMessage("Want a quote to start? Choose previous or new.");
-        return;
-      }
-
-      notifyMascotMessage(`“${quoteAt(starterQuoteIndex)}”`);
-    }, 250);
-  }, [
-    starterQuoteAccepted,
-    starterQuoteIndex,
-    starterQuoteMode,
-    conversationId,
-  ]);
 
   const handleModuleBadgeClick = (item: string) => {
     const normalized = item.toLowerCase();
@@ -821,51 +769,6 @@ export default function AIHelper({
         },
       }),
     );
-  };
-
-  const notifyMascotMessage = (message: string) => {
-    window.dispatchEvent(
-      new CustomEvent("sv-mascot-message", {
-        detail: { message },
-      }),
-    );
-  };
-
-  const showStarterQuote = (index = starterQuoteIndex) => {
-    const quote = quoteAt(index);
-    setStarterQuoteAccepted(true);
-    notifyMascotMessage(`“${quote}”`);
-  };
-
-  const chooseNewStarterQuote = () => {
-    const previous = starterQuoteIndex;
-    const next = randomQuoteIndex(previous);
-    setPreviousStarterQuoteIndex(previous);
-    setStarterQuoteIndex(next);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STARTER_QUOTE_PREVIOUS_KEY, String(previous));
-      localStorage.setItem(STARTER_QUOTE_CURRENT_KEY, String(next));
-    }
-    showStarterQuote(next);
-  };
-
-  const choosePreviousStarterQuote = () => {
-    if (previousStarterQuoteIndex === null) {
-      showStarterQuote(starterQuoteIndex);
-      return;
-    }
-
-    const current = starterQuoteIndex;
-    setStarterQuoteIndex(previousStarterQuoteIndex);
-    setPreviousStarterQuoteIndex(current);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(
-        STARTER_QUOTE_CURRENT_KEY,
-        String(previousStarterQuoteIndex),
-      );
-      localStorage.setItem(STARTER_QUOTE_PREVIOUS_KEY, String(current));
-    }
-    showStarterQuote(previousStarterQuoteIndex);
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1300,186 +1203,6 @@ export default function AIHelper({
         }}
       >
         <AnimatePresence initial={false}>
-          {!conversationId &&
-            starterQuoteMode !== "off" &&
-            !starterQuoteDismissed &&
-            messages.length <= 1 && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{
-                  marginBottom: "12px",
-                  padding: "14px 16px",
-                  borderRadius: "16px",
-                  background:
-                    "linear-gradient(135deg, rgba(56,189,248,0.13), rgba(168,85,247,0.1))",
-                  border: "1px solid rgba(125,211,252,0.18)",
-                  color: "white",
-                }}
-              >
-                <div
-                  style={{
-                    color: "#7dd3fc",
-                    fontSize: "0.78rem",
-                    fontWeight: 900,
-                    letterSpacing: "0.08em",
-                    marginBottom: "6px",
-                  }}
-                >
-                  SVANS-AI STARTER QUOTE
-                </div>
-                {starterQuoteMode === "ask" && !starterQuoteAccepted ? (
-                  <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>
-                    Would you like the previous quote or a new one?
-                  </div>
-                ) : (
-                  <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>
-                    “{quoteAt(starterQuoteIndex)}”
-                  </div>
-                )}
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "8px",
-                    marginTop: "10px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {starterQuoteMode === "ask" && !starterQuoteAccepted && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={choosePreviousStarterQuote}
-                        disabled={previousStarterQuoteIndex === null}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: "999px",
-                          border: "1px solid rgba(125,211,252,0.28)",
-                          background:
-                            previousStarterQuoteIndex === null
-                              ? "rgba(255,255,255,0.04)"
-                              : "rgba(56,189,248,0.14)",
-                          color:
-                            previousStarterQuoteIndex === null
-                              ? "rgba(255,255,255,0.42)"
-                              : "white",
-                          cursor:
-                            previousStarterQuoteIndex === null
-                              ? "not-allowed"
-                              : "pointer",
-                        }}
-                      >
-                        Previous quote
-                      </button>
-                      <button
-                        type="button"
-                        onClick={chooseNewStarterQuote}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: "999px",
-                          border: "1px solid rgba(125,211,252,0.28)",
-                          background: "rgba(56,189,248,0.14)",
-                          color: "white",
-                          cursor: "pointer",
-                        }}
-                      >
-                        New quote
-                      </button>
-                    </>
-                  )}
-                  {(starterQuoteMode !== "ask" || starterQuoteAccepted) && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={choosePreviousStarterQuote}
-                        disabled={previousStarterQuoteIndex === null}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: "999px",
-                          border: "1px solid rgba(125,211,252,0.2)",
-                          background:
-                            previousStarterQuoteIndex === null
-                              ? "rgba(255,255,255,0.04)"
-                              : "rgba(255,255,255,0.06)",
-                          color:
-                            previousStarterQuoteIndex === null
-                              ? "rgba(255,255,255,0.42)"
-                              : "white",
-                          cursor:
-                            previousStarterQuoteIndex === null
-                              ? "not-allowed"
-                              : "pointer",
-                        }}
-                      >
-                        Previous quote
-                      </button>
-                      <button
-                        type="button"
-                        onClick={chooseNewStarterQuote}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: "999px",
-                          border: "1px solid rgba(125,211,252,0.28)",
-                          background: "rgba(56,189,248,0.14)",
-                          color: "white",
-                          cursor: "pointer",
-                        }}
-                      >
-                        New quote
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setStarterQuoteDismissed(true)}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: "999px",
-                      border: "1px solid rgba(255,255,255,0.16)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "white",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Start chat
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStarterQuoteMode("show");
-                      showStarterQuote();
-                    }}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: "999px",
-                      border: "1px solid rgba(255,255,255,0.16)",
-                      background: "rgba(255,255,255,0.03)",
-                      color: "rgba(255,255,255,0.75)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Always show
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStarterQuoteMode("off");
-                      setStarterQuoteDismissed(true);
-                    }}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: "999px",
-                      border: "1px solid rgba(255,255,255,0.16)",
-                      background: "rgba(255,255,255,0.03)",
-                      color: "rgba(255,255,255,0.75)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Don’t show quotes
-                  </button>
-                </div>
-              </motion.div>
-            )}
           {messages.map((msg, i) => (
             <motion.div
               key={`${msg.role}-${i}-${msg.content.slice(0, 16)}`}
@@ -1984,29 +1707,6 @@ export default function AIHelper({
               >
                 Voice Profile
               </button>
-              {starterQuoteMode === "off" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStarterQuoteMode("ask");
-                    setStarterQuoteDismissed(false);
-                    setStarterQuoteAccepted(false);
-                  }}
-                  style={{
-                    marginLeft: "8px",
-                    padding: "7px 12px",
-                    borderRadius: "12px",
-                    border: "1px solid rgba(168,85,247,0.28)",
-                    background: "rgba(168,85,247,0.10)",
-                    color: "#ddd6fe",
-                    cursor: "pointer",
-                    fontWeight: 800,
-                  }}
-                  title="Turn starter quotes back on"
-                >
-                  Quotes off — turn on
-                </button>
-              )}
               {showVoiceProfile && (
                 <div
                   style={{
@@ -2145,49 +1845,6 @@ export default function AIHelper({
                       borderTop: "1px solid rgba(255,255,255,0.1)",
                     }}
                   >
-                    <strong>Starter quote</strong>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "8px",
-                        flexWrap: "wrap",
-                        margin: "8px 0 12px",
-                      }}
-                    >
-                      {(["ask", "show", "off"] as const).map((mode) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          onClick={() => {
-                            setStarterQuoteMode(mode);
-                            if (mode !== "off") {
-                              setStarterQuoteDismissed(false);
-                              setStarterQuoteAccepted(mode === "show");
-                            }
-                          }}
-                          style={{
-                            padding: "6px 10px",
-                            borderRadius: "999px",
-                            border:
-                              starterQuoteMode === mode
-                                ? "1px solid rgba(56,189,248,0.58)"
-                                : "1px solid rgba(255,255,255,0.14)",
-                            background:
-                              starterQuoteMode === mode
-                                ? "rgba(56,189,248,0.16)"
-                                : "rgba(255,255,255,0.04)",
-                            color: "white",
-                            cursor: "pointer",
-                          }}
-                        >
-                          {mode === "ask"
-                            ? "Ask first"
-                            : mode === "show"
-                              ? "Always show"
-                              : "Off"}
-                        </button>
-                      ))}
-                    </div>
                     <strong>User-controlled memory</strong>
                     <div
                       style={{

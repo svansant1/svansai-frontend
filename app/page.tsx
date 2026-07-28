@@ -24,8 +24,12 @@ import {
   getStarterQuoteMode,
   initializeStarterQuoteIndex,
   quoteAt,
+  randomQuoteIndex,
   storedQuoteIndex,
   STARTER_QUOTE_CURRENT_KEY,
+  STARTER_QUOTE_MODE_KEY,
+  STARTER_QUOTE_PREVIOUS_KEY,
+  type StarterQuoteMode,
 } from "@/lib/ui/starter-quotes";
 
 type AiUser = { id: string; email: string };
@@ -69,6 +73,12 @@ export default function HomePage() {
 
   const [isThinking, setIsThinking] = useState(false);
   const [lastThought, setLastThought] = useState("Ready to help.");
+  const [starterQuoteMode, setStarterQuoteMode] =
+    useState<StarterQuoteMode>("ask");
+  const [starterQuoteIndex, setStarterQuoteIndex] = useState(0);
+  const [previousStarterQuoteIndex, setPreviousStarterQuoteIndex] = useState<
+    number | null
+  >(null);
 
   const [isMobile, setIsMobile] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -98,11 +108,14 @@ export default function HomePage() {
     if (typeof window === "undefined") return;
 
     const mode = getStarterQuoteMode();
+    setStarterQuoteMode(mode);
     if (mode === "off") return;
 
     const quoteIndex =
       storedQuoteIndex(STARTER_QUOTE_CURRENT_KEY) ??
       initializeStarterQuoteIndex();
+    setStarterQuoteIndex(quoteIndex);
+    setPreviousStarterQuoteIndex(storedQuoteIndex(STARTER_QUOTE_PREVIOUS_KEY));
 
     setLastThought(
       mode === "ask"
@@ -110,6 +123,60 @@ export default function HomePage() {
         : `“${quoteAt(quoteIndex)}”`,
     );
   }, []);
+
+  const persistStarterQuoteMode = (
+    mode: StarterQuoteMode,
+    quoteIndex = starterQuoteIndex,
+  ) => {
+    setStarterQuoteMode(mode);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STARTER_QUOTE_MODE_KEY, mode);
+    }
+
+    if (mode === "off") {
+      setLastThought("Ready to help.");
+    } else if (mode === "ask") {
+      setLastThought("Want a quote to start? Choose previous or new.");
+    } else {
+      setLastThought(`“${quoteAt(quoteIndex)}”`);
+    }
+  };
+
+  const chooseNewStarterQuote = () => {
+    const previous = starterQuoteIndex;
+    const next = randomQuoteIndex(previous);
+
+    setPreviousStarterQuoteIndex(previous);
+    setStarterQuoteIndex(next);
+    persistStarterQuoteMode("show", next);
+    setLastThought(`“${quoteAt(next)}”`);
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STARTER_QUOTE_PREVIOUS_KEY, String(previous));
+      localStorage.setItem(STARTER_QUOTE_CURRENT_KEY, String(next));
+    }
+  };
+
+  const choosePreviousStarterQuote = () => {
+    if (previousStarterQuoteIndex === null) {
+      setLastThought(`“${quoteAt(starterQuoteIndex)}”`);
+      persistStarterQuoteMode("show", starterQuoteIndex);
+      return;
+    }
+
+    const current = starterQuoteIndex;
+    const previous = previousStarterQuoteIndex;
+
+    setStarterQuoteIndex(previous);
+    setPreviousStarterQuoteIndex(current);
+    persistStarterQuoteMode("show", previous);
+    setLastThought(`“${quoteAt(previous)}”`);
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STARTER_QUOTE_CURRENT_KEY, String(previous));
+      localStorage.setItem(STARTER_QUOTE_PREVIOUS_KEY, String(current));
+    }
+  };
 
   // ─── Ref tracks conversationId synchronously to prevent stale closures ────
   const activeConversationIdRef = useRef<string | null>(null);
@@ -577,13 +644,19 @@ export default function HomePage() {
   const isShortDesktop =
     !isMobile && viewportHeight > 0 && viewportHeight < 850;
 
-  const RobotMascot = ({ size }: { size: number }) => (
+  const RobotMascot = ({
+    size,
+    showQuoteControls,
+  }: {
+    size: number;
+    showQuoteControls: boolean;
+  }) => (
     <div
       style={{
         position: "relative",
         width: size,
         height: size,
-        pointerEvents: "none",
+        pointerEvents: showQuoteControls ? "auto" : "none",
         userSelect: "none",
         WebkitUserSelect: "none",
       }}
@@ -619,7 +692,7 @@ export default function HomePage() {
           backdropFilter: "blur(22px)",
           boxShadow:
             "0 14px 34px rgba(0,0,0,0.34), 0 0 24px rgba(56,189,248,0.12)",
-          pointerEvents: "none",
+          pointerEvents: showQuoteControls ? "auto" : "none",
           overflow: "visible",
         }}
       >
@@ -650,7 +723,79 @@ export default function HomePage() {
             pointerEvents: "none",
           }}
         />
-        <span style={{ position: "relative", zIndex: 1 }}>{lastThought}</span>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <span>{lastThought}</span>
+          {showQuoteControls && (
+            <div
+              style={{
+                display: "flex",
+                gap: "6px",
+                justifyContent: "center",
+                flexWrap: "wrap",
+                marginTop: "9px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={choosePreviousStarterQuote}
+                disabled={previousStarterQuoteIndex === null}
+                style={{
+                  padding: isMobile ? "4px 7px" : "5px 9px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(125,211,252,0.24)",
+                  background:
+                    previousStarterQuoteIndex === null
+                      ? "rgba(255,255,255,0.04)"
+                      : "rgba(255,255,255,0.08)",
+                  color:
+                    previousStarterQuoteIndex === null
+                      ? "rgba(255,255,255,0.42)"
+                      : "#e0f2fe",
+                  cursor:
+                    previousStarterQuoteIndex === null
+                      ? "not-allowed"
+                      : "pointer",
+                  fontSize: isMobile ? "0.62rem" : "0.72rem",
+                  fontWeight: 850,
+                }}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={chooseNewStarterQuote}
+                style={{
+                  padding: isMobile ? "4px 7px" : "5px 9px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(125,211,252,0.34)",
+                  background: "rgba(56,189,248,0.16)",
+                  color: "white",
+                  cursor: "pointer",
+                  fontSize: isMobile ? "0.62rem" : "0.72rem",
+                  fontWeight: 850,
+                }}
+              >
+                New
+              </button>
+              <button
+                type="button"
+                onClick={() => persistStarterQuoteMode("off")}
+                style={{
+                  padding: isMobile ? "4px 7px" : "5px 9px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.72)",
+                  cursor: "pointer",
+                  fontSize: isMobile ? "0.62rem" : "0.72rem",
+                  fontWeight: 800,
+                }}
+              >
+                Off
+              </button>
+            </div>
+          )}
+        </div>
       </motion.div>
 
       <motion.div
@@ -1796,10 +1941,13 @@ export default function HomePage() {
             justifyContent: "center",
             position: "relative",
             zIndex: 12,
-            pointerEvents: "none",
+            pointerEvents: "auto",
           }}
         >
-          <RobotMascot size={isMobile ? 118 : isShortDesktop ? 138 : 190} />
+          <RobotMascot
+            size={isMobile ? 118 : isShortDesktop ? 138 : 190}
+            showQuoteControls={!isThinking && starterQuoteMode !== "off"}
+          />
         </motion.div>
 
         <motion.div
@@ -2023,6 +2171,8 @@ export default function HomePage() {
             width: "100%",
             maxWidth: "min(1180px, calc(100vw - 32px))",
             margin: isMobile ? "12px auto 0" : "12px auto 0",
+            transform:
+              !isMobile && !isSidebarCollapsed ? "translateX(18px)" : undefined,
             minHeight: isMobile ? "calc(100dvh - 140px)" : 0,
             height: isMobile ? "auto" : "auto",
             flex: isMobile ? "0 0 auto" : "1 1 0",

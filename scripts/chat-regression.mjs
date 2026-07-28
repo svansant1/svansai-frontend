@@ -324,6 +324,28 @@ assert(
   `Module badges missed one or more explicit modules. Got: ${recommendedModules.join(", ")}`,
 );
 
+const largeMigrationPlan = await ask(
+  "I have a Git repository with 5,000 files. I want to migrate from Express to Fastify without breaking anything. Explain, step by step, how SVANS-AI, VOS, Sandbox, Debugger, and Shield coordinate the migration. Include permissions, project scanning, patch generation, testing, rollback, approval, auditing, and deployment verification.",
+);
+const largeMigrationCompact = largeMigrationPlan.replace(/\s+/g, " ").trim();
+console.log(
+  `\nPROMPT: large Express to Fastify migration protocol\nRESPONSE: ${largeMigrationCompact.slice(0, 700)}`,
+);
+assert(
+  /incremental|approval-gated/i.test(largeMigrationCompact) &&
+    /permission/i.test(largeMigrationCompact) &&
+    /inventory/i.test(largeMigrationCompact) &&
+    /baseline/i.test(largeMigrationCompact) &&
+    /patch/i.test(largeMigrationCompact) &&
+    /Sandbox/i.test(largeMigrationCompact) &&
+    /Debugger/i.test(largeMigrationCompact) &&
+    /Shield/i.test(largeMigrationCompact) &&
+    /rollback/i.test(largeMigrationCompact) &&
+    /audit/i.test(largeMigrationCompact) &&
+    /deployment/i.test(largeMigrationCompact),
+  "Large migration response did not include the full coordination protocol.",
+);
+
 const duplicateHistory = [];
 await askTurn(
   duplicateHistory,
