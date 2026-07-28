@@ -461,6 +461,7 @@ function getDuplicateQuestionResponse(
       latestUserMessage,
     );
   if (isExplicitWorkflowRequest) return null;
+  if (looksLikeQuizBlock(latestUserMessage)) return null;
 
   const latest = normalizeText(latestUserMessage);
   const previous = normalizeText(previousUserMessage);
@@ -1990,6 +1991,18 @@ function getKnownMultipleChoiceQuizAnswer(message: string): string | null {
       wrongChoiceNote ? `\n\n${wrongChoiceNote}` : ""
     }`;
   };
+
+  if (
+    normalized.includes("object is a n") &&
+    normalized.includes("of a class") &&
+    normalized.includes("instantiation")
+  ) {
+    return formatKnownQuizAnswer(
+      "Instantiation",
+      "An object is an instantiation, or instance, of a class. A class defines the blueprint, and an object is a concrete instance created from it.",
+      "Child, relative, and institution do not describe the object-to-class relationship.",
+    );
+  }
 
   if (
     normalized.includes("primary role of dns") ||

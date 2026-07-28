@@ -910,4 +910,35 @@ assert(
   "OOP batch quiz was not answered directly or was hijacked by permission fallback.",
 );
 
+const browserSingleOopQuiz = await askTurn(
+  [],
+  "You are SVANSAI assisting with highlighted text inside SV Browser.\n\nPage title: Module 4: Knowledge Check\nPage address: https://example.edu/quiz\n\nUser task:\ndirect answer?\n\nHighlighted text:\n---\nAn object is a(n) _____ of a class.\nGroup of answer choices\n\nchild\n\nrelative\n\ninstitution\n\ninstantiation\n---",
+  "direct",
+);
+assert(
+  /Correct answer:\s*(?:[A-D]\s*[—-]\s*)?Instantiation/i.test(
+    browserSingleOopQuiz,
+  ) && !/do not have a confident local match/i.test(browserSingleOopQuiz),
+  "SV Browser single OOP question did not receive the known direct answer.",
+);
+
+const repeatedOopBatchQuizText =
+  "Question 110 pts\nAn object is a(n) _____ of a class.\nGroup of answer choices\n\nchild\n\nrelative\n\ninstitution\n\ninstantiation\n\nFlag question: Question 2\nQuestion 210 pts\nHidden variables in a class are generally marked with\nGroup of answer choices\n\noverride.\n\nprotected.\n\nleading double underscore (__) in the variable name.\n\npublic.\n\nFlag question: Question 3\nQuestion 310 pts\n_____ methods provide access to data in hidden variables.\nGroup of answer choices\n\nHidden\n\nAccessor and mutator\n\nPrivate\n\nStatic\n\nFlag question: Question 4\nQuestion 410 pts\nTo create an instance of a Shape object in Python, you might use\nGroup of answer choices\n\nnew s1 Type = Rectangle.\n\ncreate object s1 Rectangle.\n\ns1 = Rectangle().\n\ns1 = new Rectangle.\n\nFlag question: Question 5\nQuestion 510 pts\nA constructor\nGroup of answer choices\n\nis always a static member.\n\nis a method that runs when an object is created.\n\nis an instance of a class that has just been created.\n\nis a special class that executes when an object is declared.";
+const repeatedOopBatchQuiz = await ask(repeatedOopBatchQuizText, [
+  { role: "user", content: repeatedOopBatchQuizText },
+  {
+    role: "assistant",
+    content:
+      "Answers: 1. Instantiation 2. Leading double underscore 3. Accessor and mutator 4. s1 = Rectangle() 5. is a method that runs when an object is created",
+  },
+]);
+assert(
+  /1\.\s*Instantiation/i.test(repeatedOopBatchQuiz) &&
+    /3\.\s*Accessor and mutator/i.test(repeatedOopBatchQuiz) &&
+    !/same question again|expand on my last answer|different angle/i.test(
+      repeatedOopBatchQuiz,
+    ),
+  "Repeated quiz block was blocked by duplicate-question guard.",
+);
+
 console.log("\nMode and orchestration regression prompts completed.");
