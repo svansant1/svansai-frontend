@@ -25,6 +25,29 @@ type ChatOrchestration = {
   recommendedModules?: string[];
   responseMode?: string;
   capabilities?: string[];
+  commandCenter?: string[];
+  mind?: {
+    primaryIntent?: string;
+    confidence?: number;
+    activeTask?: {
+      type?: string;
+      subject?: string;
+      goal?: string;
+    };
+    permissionPosture?: {
+      localFiles?: string;
+      writes?: string;
+      auditRequired?: boolean;
+      note?: string;
+    };
+  };
+  analytics?: {
+    providerSelected?: string;
+    qualityScore?: number;
+    fallbackUsed?: boolean;
+    liveSearchAttempted?: boolean;
+    liveSearchResults?: number;
+  };
 };
 
 type AttachedFile = {
@@ -865,6 +888,60 @@ export default function AIHelper({
     });
   };
 
+  const inferThinkingStatus = (
+    message: string,
+    filesToSend: AttachedFile[],
+  ) => {
+    const normalized = message.toLowerCase();
+
+    if (
+      /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/.test(
+        normalized,
+      )
+    ) {
+      return "Generating image...";
+    }
+
+    if (
+      /\b(sc(a|u)m|fraud|legit|trustworthy|bbb|safe site|fake site)\b/.test(
+        normalized,
+      )
+    ) {
+      return "Checking site reputation...";
+    }
+
+    if (
+      /\b(search|browse|internet|current|latest|today|source|research|website|url|domain)\b/.test(
+        normalized,
+      )
+    ) {
+      return "Searching web...";
+    }
+
+    if (
+      /\b(answer choices|group of answer choices|quiz|homework|complete the|sample output)\b/.test(
+        normalized,
+      )
+    ) {
+      return "Using education solver...";
+    }
+
+    if (filesToSend.length) {
+      if (filesToSend.some((file) => /[\\/]/.test(file.name))) {
+        return "Analyzing folder upload...";
+      }
+      if (filesToSend.every((file) => isImageType(file.type))) {
+        return `Analyzing ${filesToSend.length} image${filesToSend.length === 1 ? "" : "s"}...`;
+      }
+      if (filesToSend.some((file) => isPdfType(file.type))) {
+        return "Reading your documents...";
+      }
+      return "Reading your files...";
+    }
+
+    return "Thinking it through...";
+  };
+
   const handleFeedback = async (messageIndex: number, vote: "up" | "down") => {
     if (!conversationId) return;
 
@@ -936,16 +1013,7 @@ export default function AIHelper({
     setFileError("");
     setLoading(true);
 
-    notifyThinking(
-      true,
-      filesToSend.length
-        ? filesToSend.every((file) => isImageType(file.type))
-          ? `Analyzing ${filesToSend.length} image${filesToSend.length === 1 ? "" : "s"}...`
-          : filesToSend.some((file) => isPdfType(file.type))
-            ? "Reading your documents..."
-            : "Reading your files..."
-        : "Thinking it through...",
-    );
+    notifyThinking(true, inferThinkingStatus(userMessage.content, filesToSend));
 
     try {
       const body: Record<string, unknown> = {
@@ -1365,19 +1433,127 @@ export default function AIHelper({
                   </div>
                 )}
 
+                {msg.role === "assistant" &&
+                  msg.orchestration?.commandCenter?.length > 0 && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: "6px",
+                        marginBottom: "10px",
+                        padding: "9px 10px",
+                        borderRadius: "14px",
+                        border: "1px solid rgba(125,211,252,0.16)",
+                        background:
+                          "linear-gradient(135deg, rgba(56,189,248,0.08), rgba(168,85,247,0.06))",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          color: "#bae6fd",
+                          fontSize: "0.72rem",
+                          fontWeight: 900,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        SVANS-Mind
+                        {typeof msg.orchestration.mind?.confidence ===
+                          "number" && (
+                          <span
+                            style={{
+                              color: "rgba(226,232,240,0.72)",
+                              fontWeight: 800,
+                              letterSpacing: "0.02em",
+                              textTransform: "none",
+                            }}
+                          >
+                            {Math.round(
+                              msg.orchestration.mind.confidence * 100,
+                            )}
+                            % confidence
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        {msg.orchestration.commandCenter
+                          .slice(0, 6)
+                          .map((status) => (
+                            <span
+                              key={`${i}-${status}`}
+                              style={{
+                                padding: "4px 8px",
+                                borderRadius: "999px",
+                                background: "rgba(15,23,42,0.36)",
+                                border: "1px solid rgba(148,163,184,0.16)",
+                                color: "rgba(226,232,240,0.9)",
+                                fontSize: "0.72rem",
+                                fontWeight: 750,
+                              }}
+                            >
+                              {status}
+                            </span>
+                          ))}
+                      </div>
+                      {msg.orchestration.mind?.permissionPosture?.note && (
+                        <div
+                          style={{
+                            color: "rgba(226,232,240,0.68)",
+                            fontSize: "0.72rem",
+                          }}
+                        >
+                          Permission:{" "}
+                          {msg.orchestration.mind.permissionPosture.note}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 {msg.filePreview && isImageType(msg.fileType || "") && (
-                  <img
-                    src={msg.filePreview}
-                    alt={msg.fileName || "Attached image"}
-                    style={{
-                      maxWidth: "100%",
-                      maxHeight: "220px",
-                      borderRadius: "10px",
-                      marginBottom: "8px",
-                      objectFit: "contain",
-                      display: "block",
-                    }}
-                  />
+                  <div style={{ marginBottom: "8px" }}>
+                    <img
+                      src={msg.filePreview}
+                      alt={msg.fileName || "Attached image"}
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: msg.role === "assistant" ? "420px" : "220px",
+                        borderRadius: "10px",
+                        marginBottom: "8px",
+                        objectFit: "contain",
+                        display: "block",
+                      }}
+                    />
+                    {msg.role === "assistant" && (
+                      <a
+                        href={msg.filePreview}
+                        download={msg.fileName || "svans-ai-image.png"}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          padding: "7px 10px",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(125,211,252,0.24)",
+                          background: "rgba(56,189,248,0.09)",
+                          color: "#bae6fd",
+                          textDecoration: "none",
+                          fontSize: "0.78rem",
+                          fontWeight: 850,
+                        }}
+                      >
+                        ⬇ Download image
+                      </a>
+                    )}
+                  </div>
                 )}
 
                 {msg.fileName && !isImageType(msg.fileType || "") && (

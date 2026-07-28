@@ -60,7 +60,10 @@ async function ask(prompt, prior = []) {
 async function askTurn(history, prompt, responseMode = "auto") {
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-forwarded-for": testClientIp },
+    headers: {
+      "Content-Type": "application/json",
+      "x-forwarded-for": testClientIp,
+    },
     body: JSON.stringify({
       sessionId: "chat-regression-quality",
       responseMode,
@@ -140,15 +143,24 @@ for (const prompt of prompts) {
   }
 
   if (prompt === "What is Shield for?") {
-    assert(/protect|safety|security|risky|guardrail/i.test(compact), "Shield answer did not describe protection.");
+    assert(
+      /protect|safety|security|risky|guardrail/i.test(compact),
+      "Shield answer did not describe protection.",
+    );
   }
 
   if (prompt === "What is Debugger for?") {
-    assert(/diagnos|debug|error|fix|failure/i.test(compact), "Debugger answer did not describe diagnosis.");
+    assert(
+      /diagnos|debug|error|fix|failure/i.test(compact),
+      "Debugger answer did not describe diagnosis.",
+    );
   }
 
   if (prompt === "What is Sandbox for?") {
-    assert(/isolat|experiment|simulation|test/i.test(compact), "Sandbox answer did not describe isolation.");
+    assert(
+      /isolat|experiment|simulation|test/i.test(compact),
+      "Sandbox answer did not describe isolation.",
+    );
   }
 }
 
@@ -170,9 +182,13 @@ const mythosText = await ask(
   mythosPrior,
 );
 const mythosCompact = mythosText.replace(/\s+/g, " ").trim();
-console.log(`\nPROMPT: Project Mythos retrieval derailment check\nRESPONSE: ${mythosCompact.slice(0, 500)}`);
+console.log(
+  `\nPROMPT: Project Mythos retrieval derailment check\nRESPONSE: ${mythosCompact.slice(0, 500)}`,
+);
 assert(
-  !mythosCompact.includes("SVANSAI uses a chat engine, routing logic, memory, retrieval"),
+  !mythosCompact.includes(
+    "SVANSAI uses a chat engine, routing logic, memory, retrieval",
+  ),
   "Roleplay was derailed by raw SVANSAI retrieval output.",
 );
 assert(
@@ -189,14 +205,18 @@ const noBulletsAck = await askTurn(
   qualityHistory,
   "For this chat, do not use bullets unless I ask. Talk like a person.",
 );
-console.log(`\nPROMPT: no-bullets preference\nRESPONSE: ${noBulletsAck.replace(/\s+/g, " ").slice(0, 300)}`);
+console.log(
+  `\nPROMPT: no-bullets preference\nRESPONSE: ${noBulletsAck.replace(/\s+/g, " ").slice(0, 300)}`,
+);
 
 const noBulletsAnswer = await askTurn(
   qualityHistory,
   "Explain why my AI keeps repeating itself.",
 );
 const noBulletsCompact = noBulletsAnswer.replace(/\s+/g, " ").trim();
-console.log(`\nPROMPT: no-bullets follow-through\nRESPONSE: ${noBulletsCompact.slice(0, 500)}`);
+console.log(
+  `\nPROMPT: no-bullets follow-through\nRESPONSE: ${noBulletsCompact.slice(0, 500)}`,
+);
 assert(
   !/(^|\n)\s*(?:[-*•]|\d+[.)])\s+/.test(noBulletsAnswer),
   "No-bullets preference was ignored.",
@@ -207,17 +227,25 @@ const firstBuild = await askTurn(
   followUpHistory,
   "I want SVANSAI to check its own brain before calling OpenAI. What part should I build first?",
 );
-console.log(`\nPROMPT: build-first setup\nRESPONSE: ${firstBuild.replace(/\s+/g, " ").slice(0, 500)}`);
+console.log(
+  `\nPROMPT: build-first setup\nRESPONSE: ${firstBuild.replace(/\s+/g, " ").slice(0, 500)}`,
+);
 
 const whyAnswer = await askTurn(followUpHistory, "why");
 const whyCompact = whyAnswer.replace(/\s+/g, " ").trim();
-console.log(`\nPROMPT: short follow-up why\nRESPONSE: ${whyCompact.slice(0, 500)}`);
+console.log(
+  `\nPROMPT: short follow-up why\nRESPONSE: ${whyCompact.slice(0, 500)}`,
+);
 assert(
-  !/what do you mean|could you clarify|specific topic|please elaborate/i.test(whyCompact),
+  !/what do you mean|could you clarify|specific topic|please elaborate/i.test(
+    whyCompact,
+  ),
   "Short follow-up 'why' was treated as standalone instead of contextual.",
 );
 assert(
-  /because|reason|first|before|foundation|depends|lets|lets you|allows/i.test(whyCompact),
+  /because|reason|first|before|foundation|depends|lets|lets you|allows/i.test(
+    whyCompact,
+  ),
   "Short follow-up 'why' did not explain the prior recommendation.",
 );
 
@@ -226,20 +254,28 @@ const fakeSetup = await askTurn(
   fakeHistory,
   "I feel like the conversations still are not up to par.",
 );
-console.log(`\nPROMPT: conversation quality complaint\nRESPONSE: ${fakeSetup.replace(/\s+/g, " ").slice(0, 400)}`);
+console.log(
+  `\nPROMPT: conversation quality complaint\nRESPONSE: ${fakeSetup.replace(/\s+/g, " ").slice(0, 400)}`,
+);
 
 const realFix = await askTurn(
   fakeHistory,
   "yeah exactly, it repeats and feels fake sometimes. so what is the real fix?",
 );
 const realFixCompact = realFix.replace(/\s+/g, " ").trim();
-console.log(`\nPROMPT: real fix for fake repetition\nRESPONSE: ${realFixCompact.slice(0, 600)}`);
+console.log(
+  `\nPROMPT: real fix for fake repetition\nRESPONSE: ${realFixCompact.slice(0, 600)}`,
+);
 assert(
-  !/i appreciate your feedback|let me know|specific topics or styles|i'm here to adapt/i.test(realFixCompact),
+  !/i appreciate your feedback|let me know|specific topics or styles|i'm here to adapt/i.test(
+    realFixCompact,
+  ),
   "Repetition complaint got generic reassurance instead of a real fix.",
 );
 assert(
-  /state|memory|critic|follow-up|repetition|prompt|learning|score|gate/i.test(realFixCompact),
+  /state|memory|critic|follow-up|repetition|prompt|learning|score|gate/i.test(
+    realFixCompact,
+  ),
   "Real-fix response did not name concrete engineering improvements.",
 );
 
@@ -262,7 +298,9 @@ const recallLetters = await ask(
   longQuizHistory,
 );
 const recallCompact = recallLetters.replace(/\s+/g, " ").trim();
-console.log(`\nPROMPT: long conversation letter recall\nRESPONSE: ${recallCompact.slice(0, 500)}`);
+console.log(
+  `\nPROMPT: long conversation letter recall\nRESPONSE: ${recallCompact.slice(0, 500)}`,
+);
 assert(
   /^1\.\s*C\b[\s\S]*25\.\s*C\b/.test(recallLetters),
   "Long conversation recall did not include all 25 letter answers.",
@@ -299,9 +337,13 @@ const refinementText = await askTurn(
   "direct",
 );
 const refinementCompact = refinementText.replace(/\s+/g, " ").trim();
-console.log(`\nPROMPT: writing refinement must bypass conversation recall\nRESPONSE: ${refinementCompact.slice(0, 500)}`);
+console.log(
+  `\nPROMPT: writing refinement must bypass conversation recall\nRESPONSE: ${refinementCompact.slice(0, 500)}`,
+);
 assert(
-  !/prior question-like messages|letter answers|loaded chat history/i.test(refinementCompact),
+  !/prior question-like messages|letter answers|loaded chat history/i.test(
+    refinementCompact,
+  ),
   "Writing refinement was hijacked by the conversation-recall shortcut.",
 );
 assert(
@@ -335,18 +377,65 @@ assert(
 
 const orchestrationResponse = await fetch(`${baseUrl}/api/chat`, {
   method: "POST",
-    headers: { "Content-Type": "application/json", "x-forwarded-for": testClientIp },
+  headers: {
+    "Content-Type": "application/json",
+    "x-forwarded-for": testClientIp,
+  },
   body: JSON.stringify({
     sessionId: "orchestration-regression",
     responseMode: "debug",
-    messages: [{ role: "user", content: "Debug this error: connection refused." }],
+    messages: [
+      { role: "user", content: "Debug this error: connection refused." },
+    ],
   }),
 });
 const orchestrationData = await orchestrationResponse.json();
-assert(orchestrationData?.orchestration?.route === "debug", "Debug request did not use the debug route.");
+assert(
+  orchestrationData?.orchestration?.route === "debug",
+  "Debug request did not use the debug route.",
+);
 assert(
   orchestrationData?.orchestration?.recommendedModules?.includes("debugger"),
   "Debug route did not recommend the Debugger platform module.",
+);
+assert(
+  orchestrationData?.orchestration?.mind?.primaryIntent === "debug",
+  "SVANS-Mind did not classify debug intent.",
+);
+assert(
+  Array.isArray(orchestrationData?.orchestration?.commandCenter),
+  "SVANS-Mind command center statuses were not returned.",
+);
+
+const educationOrchestrationResponse = await fetch(`${baseUrl}/api/chat`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-forwarded-for": testClientIp,
+  },
+  body: JSON.stringify({
+    sessionId: "mind-education-regression",
+    responseMode: "direct",
+    messages: [
+      {
+        role: "user",
+        content:
+          "What does bandwidth measure?\nGroup of answer choices\nStorage size\nScreen resolution\nData transfer speed\nPower usage",
+      },
+    ],
+  }),
+});
+const educationOrchestrationData = await educationOrchestrationResponse.json();
+assert(
+  educationOrchestrationData?.orchestration?.mind?.primaryIntent ===
+    "education",
+  "SVANS-Mind did not classify education intent.",
+);
+assert(
+  educationOrchestrationData?.orchestration?.commandCenter?.some((status) =>
+    /education solver/i.test(status),
+  ),
+  "Education request did not expose education solver status.",
 );
 
 console.log("\nMode and orchestration regression prompts completed.");

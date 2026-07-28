@@ -5,13 +5,23 @@ import type { WritingProfile } from "@/lib/personalization/writing-profile";
 import type { UserMemory } from "@/lib/personalization/structured-memory";
 import { selectModules, type ModuleDecision } from "@/lib/platform/modules";
 import {
+  buildSvansMindPlan,
+  formatSvansMindPlan,
+  type SvansMindPlan,
+} from "@/lib/platform/svans-mind";
+import {
   createRequestId,
   createRuntimeTelemetry,
   logConversationAnalytics,
   type RuntimeTelemetry,
 } from "@/lib/platform/telemetry";
 
-export type PlatformModule = "svans-ai" | "shield" | "debugger" | "sandbox";
+export type PlatformModule =
+  | "svans-ai"
+  | "shield"
+  | "debugger"
+  | "sandbox"
+  | "vos";
 export type TaskRoute =
   | "conversation"
   | "learn"
@@ -26,10 +36,22 @@ export type PlatformCapability =
   | "writing"
   | "web_research"
   | "image_analysis"
+  | "image_generation"
+  | "image_editing"
   | "document_analysis"
+  | "document_generation"
   | "code_assistance"
+  | "code_editing"
   | "data_analysis"
-  | "content_creation";
+  | "spreadsheet_generation"
+  | "content_creation"
+  | "local_workspace_access"
+  | "database_access"
+  | "email_calendar"
+  | "api_calls"
+  | "automation"
+  | "self_improvement"
+  | "permission_control";
 
 export type OrchestrationResult = {
   text: string;
@@ -40,6 +62,8 @@ export type OrchestrationResult = {
   moduleDecisions: ModuleDecision[];
   responseMode: ResponseMode;
   capabilities: PlatformCapability[];
+  mind: SvansMindPlan;
+  commandCenter: string[];
   analytics: {
     latencyMs: number;
     providerSelected?: string;
@@ -90,6 +114,12 @@ function chooseRoute(
   )
     return "build";
   if (
+    /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/.test(
+      normalized,
+    )
+  )
+    return "write";
+  if (
     /\b(rewrite|refine|proofread|grammar|write|email|reply|discussion post)\b/.test(
       normalized,
     )
@@ -113,6 +143,7 @@ function modulesForRoute(route: TaskRoute): PlatformModule[] {
   if (route === "protect") return ["svans-ai", "shield"];
   if (route === "debug") return ["svans-ai", "debugger"];
   if (route === "build") return ["svans-ai", "sandbox"];
+  if (route === "analyze") return ["svans-ai", "vos"];
   return ["svans-ai"];
 }
 
@@ -142,6 +173,17 @@ function capabilitiesForRequest(
   if (files.some((file) => file.type.startsWith("image/")))
     capabilities.add("image_analysis");
   if (
+    /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/.test(
+      normalized,
+    )
+  )
+    capabilities.add("image_generation");
+  if (
+    files.some((file) => file.type.startsWith("image/")) &&
+    /\b(edit|change|modify|cross|remove|add|replace)\b/.test(normalized)
+  )
+    capabilities.add("image_editing");
+  if (
     files.some(
       (file) =>
         file.type === "application/pdf" ||
@@ -169,10 +211,54 @@ function capabilitiesForRequest(
     )
   )
     capabilities.add("code_assistance");
+  if (
+    /\b(change the code|edit code|modify file|patch|commit)\b/.test(normalized)
+  )
+    capabilities.add("code_editing");
   if (/\b(data|csv|table|statistics|analyze numbers|chart)\b/.test(normalized))
     capabilities.add("data_analysis");
+  if (/\b(spreadsheet|excel|xlsx|csv|table)\b/.test(normalized))
+    capabilities.add("spreadsheet_generation");
+  if (/\b(document|docx|pdf|report|worksheet)\b/.test(normalized))
+    capabilities.add("document_generation");
   if (/\b(create|draft|generate|design|build)\b/.test(normalized))
     capabilities.add("content_creation");
+  if (
+    /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/.test(
+      normalized,
+    )
+  )
+    capabilities.add("content_creation");
+  if (
+    /\b(c drive|local folder|workspace|folder access|vos bridge|filesystem|file system)\b/.test(
+      normalized,
+    )
+  )
+    capabilities.add("local_workspace_access");
+  if (/\b(database|supabase|sql|table|schema)\b/.test(normalized))
+    capabilities.add("database_access");
+  if (
+    /\b(email|gmail|outlook|calendar|meeting|schedule invite|appointment)\b/.test(
+      normalized,
+    )
+  )
+    capabilities.add("email_calendar");
+  if (/\b(api|endpoint|webhook|external call)\b/.test(normalized))
+    capabilities.add("api_calls");
+  if (
+    /\b(automation|background job|schedule|monitor|reminder)\b/.test(normalized)
+  )
+    capabilities.add("automation");
+  if (
+    /\b(improve|self-improve|self improvement|failure|fallback|generic response|regression)\b/.test(
+      normalized,
+    )
+  )
+    capabilities.add("self_improvement");
+  if (
+    /\b(permission|access|owner approval|audit|full access)\b/.test(normalized)
+  )
+    capabilities.add("permission_control");
   return [...capabilities];
 }
 
@@ -198,6 +284,13 @@ export async function orchestrateChat(params: {
     Boolean(params.attachedFiles?.length),
   );
   const capabilities = capabilitiesForRequest(latestMessage, files);
+  const mind = buildSvansMindPlan({
+    messages: params.messages,
+    latestMessage,
+    attachedFiles: files,
+    responseMode: params.responseMode,
+    userMemories: params.userMemories ?? [],
+  });
   const moduleDecisions = selectModules({
     latestMessage,
     messages: params.messages,
@@ -216,6 +309,7 @@ export async function orchestrateChat(params: {
     params.writingProfile,
     params.userMemories,
     runtimeTelemetry,
+    formatSvansMindPlan(mind),
   );
   const latencyMs = Date.now() - startedAt;
   const analytics = {
@@ -270,6 +364,8 @@ export async function orchestrateChat(params: {
     moduleDecisions,
     responseMode: params.responseMode,
     capabilities,
+    mind,
+    commandCenter: mind.commandCenter,
     analytics,
   };
 }

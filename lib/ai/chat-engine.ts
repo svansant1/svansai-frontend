@@ -73,6 +73,11 @@ import {
   handleChecklistRequest,
   shouldExtractChecklistFromImages,
 } from "@/lib/ai/checklist-state";
+import {
+  formatGeneratedImageResponse,
+  generateImageWithOpenAI,
+  isImageGenerationRequest,
+} from "@/lib/ai/image-generation";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
@@ -1372,6 +1377,7 @@ export async function generateChatResponse(
   writingProfile?: WritingProfile | null,
   userMemories: UserMemory[] = [],
   runtimeTelemetry?: RuntimeTelemetry,
+  mindContext = "",
 ): Promise<string> {
   const fullMessages = sanitizeMessages(rawMessages, 250);
   const messages = fullMessages.slice(-20);
@@ -1522,6 +1528,15 @@ Do not claim you have no browsing ability. Say that live search did not return e
   if (messages.length === 1) {
     const upgradeNotice = await checkAndSurfaceUpgrades(sid);
     if (upgradeNotice) return upgradeNotice;
+  }
+
+  if (isImageGenerationRequest(latestUserMessage)) {
+    const generatedImage = await generateImageWithOpenAI(latestUserMessage);
+    if (generatedImage) {
+      return formatGeneratedImageResponse(generatedImage);
+    }
+
+    return "I can generate images, but the image provider did not return an image just now. Check that `OPENAI_API_KEY` is set and that the account has image-generation access, then try again with a clear prompt like “Generate a realistic photo of a blue delivery robot in a warehouse.”";
   }
 
   const lastAssistantMessage = getLastAssistantMessage(messages);
@@ -1821,6 +1836,7 @@ ${lastAssistantMessage}
       formatConversationState(conversationState),
       formatWritingProfile(writingProfile),
       formatUserMemories(userMemories),
+      mindContext,
       fileContext,
       liveSearchContext,
     ]
