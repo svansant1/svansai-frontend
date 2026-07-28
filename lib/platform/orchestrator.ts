@@ -152,6 +152,10 @@ function capabilitiesForRequest(
   files: AttachedFile[],
 ): PlatformCapability[] {
   const normalized = message.toLowerCase();
+  const looksLikeQuizBlock =
+    /\b(group of answer choices|answer choices|flag question|question\s+\d+|quiz|exam|test question)\b/i.test(
+      message,
+    );
   const capabilities = new Set<PlatformCapability>(["conversation"]);
   if (/\b(teach|learn|study|quiz|homework|explain|guide)\b/.test(normalized))
     capabilities.add("teaching");
@@ -256,6 +260,7 @@ function capabilitiesForRequest(
   )
     capabilities.add("self_improvement");
   if (
+    !looksLikeQuizBlock &&
     /\b(permission|access|owner approval|audit|full access)\b/.test(normalized)
   )
     capabilities.add("permission_control");

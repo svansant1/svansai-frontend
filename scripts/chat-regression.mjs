@@ -889,4 +889,25 @@ assert(
   "Education request did not expose education solver status.",
 );
 
+const oopBatchQuiz = await ask(
+  "An object is a(n) _____ of a class.\nGroup of answer choices\n\nchild\n\nrelative\n\ninstitution\n\ninstantiation\n\nFlag question: Question 2\nQuestion 210 pts\nHidden variables in a class are generally marked with\nGroup of answer choices\n\noverride.\n\nprotected.\n\nleading double underscore (__) in the variable name.\n\npublic.\n\nFlag question: Question 3\nQuestion 310 pts\n_____ methods provide access to data in hidden variables.\nGroup of answer choices\n\nHidden\n\nAccessor and mutator\n\nPrivate\n\nStatic\n\nFlag question: Question 4\nQuestion 410 pts\nTo create an instance of a Shape object in Python, you might use\nGroup of answer choices\n\nnew s1 Type = Rectangle.\n\ncreate object s1 Rectangle.\n\ns1 = Rectangle().\n\ns1 = new Rectangle.\n\nFlag question: Question 5\nQuestion 510 pts\nA constructor\nGroup of answer choices\n\nis always a static member.\n\nis a method that runs when an object is created.\n\nis an instance of a class that has just been created.\n\nis a special class that executes when an object is declared.",
+);
+const oopBatchQuizCompact = oopBatchQuiz.replace(/\s+/g, " ").trim();
+console.log(
+  `\nPROMPT: OOP batch quiz with access wording\nRESPONSE: ${oopBatchQuizCompact.slice(0, 700)}`,
+);
+assert(
+  /1\.\s*Instantiation/i.test(oopBatchQuiz) &&
+    /2\.\s*Leading double underscore/i.test(oopBatchQuiz) &&
+    /3\.\s*Accessor and mutator/i.test(oopBatchQuiz) &&
+    /4\.\s*s1\s*=\s*Rectangle\(\)/i.test(oopBatchQuiz) &&
+    /5\.\s*is a method that runs when an object is created/i.test(
+      oopBatchQuiz,
+    ) &&
+    !/permissioned through the local VOS desktop app|selected-folder access|full local access/i.test(
+      oopBatchQuizCompact,
+    ),
+  "OOP batch quiz was not answered directly or was hijacked by permission fallback.",
+);
+
 console.log("\nMode and orchestration regression prompts completed.");

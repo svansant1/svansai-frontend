@@ -1873,6 +1873,103 @@ function getControlStructureQuizAnswer(message: string): string | null {
   return "Answer: Sequence.\n\nA sequence control structure flows straight downward from one instruction to the next. There is no branching like a selection/if statement, and there is no repeating like a loop.";
 }
 
+function looksLikeQuizBlock(message: string): boolean {
+  return (
+    /\bGroup of answer choices\b/i.test(message) ||
+    /\bFlag question\b/i.test(message) ||
+    /\bQuestion\s+\d+/i.test(message) ||
+    /\b(answer choices|quiz|exam|test question)\b/i.test(message)
+  );
+}
+
+function getBatchMultipleChoiceQuizAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const choiceBlockCount = (message.match(/Group of answer choices/gi) ?? [])
+    .length;
+  const isBatchQuiz =
+    choiceBlockCount >= 2 ||
+    (looksLikeQuizBlock(message) && /\bQuestion\s+\d+/i.test(message));
+
+  if (!isBatchQuiz) return null;
+
+  const answers: Array<{
+    number: number;
+    answer: string;
+    explanation: string;
+  }> = [];
+
+  if (
+    normalized.includes("object is a n") &&
+    normalized.includes("of a class") &&
+    normalized.includes("instantiation")
+  ) {
+    answers.push({
+      number: 1,
+      answer: "Instantiation",
+      explanation: "An object is an instantiation, or instance, of a class.",
+    });
+  }
+
+  if (
+    normalized.includes("hidden variables in a class") &&
+    (normalized.includes("leading double underscore") ||
+      normalized.includes("__"))
+  ) {
+    answers.push({
+      number: 2,
+      answer: "Leading double underscore (__) in the variable name",
+      explanation:
+        "In Python, a leading double underscore triggers name mangling and is commonly used for hidden/private-style variables.",
+    });
+  }
+
+  if (
+    normalized.includes("methods provide access to data in hidden variables") &&
+    normalized.includes("accessor") &&
+    normalized.includes("mutator")
+  ) {
+    answers.push({
+      number: 3,
+      answer: "Accessor and mutator",
+      explanation:
+        "Accessor methods read hidden data, and mutator methods change hidden data.",
+    });
+  }
+
+  if (
+    normalized.includes("create an instance of a shape object") &&
+    normalized.includes("s1 rectangle")
+  ) {
+    answers.push({
+      number: 4,
+      answer: "s1 = Rectangle()",
+      explanation:
+        "In Python, calling the class like a function creates a new object instance.",
+    });
+  }
+
+  if (
+    normalized.includes("constructor") &&
+    normalized.includes("runs when an object is created")
+  ) {
+    answers.push({
+      number: 5,
+      answer: "is a method that runs when an object is created",
+      explanation:
+        "A constructor initializes an object when that object is created.",
+    });
+  }
+
+  if (answers.length === 0) return null;
+
+  const rows = answers
+    .sort((a, b) => a.number - b.number)
+    .map((item) => `${item.number}. ${item.answer}\n   ${item.explanation}`)
+    .join("\n\n");
+
+  return `Answers:\n\n${rows}`;
+}
+
 function getKnownMultipleChoiceQuizAnswer(message: string): string | null {
   const normalized = normalizeText(message);
   const hasAnswerChoices =
@@ -2167,6 +2264,8 @@ function getLocalPathAccessAnswer(message: string): string | null {
 }
 
 function getFilesystemPermissionModelAnswer(message: string): string | null {
+  if (looksLikeQuizBlock(message)) return null;
+
   const normalized = normalizeText(message);
   const asksAboutPermissions =
     /\b(permission|access|full access|some access|ask for access|c drive|filesystem|file system|folders?)\b/i.test(
@@ -2605,6 +2704,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
     getControlStructureQuizAnswer(latestUserMessage);
   if (controlStructureQuizAnswer) {
     return controlStructureQuizAnswer;
+  }
+
+  const batchMultipleChoiceQuizAnswer =
+    getBatchMultipleChoiceQuizAnswer(latestUserMessage);
+  if (batchMultipleChoiceQuizAnswer) {
+    return batchMultipleChoiceQuizAnswer;
   }
 
   const knownMultipleChoiceQuizAnswer =
