@@ -8,6 +8,17 @@ import {
   getTotalViews,
 } from "@/lib/db/engagement";
 import { supabase } from "@/lib/supabase";
+import {
+  getStarterQuoteMode,
+  initializeStarterQuoteIndex,
+  quoteAt,
+  randomQuoteIndex,
+  STARTER_QUOTE_CURRENT_KEY,
+  STARTER_QUOTE_MODE_KEY,
+  STARTER_QUOTE_PREVIOUS_KEY,
+  storedQuoteIndex,
+  type StarterQuoteMode,
+} from "@/lib/ui/starter-quotes";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -71,7 +82,6 @@ type MemoryCategory =
   | "personal_preference"
   | "project_context";
 type ProfileMemory = { id: string; category: MemoryCategory; summary: string };
-type StarterQuoteMode = "show" | "ask" | "off";
 
 type UserState = {
   id: string;
@@ -147,19 +157,6 @@ const RESPONSE_MODES: Array<{
     title: "Diagnose problems and find the smallest fix",
   },
 ];
-
-const STARTER_QUOTES = [
-  "Small steps still count when they are aimed in the right direction.",
-  "Learn the pattern, not just the answer.",
-  "A clear mind beats a rushed answer every time.",
-  "Build it calmly. Test it honestly. Improve it one layer at a time.",
-  "Progress gets easier when the next step is visible.",
-];
-
-function getStarterQuote() {
-  const index = new Date().getDate() % STARTER_QUOTES.length;
-  return STARTER_QUOTES[index];
-}
 
 function formatLabel(value: string) {
   return value
@@ -504,17 +501,23 @@ export default function AIHelper({
   );
   const [memorySummary, setMemorySummary] = useState("");
   const [starterQuoteMode, setStarterQuoteMode] = useState<StarterQuoteMode>(
-    () => {
-      if (typeof window === "undefined") return "ask";
-      const value = localStorage.getItem("svansai-starter-quote-mode");
-      if (value === "show" || value === "ask" || value === "off") return value;
-      return localStorage.getItem("SVANS-AI-show-starter-quote") === "false"
-        ? "off"
-        : "ask";
-    },
+    () => getStarterQuoteMode(),
   );
   const [starterQuoteAccepted, setStarterQuoteAccepted] = useState(false);
   const [starterQuoteDismissed, setStarterQuoteDismissed] = useState(false);
+  const [starterQuoteIndex, setStarterQuoteIndex] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    return (
+      storedQuoteIndex(STARTER_QUOTE_CURRENT_KEY) ??
+      initializeStarterQuoteIndex()
+    );
+  });
+  const [previousStarterQuoteIndex, setPreviousStarterQuoteIndex] = useState<
+    number | null
+  >(() => {
+    if (typeof window === "undefined") return null;
+    return storedQuoteIndex(STARTER_QUOTE_PREVIOUS_KEY);
+  });
   const [showAttachmentDetails, setShowAttachmentDetails] = useState(false);
   const attachedFile = attachedFiles[0] ?? null;
   const attachmentTotalKb = Math.round(
@@ -611,8 +614,26 @@ export default function AIHelper({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("svansai-starter-quote-mode", starterQuoteMode);
+    localStorage.setItem(STARTER_QUOTE_MODE_KEY, starterQuoteMode);
   }, [starterQuoteMode]);
+
+  useEffect(() => {
+    if (starterQuoteMode === "off" || conversationId) return;
+
+    window.setTimeout(() => {
+      if (starterQuoteMode === "ask" && !starterQuoteAccepted) {
+        notifyMascotMessage("Want a quote to start? Choose previous or new.");
+        return;
+      }
+
+      notifyMascotMessage(`“${quoteAt(starterQuoteIndex)}”`);
+    }, 250);
+  }, [
+    starterQuoteAccepted,
+    starterQuoteIndex,
+    starterQuoteMode,
+    conversationId,
+  ]);
 
   const handleModuleBadgeClick = (item: string) => {
     const normalized = item.toLowerCase();
@@ -800,6 +821,51 @@ export default function AIHelper({
         },
       }),
     );
+  };
+
+  const notifyMascotMessage = (message: string) => {
+    window.dispatchEvent(
+      new CustomEvent("sv-mascot-message", {
+        detail: { message },
+      }),
+    );
+  };
+
+  const showStarterQuote = (index = starterQuoteIndex) => {
+    const quote = quoteAt(index);
+    setStarterQuoteAccepted(true);
+    notifyMascotMessage(`“${quote}”`);
+  };
+
+  const chooseNewStarterQuote = () => {
+    const previous = starterQuoteIndex;
+    const next = randomQuoteIndex(previous);
+    setPreviousStarterQuoteIndex(previous);
+    setStarterQuoteIndex(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STARTER_QUOTE_PREVIOUS_KEY, String(previous));
+      localStorage.setItem(STARTER_QUOTE_CURRENT_KEY, String(next));
+    }
+    showStarterQuote(next);
+  };
+
+  const choosePreviousStarterQuote = () => {
+    if (previousStarterQuoteIndex === null) {
+      showStarterQuote(starterQuoteIndex);
+      return;
+    }
+
+    const current = starterQuoteIndex;
+    setStarterQuoteIndex(previousStarterQuoteIndex);
+    setPreviousStarterQuoteIndex(current);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(
+        STARTER_QUOTE_CURRENT_KEY,
+        String(previousStarterQuoteIndex),
+      );
+      localStorage.setItem(STARTER_QUOTE_PREVIOUS_KEY, String(current));
+    }
+    showStarterQuote(previousStarterQuoteIndex);
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1264,11 +1330,11 @@ export default function AIHelper({
                 </div>
                 {starterQuoteMode === "ask" && !starterQuoteAccepted ? (
                   <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>
-                    Would you like to start off with a quote?
+                    Would you like the previous quote or a new one?
                   </div>
                 ) : (
                   <div style={{ fontSize: "0.98rem", lineHeight: 1.55 }}>
-                    “{getStarterQuote()}”
+                    “{quoteAt(starterQuoteIndex)}”
                   </div>
                 )}
                 <div
@@ -1280,20 +1346,88 @@ export default function AIHelper({
                   }}
                 >
                   {starterQuoteMode === "ask" && !starterQuoteAccepted && (
-                    <button
-                      type="button"
-                      onClick={() => setStarterQuoteAccepted(true)}
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: "999px",
-                        border: "1px solid rgba(125,211,252,0.28)",
-                        background: "rgba(56,189,248,0.14)",
-                        color: "white",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Show quote
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={choosePreviousStarterQuote}
+                        disabled={previousStarterQuoteIndex === null}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(125,211,252,0.28)",
+                          background:
+                            previousStarterQuoteIndex === null
+                              ? "rgba(255,255,255,0.04)"
+                              : "rgba(56,189,248,0.14)",
+                          color:
+                            previousStarterQuoteIndex === null
+                              ? "rgba(255,255,255,0.42)"
+                              : "white",
+                          cursor:
+                            previousStarterQuoteIndex === null
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
+                      >
+                        Previous quote
+                      </button>
+                      <button
+                        type="button"
+                        onClick={chooseNewStarterQuote}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(125,211,252,0.28)",
+                          background: "rgba(56,189,248,0.14)",
+                          color: "white",
+                          cursor: "pointer",
+                        }}
+                      >
+                        New quote
+                      </button>
+                    </>
+                  )}
+                  {(starterQuoteMode !== "ask" || starterQuoteAccepted) && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={choosePreviousStarterQuote}
+                        disabled={previousStarterQuoteIndex === null}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(125,211,252,0.2)",
+                          background:
+                            previousStarterQuoteIndex === null
+                              ? "rgba(255,255,255,0.04)"
+                              : "rgba(255,255,255,0.06)",
+                          color:
+                            previousStarterQuoteIndex === null
+                              ? "rgba(255,255,255,0.42)"
+                              : "white",
+                          cursor:
+                            previousStarterQuoteIndex === null
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
+                      >
+                        Previous quote
+                      </button>
+                      <button
+                        type="button"
+                        onClick={chooseNewStarterQuote}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(125,211,252,0.28)",
+                          background: "rgba(56,189,248,0.14)",
+                          color: "white",
+                          cursor: "pointer",
+                        }}
+                      >
+                        New quote
+                      </button>
+                    </>
                   )}
                   <button
                     type="button"
@@ -1313,7 +1447,7 @@ export default function AIHelper({
                     type="button"
                     onClick={() => {
                       setStarterQuoteMode("show");
-                      setStarterQuoteAccepted(true);
+                      showStarterQuote();
                     }}
                     style={{
                       padding: "6px 10px",

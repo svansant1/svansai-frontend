@@ -71,11 +71,13 @@ export const PLATFORM_MODULES: PlatformModuleDefinition[] = [
     name: "shield",
     capabilities: ["conversation", "permission_control"],
     canHandle: (context) =>
-      context.route === "protect"
+      context.route === "protect" || /\bshield\b/i.test(context.latestMessage)
         ? decision(
             "shield",
-            0.95,
-            "Shield should review safety, abuse, privacy, or cybersecurity risk.",
+            context.route === "protect" ? 0.95 : 0.86,
+            /\bshield\b/i.test(context.latestMessage)
+              ? "Shield was explicitly requested and should review risk, secrets, permissions, and unsafe actions."
+              : "Shield should review safety, abuse, privacy, or cybersecurity risk.",
           )
         : decision(
             "shield",
@@ -88,13 +90,16 @@ export const PLATFORM_MODULES: PlatformModuleDefinition[] = [
     capabilities: ["code_assistance", "code_editing"],
     canHandle: (context) =>
       context.route === "debug" ||
+      /\bdebugger\b/i.test(context.latestMessage) ||
       /\b(error|bug|broken|stack trace|connection refused|debug)\b/i.test(
         context.latestMessage,
       )
         ? decision(
             "debugger",
-            0.9,
-            "Debugger should diagnose the symptom, cause, fix, and verification.",
+            context.route === "debug" ? 0.9 : 0.85,
+            /\bdebugger\b/i.test(context.latestMessage)
+              ? "Debugger was explicitly requested and should diagnose failures, broken builds, and test results."
+              : "Debugger should diagnose the symptom, cause, fix, and verification.",
           )
         : decision(
             "debugger",
@@ -107,6 +112,7 @@ export const PLATFORM_MODULES: PlatformModuleDefinition[] = [
     capabilities: ["code_assistance", "code_editing", "content_creation"],
     canHandle: (context) =>
       context.route === "build" ||
+      /\bsandbox\b/i.test(context.latestMessage) ||
       /\b(test|experiment|simulate|sandbox|prototype|build)\b/i.test(
         context.latestMessage,
       )
@@ -128,11 +134,15 @@ export const PLATFORM_MODULES: PlatformModuleDefinition[] = [
     ],
     canHandle: (context) =>
       context.capabilities.includes("local_workspace_access") ||
+      /\bvos\b/i.test(context.latestMessage) ||
+      /\bfolder-based\b/i.test(context.latestMessage) ||
       context.attachedFiles.some((file) => /[\\/]/.test(file.name))
         ? decision(
             "vos",
             0.88,
-            "VOS should broker local workspace, folder, and permission-scoped file access.",
+            /\bvos\b/i.test(context.latestMessage)
+              ? "VOS was explicitly requested and should broker local workspace, folder, and permission-scoped file access."
+              : "VOS should broker local workspace, folder, and permission-scoped file access.",
           )
         : decision("vos", 0.05, "VOS is not primary for this request."),
   },

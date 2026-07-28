@@ -230,7 +230,7 @@ function capabilitiesForRequest(
   )
     capabilities.add("content_creation");
   if (
-    /\b(c drive|local folder|workspace|folder access|vos bridge|filesystem|file system)\b/.test(
+    /\b(c drive|local folder|workspace|folder access|folder-based|vos|vos bridge|filesystem|file system)\b/.test(
       normalized,
     )
   )

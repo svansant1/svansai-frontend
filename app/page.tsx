@@ -20,6 +20,13 @@ import {
   getTotalViews,
   hasVisitorBeenCounted,
 } from "@/lib/db/engagement";
+import {
+  getStarterQuoteMode,
+  initializeStarterQuoteIndex,
+  quoteAt,
+  storedQuoteIndex,
+  STARTER_QUOTE_CURRENT_KEY,
+} from "@/lib/ui/starter-quotes";
 
 type AiUser = { id: string; email: string };
 type MascotPosition = { x: number; y: number };
@@ -86,6 +93,23 @@ export default function HomePage() {
   });
   const [dragging, setDragging] = useState(false);
   const [totalViews, setTotalViews] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mode = getStarterQuoteMode();
+    if (mode === "off") return;
+
+    const quoteIndex =
+      storedQuoteIndex(STARTER_QUOTE_CURRENT_KEY) ??
+      initializeStarterQuoteIndex();
+
+    setLastThought(
+      mode === "ask"
+        ? "Want a quote to start? Choose previous or new."
+        : `“${quoteAt(quoteIndex)}”`,
+    );
+  }, []);
 
   // ─── Ref tracks conversationId synchronously to prevent stale closures ────
   const activeConversationIdRef = useRef<string | null>(null);
@@ -230,11 +254,19 @@ export default function HomePage() {
         setLastThought(d?.message || "Ready to help.");
       }, 1800);
     };
+    const onMascotMessage = (e: Event) => {
+      const d = (e as CustomEvent<{ message: string }>).detail;
+      if (!d?.message) return;
+      setIsThinking(false);
+      setLastThought(d.message);
+    };
     window.addEventListener("sv-thinking-start", onStart);
     window.addEventListener("sv-thinking-end", onEnd);
+    window.addEventListener("sv-mascot-message", onMascotMessage);
     return () => {
       window.removeEventListener("sv-thinking-start", onStart);
       window.removeEventListener("sv-thinking-end", onEnd);
+      window.removeEventListener("sv-mascot-message", onMascotMessage);
     };
   }, []);
 

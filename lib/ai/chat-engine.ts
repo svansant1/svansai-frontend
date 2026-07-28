@@ -430,6 +430,27 @@ function getPreviousUserMessages(
     .map((message) => message.content);
 }
 
+function getDuplicateQuestionResponse(
+  latestUserMessage: string,
+  previousUserMessage: string,
+  lastAssistantMessage: string,
+): string | null {
+  if (!latestUserMessage || !previousUserMessage || !lastAssistantMessage)
+    return null;
+
+  const latest = normalizeText(latestUserMessage);
+  const previous = normalizeText(previousUserMessage);
+  const likelySame =
+    latest === previous ||
+    (latest.length > 80 &&
+      previous.length > 80 &&
+      (latest.includes(previous) || previous.includes(latest)));
+
+  if (!likelySame) return null;
+
+  return "You asked the same question again. Do you want me to expand on my last answer, make it more technical, or take a different angle?\n\nIf you want, I can also turn the last answer into an implementation workflow with inputs, outputs, permissions, and approval steps.";
+}
+
 function detectMessageIntent(message: string): MessageIntent {
   const normalized = normalizeText(message);
 
@@ -829,7 +850,7 @@ function getProjectModuleAnswer(message: string): string | null {
       normalized.includes("coding project");
 
     if (includesVos || folderProject) {
-      return "For a folder-based coding project, SVANS-AI should act as the coordinator and VOS should be the local workspace bridge.\n\nHere is the clean workflow:\n\n1. VOS gets permission-scoped access to the selected folder. It should read the folder tree, identify important files, and keep an audit trail of what was accessed. It should not write changes without owner approval.\n\n2. SVANS-AI decides the goal and routes the work. It should summarize the project, identify the active task, choose whether the request needs Debugger, Sandbox, Shield, or VOS, and explain the next best action.\n\n3. Debugger handles failures. If there are errors, broken builds, stack traces, bad responses, or failing tests, Debugger should isolate the cause and recommend the smallest fix.\n\n4. Sandbox runs experiments safely. New code, risky refactors, generated patches, and test runs should happen in an isolated workspace before anything touches the real project.\n\n5. Shield reviews risk. It should check secrets, unsafe commands, privacy issues, destructive file actions, dependency risks, and anything that needs owner approval.\n\nA practical loop would be: VOS reads the approved folder → SVANS-AI builds the plan → Debugger diagnoses issues → Sandbox tests possible fixes → Shield reviews safety → SVANS-AI presents the final recommendation or asks for approval before changes are applied.";
+      return 'For a folder-based coding project, SVANS-AI should coordinate the workflow, while VOS, Debugger, Sandbox, and Shield each return structured results instead of loose chat-only updates.\n\nOfficial workflow:\n\n1. VOS mounts the approved project folder read-only and records the access scope.\n2. SVANS-AI analyzes the request, identifies the active task, and creates an execution plan.\n3. VOS creates a versioned working copy or patch workspace before any edits happen.\n4. Debugger identifies failures, affected files, logs, stack traces, or likely root causes.\n5. Sandbox applies candidate patches and runs safe tests in isolation.\n6. Shield reviews commands, dependencies, secrets, privacy risk, destructive actions, and approval requirements.\n7. SVANS-AI presents the tested diff, risk summary, and recommendation to the owner.\n8. After approval, VOS applies the approved patch to the real folder.\n9. Sandbox runs final verification.\n10. VOS records the audit event and rollback point.\n\nNothing in that loop should pretend work happened before it actually does. If the folder has not been uploaded or connected through a VOS workspace bridge, SVANS-AI should say this is the coordination plan and ask for the folder/access step next.\n\nStructured handoff example:\n\n```json\n{\n  "target": "sandbox",\n  "action": "run_tests",\n  "scope": { "paths": ["src/", "tests/"] },\n  "approvalRequired": false\n}\n```';
     }
 
     return "SVANS-AI should coordinate the whole workflow, Shield should watch for risk, Debugger should inspect failures, and Sandbox should test changes safely. In practice: SVANS-AI decides the route, Debugger explains what broke, Sandbox tries fixes in isolation, Shield blocks unsafe actions, and SVANS-AI gives the next best action.";
@@ -854,6 +875,27 @@ function getProjectModuleAnswer(message: string): string | null {
     /\bwhat (is|does).*\bsandbox\b/.test(normalized)
   ) {
     return "Sandbox is the isolated experiment layer. It should let SVANS-AI test ideas, simulations, prompts, and code-like reasoning without treating the experiment as production truth.";
+  }
+
+  return null;
+}
+
+function getCalendarIntegrationAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  if (
+    !/\b(calendar|reminder|reminders|schedule|study reminders|gmail|outlook)\b/i.test(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    /\b(connect|connected|integration|later|schedule|reminders)\b/i.test(
+      normalized,
+    )
+  ) {
+    return "Calendar integration is a future permission-gated tool, not something I should pretend is already connected.\n\nFor now, I can help design the study reminder plan. Once calendar access is enabled, SVANS-AI should ask for permission, show the reminders it plans to create, and only add them after you approve.\n\nSuggested default plan:\n\n1. Monday, Wednesday, and Friday at 7:00 PM — 30-minute study block.\n2. Sunday at 6:00 PM — weekly review and catch-up.\n3. Add a reminder 15 minutes before each session.\n\nDo you want to use that default schedule, or change the days/times?";
   }
 
   return null;
@@ -1580,6 +1622,15 @@ Do not claim you have no browsing ability. Say that live search did not return e
     return buildNoRulesFramingResponse();
   }
 
+  if (!correctionRequest) {
+    const duplicateQuestionResponse = getDuplicateQuestionResponse(
+      latestUserMessage,
+      previousUserMessage,
+      lastAssistantMessage,
+    );
+    if (duplicateQuestionResponse) return duplicateQuestionResponse;
+  }
+
   const correctionClarification = getCorrectionClarification(
     latestUserMessage,
     previousUserMessage,
@@ -1606,6 +1657,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
   );
   if (conversationQualityAnswer) {
     return conversationQualityAnswer;
+  }
+
+  const calendarIntegrationAnswer =
+    getCalendarIntegrationAnswer(latestUserMessage);
+  if (calendarIntegrationAnswer) {
+    return calendarIntegrationAnswer;
   }
 
   const topicChoiceAnswer = getTopicChoiceAnswer(latestUserMessage);

@@ -145,6 +145,26 @@ function parseSimpleTypedList(text: string): ChecklistItem[] {
   return dedupeItems(parts.map((label) => ({ label, status: "pending" })));
 }
 
+function parseInlineListSetup(message: string): {
+  items: ChecklistItem[];
+  targets: string[];
+} | null {
+  const listMatch = message.match(
+    /\b(?:here is|here's|this is)\s+(?:my\s+)?(?:list|checklist)\s*:\s*([\s\S]+?)(?:\b(?:mark|cross|check|complete|finish)\b|$)/i,
+  );
+  if (!listMatch?.[1]) return null;
+
+  const items = parseSimpleTypedList(listMatch[1]);
+  if (!items.length) return null;
+
+  const commandMatch = message.match(
+    /\b(?:mark|cross|check|complete|finish)\b([\s\S]+?)(?:\b(?:completed|complete|done|finished|off|out)\b|$)/i,
+  );
+  const targets = commandMatch?.[1] ? splitTargets(commandMatch[1]) : [];
+
+  return { items, targets };
+}
+
 function looksLikeChecklistSetup(message: string, messages: ChatMessage[]) {
   if (WRITING_REVIEW_REQUEST.test(message)) return false;
 
@@ -402,11 +422,36 @@ export function handleChecklistRequest(
     getState(sessionId) ?? hydrateStateFromMessages(sessionId, messages);
 
   if (!state) {
+    const inlineSetup = parseInlineListSetup(message);
+    if (inlineSetup) {
+      state = setState(sessionId, inlineSetup.items, "text");
+      if (state && inlineSetup.targets.length) {
+        const { updatedItems } = markTargetsCompleted(
+          state,
+          inlineSetup.targets,
+        );
+        checklistSessions.set(sessionId, {
+          ...state,
+          items: updatedItems,
+          updatedAt: Date.now(),
+        });
+        return `Here is the updated active list for this chat:\n\n${formatChecklist(
+          updatedItems,
+        )}`;
+      }
+
+      if (state) {
+        return `Here is the active list for this chat:\n\n${formatChecklist(
+          state.items,
+        )}\n\nSend the completed items, and I’ll cross them off.`;
+      }
+    }
+
     const typedItems = parseSimpleTypedList(message);
     if (typedItems.length && looksLikeChecklistSetup(message, messages)) {
       state = setState(sessionId, typedItems, "text");
       if (state) {
-        return `Got it — I created an active checklist from those items.\n\nCurrent list:\n\n${formatChecklist(state.items)}\n\nSend the completed items, and I’ll cross them off.`;
+        return `Here is the active list for this chat:\n\n${formatChecklist(state.items)}\n\nSend the completed items, and I’ll cross them off.`;
       }
     }
   }
@@ -444,7 +489,7 @@ export function handleChecklistRequest(
         updatedAt: Date.now(),
       });
 
-      return `Done — I marked those completed.\n\nUpdated list:\n\n${formatChecklist(updatedItems)}${imageMarkerForState(
+      return `Updated active list for this chat:\n\n${formatChecklist(updatedItems)}${imageMarkerForState(
         {
           ...state,
           items: updatedItems,
@@ -475,7 +520,7 @@ export function handleChecklistRequest(
     updatedAt: Date.now(),
   });
 
-  return `Done — I crossed that off.\n\nUpdated list:\n\n${formatChecklist(updatedItems)}${imageMarkerForState(
+  return `Updated active list for this chat:\n\n${formatChecklist(updatedItems)}${imageMarkerForState(
     {
       ...state,
       items: updatedItems,

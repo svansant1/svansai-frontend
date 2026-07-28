@@ -296,6 +296,87 @@ assert(
   "Module coordination response did not include VOS/folder permission workflow.",
 );
 
+const moduleCoordinationResponse = await fetch(`${baseUrl}/api/chat`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-forwarded-for": testClientIp,
+  },
+  body: JSON.stringify({
+    sessionId: "module-coordination-regression",
+    responseMode: "auto",
+    messages: [
+      {
+        role: "user",
+        content:
+          "I want SVANS-AI, Shield, Debugger, Sandbox, and VOS to work together on a folder-based coding project. How should they coordinate?",
+      },
+    ],
+  }),
+});
+const moduleCoordinationData = await moduleCoordinationResponse.json();
+const recommendedModules =
+  moduleCoordinationData?.orchestration?.recommendedModules ?? [];
+assert(
+  ["svans-ai", "shield", "debugger", "sandbox", "vos"].every((module) =>
+    recommendedModules.includes(module),
+  ),
+  `Module badges missed one or more explicit modules. Got: ${recommendedModules.join(", ")}`,
+);
+
+const duplicateHistory = [];
+await askTurn(
+  duplicateHistory,
+  "I want SVANS-AI, Shield, Debugger, Sandbox, and VOS to work together on a folder-based coding project. How should they coordinate?",
+);
+const duplicateResponse = await askTurn(
+  duplicateHistory,
+  "I want SVANS-AI, Shield, Debugger, Sandbox, and VOS to work together on a folder-based coding project. How should they coordinate?",
+);
+assert(
+  /same question|expand|different angle|more technical/i.test(
+    duplicateResponse,
+  ),
+  "Repeated question was regenerated instead of handled as a duplicate.",
+);
+
+const calendarResponse = await ask(
+  "Can you connect this later to my calendar and schedule study reminders?",
+);
+assert(
+  /future|permission-gated|not.*already connected|once calendar access is enabled/i.test(
+    calendarResponse,
+  ) && /Monday|Wednesday|Friday|default|schedule/i.test(calendarResponse),
+  "Calendar response did not clearly state future permission-gated status with a proactive default.",
+);
+
+const checklistHistory = [];
+const checklistSetup = await askTurn(
+  checklistHistory,
+  "Here is my list: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10. Mark 3, 5, and 9 completed.",
+);
+assert(
+  /active list for this chat|updated active list/i.test(checklistSetup) &&
+    /\[x\].*3/i.test(checklistSetup) &&
+    /\[x\].*5/i.test(checklistSetup) &&
+    /\[x\].*9/i.test(checklistSetup),
+  "Checklist setup did not create/update active chat list honestly.",
+);
+const checklistLeft = await askTurn(checklistHistory, "What is left?");
+assert(
+  /1/i.test(checklistLeft) &&
+    /2/i.test(checklistLeft) &&
+    /4/i.test(checklistLeft) &&
+    /6/i.test(checklistLeft) &&
+    /7/i.test(checklistLeft) &&
+    /8/i.test(checklistLeft) &&
+    /10/i.test(checklistLeft) &&
+    !/3\b/.test(checklistLeft) &&
+    !/5\b/.test(checklistLeft) &&
+    !/9\b/.test(checklistLeft),
+  "Checklist follow-up did not preserve active task state.",
+);
+
 console.log("\nConversation quality regression prompts completed.");
 
 const longQuizHistory = [];

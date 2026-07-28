@@ -23,7 +23,11 @@ const CANNED_PHRASES = [
 ];
 
 function normalize(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function wordSet(text: string): Set<string> {
@@ -48,7 +52,10 @@ function similarity(a: string, b: string): number {
 }
 
 function lastAssistant(messages: ChatMessage[]): string {
-  return [...messages].reverse().find((message) => message.role === "assistant")?.content ?? "";
+  return (
+    [...messages].reverse().find((message) => message.role === "assistant")
+      ?.content ?? ""
+  );
 }
 
 function violatesNoBullets(response: string): boolean {
@@ -72,7 +79,9 @@ export function critiqueResponse(params: {
     reasons.push("response is too similar to the previous assistant answer");
   }
 
-  const cannedHits = CANNED_PHRASES.filter((phrase) => normalized.includes(phrase));
+  const cannedHits = CANNED_PHRASES.filter((phrase) =>
+    normalized.includes(phrase),
+  );
   if (cannedHits.length >= 2) {
     reasons.push(`response uses canned phrasing: ${cannedHits.join(", ")}`);
   }
@@ -86,7 +95,9 @@ export function critiqueResponse(params: {
 
   if (
     params.conversationState.isShortFollowUp &&
-    /\b(what do you mean|could you clarify|please elaborate|specific topic|specific concerns)\b/i.test(response)
+    /\b(what do you mean|could you clarify|please elaborate|specific topic|specific concerns)\b/i.test(
+      response,
+    )
   ) {
     reasons.push("response failed to resolve a context-dependent follow-up");
   }
@@ -99,7 +110,9 @@ export function critiqueResponse(params: {
       response,
     )
   ) {
-    reasons.push("response gives reassurance instead of the requested engineering fix");
+    reasons.push(
+      "response gives reassurance instead of the requested engineering fix",
+    );
   }
 
   if (
@@ -108,7 +121,46 @@ export function critiqueResponse(params: {
       response,
     )
   ) {
-    reasons.push("build-mode response lacks concrete implementation or verification detail");
+    reasons.push(
+      "build-mode response lacks concrete implementation or verification detail",
+    );
+  }
+
+  const namedModules = [
+    "SVANS-AI",
+    "Shield",
+    "Debugger",
+    "Sandbox",
+    "VOS",
+  ].filter((module) =>
+    new RegExp(`\\b${module.replace("-", "[- ]?")}\\b`, "i").test(
+      params.latestUserMessage,
+    ),
+  );
+  const missingModules = namedModules.filter(
+    (module) =>
+      !new RegExp(`\\b${module.replace("-", "[- ]?")}\\b`, "i").test(response),
+  );
+  if (missingModules.length) {
+    reasons.push(
+      `response omitted named component(s): ${missingModules.join(", ")}`,
+    );
+  }
+
+  if (
+    /\b(folder-based|workspace|local folder|c drive|vos)\b/i.test(
+      params.latestUserMessage,
+    ) &&
+    /\b(test(?:ed)?|ran|read|mounted|applied|modified|changed)\b/i.test(
+      response,
+    ) &&
+    !/\b(should|would|once|after approval|if|plan|workflow|needs|requires|not pretend|has not been)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push(
+      "response appears to claim tool/workspace actions happened without permission or evidence",
+    );
   }
 
   if (
@@ -117,7 +169,9 @@ export function critiqueResponse(params: {
       response,
     )
   ) {
-    reasons.push("debug-mode response lacks diagnosis, checks, or verification detail");
+    reasons.push(
+      "debug-mode response lacks diagnosis, checks, or verification detail",
+    );
   }
 
   if (
@@ -126,25 +180,32 @@ export function critiqueResponse(params: {
       response,
     )
   ) {
-    reasons.push("analysis response ignored the attached evidence and asked for information already provided");
+    reasons.push(
+      "analysis response ignored the attached evidence and asked for information already provided",
+    );
   }
 
-  const teachingFirst = /teaching-first|teach the concept|clue or checkpoint/i.test(
-    params.conversationState.modeBehavior,
-  );
-  const explicitDirect = /\b(just (give me|tell me)|direct answer|give me the answer|answer only|no hints)\b/i.test(
-    params.latestUserMessage,
-  );
-  const looksLikeQuiz = /\b([a-d][.)]\s|multiple choice|which (answer|option)|quiz)\b/i.test(
-    params.latestUserMessage,
-  );
+  const teachingFirst =
+    /teaching-first|teach the concept|clue or checkpoint/i.test(
+      params.conversationState.modeBehavior,
+    );
+  const explicitDirect =
+    /\b(just (give me|tell me)|direct answer|give me the answer|answer only|no hints)\b/i.test(
+      params.latestUserMessage,
+    );
+  const looksLikeQuiz =
+    /\b([a-d][.)]\s|multiple choice|which (answer|option)|quiz)\b/i.test(
+      params.latestUserMessage,
+    );
   if (
     teachingFirst &&
     !explicitDirect &&
     looksLikeQuiz &&
     /^(correct )?answer\s*:|^[a-d]\s*[—:-]/i.test(response)
   ) {
-    reasons.push("teaching-first mode revealed the quiz answer before offering a useful clue or reasoning step");
+    reasons.push(
+      "teaching-first mode revealed the quiz answer before offering a useful clue or reasoning step",
+    );
   }
 
   const score = Math.max(0, 1 - reasons.length * 0.28);
@@ -156,7 +217,9 @@ export function critiqueResponse(params: {
   };
 }
 
-export function buildCritiqueRetryInstruction(critique: ResponseCritique): string {
+export function buildCritiqueRetryInstruction(
+  critique: ResponseCritique,
+): string {
   if (critique.usable) return "";
 
   return `
