@@ -676,9 +676,9 @@ export default function HomePage() {
         style={{
           position: "absolute",
           top: isMobile ? 2 : 20,
-          left: isMobile ? size * 0.58 : size * 0.68,
-          minWidth: isMobile ? 118 : 164,
-          maxWidth: isMobile ? 150 : 230,
+          left: isMobile ? size * 0.72 : size * 0.88,
+          minWidth: isMobile ? 128 : 178,
+          maxWidth: isMobile ? 168 : 248,
           background:
             "linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,41,59,0.76))",
           border: "1px solid rgba(125,211,252,0.28)",
