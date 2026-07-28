@@ -1259,8 +1259,23 @@ export default function AIHelper({
                       gap: "6px",
                       flexWrap: "wrap",
                       marginBottom: "8px",
+                      alignItems: "center",
+                      paddingBottom: "6px",
+                      borderBottom: "1px solid rgba(125,211,252,0.1)",
                     }}
+                    aria-label="SVANS-AI module metadata"
                   >
+                    <span
+                      style={{
+                        color: "rgba(186,230,253,0.68)",
+                        fontSize: "0.66rem",
+                        fontWeight: 900,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Modules used
+                    </span>
                     {[
                       ...(msg.orchestration.recommendedModules ?? []),
                       ...(msg.orchestration.capabilities ?? []),

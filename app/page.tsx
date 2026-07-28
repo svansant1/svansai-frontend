@@ -79,6 +79,8 @@ export default function HomePage() {
   const [previousStarterQuoteIndex, setPreviousStarterQuoteIndex] = useState<
     number | null
   >(null);
+  const [showStarterQuoteControls, setShowStarterQuoteControls] =
+    useState(false);
 
   const [isMobile, setIsMobile] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -116,6 +118,7 @@ export default function HomePage() {
       initializeStarterQuoteIndex();
     setStarterQuoteIndex(quoteIndex);
     setPreviousStarterQuoteIndex(storedQuoteIndex(STARTER_QUOTE_PREVIOUS_KEY));
+    setShowStarterQuoteControls(mode === "ask");
 
     setLastThought(
       mode === "ask"
@@ -127,8 +130,12 @@ export default function HomePage() {
   const persistStarterQuoteMode = (
     mode: StarterQuoteMode,
     quoteIndex = starterQuoteIndex,
+    hideControls = true,
   ) => {
     setStarterQuoteMode(mode);
+    if (hideControls) {
+      setShowStarterQuoteControls(false);
+    }
     if (typeof window !== "undefined") {
       localStorage.setItem(STARTER_QUOTE_MODE_KEY, mode);
     }
@@ -1946,7 +1953,7 @@ export default function HomePage() {
         >
           <RobotMascot
             size={isMobile ? 118 : isShortDesktop ? 138 : 190}
-            showQuoteControls={!isThinking && starterQuoteMode !== "off"}
+            showQuoteControls={!isThinking && showStarterQuoteControls}
           />
         </motion.div>
 

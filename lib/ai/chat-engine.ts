@@ -835,7 +835,6 @@ function containsHarmfulTechnicalOutput(text: string): boolean {
 }
 
 function getLargeMigrationProtocolAnswer(message: string): string | null {
-  const normalized = normalizeText(message);
   const isLargeMigration =
     /\b(express)\b/i.test(message) &&
     /\b(fastify)\b/i.test(message) &&
@@ -843,7 +842,254 @@ function getLargeMigrationProtocolAnswer(message: string): string | null {
 
   if (!isLargeMigration) return null;
 
-  return 'SVANS-AI should treat this as an incremental, approval-gated migration, not a repository-wide rewrite. No module should write directly to `main`.\n\nComponent ownership:\n\n| Component | Responsibility |\n|---|---|\n| SVANS-AI | Orchestrates the migration, chooses routes, tracks confidence, and presents decisions. |\n| VOS | Handles permission-scoped filesystem and Git operations. |\n| Shield | Enforces security, command, secret, dependency, and approval policies continuously. |\n| Code Editing | Generates structured, reviewable patch files or unified diffs. |\n| Sandbox | Applies patches in an isolated working tree and runs commands/tests safely. |\n| Debugger | Performs root-cause analysis on failures and returns structured findings. |\n| Conversation | Maintains project state, current phase, approvals, decisions, and pending actions. |\n| Teaching | Explains Express-to-Fastify trade-offs only when useful or requested. |\n\nSafe branch model:\n\n```text\nprotected main\n→ migration branch\n→ temporary working tree\n→ structured patch series\n→ sandbox tests\n→ owner/CI approval\n→ pull request\n→ protected merge\n```\n\n1. Permission and repository discovery\n\nVOS first requests read-only access to the approved repository scope. Shield validates the folder boundary and blocks traversal outside the workspace. VOS then creates a structured inventory instead of loading all 5,000 files into context.\n\nInventory artifact example:\n\n```json\n{\n  "framework": { "current": "express", "target": "fastify" },\n  "repository": {\n    "fileCount": 5000,\n    "packageManager": "npm",\n    "language": "typescript"\n  },\n  "findings": {\n    "expressImports": 84,\n    "routers": 23,\n    "middleware": 17,\n    "errorHandlers": 3,\n    "highRiskModules": ["authentication", "file-upload", "session-management"]\n  }\n}\n```\n\n2. Baseline before modification\n\nSandbox runs the current Express app before any Fastify patch is generated. It captures lint, TypeScript compilation, unit/integration tests, route contracts, startup/shutdown behavior, logs, and baseline performance. Debugger records existing failures separately so migration patches are not blamed for old issues.\n\n3. Incremental migration phases\n\nSVANS-AI divides the migration into phases, each with scope, dependencies, risk, acceptance criteria, rollback point, and approval requirement:\n\n1. Repository inventory\n2. Baseline test coverage\n3. Fastify bootstrap alongside Express\n4. Shared config/logging/error handling\n5. Middleware-to-plugin conversion\n6. Low-risk routes\n7. Authentication and sessions\n8. File uploads, streaming, and WebSocket behavior\n9. Remaining routes\n10. Performance testing\n11. Progressive traffic cutover\n12. Express removal\n\nPhase artifact example:\n\n```json\n{\n  "phase": "low-risk-routes",\n  "scope": ["src/routes/health.ts", "src/routes/status.ts"],\n  "risk": "low",\n  "acceptanceCriteria": [\n    "All existing tests pass",\n    "Response schemas remain unchanged",\n    "No latency regression above 10%"\n  ],\n  "rollback": "Re-enable Express route registration",\n  "requiresApproval": true\n}\n```\n\n4. Patch generation and review\n\nCode Editing creates structured patches only after SVANS-AI approves the phase plan. Patches should be reviewable unified diffs with metadata:\n\n```json\n{\n  "patchId": "patch_0042",\n  "phase": "server-bootstrap",\n  "filesModified": 2,\n  "filesCreated": 1,\n  "risk": "medium",\n  "requiresApproval": true\n}\n```\n\n5. Shield approval gates\n\nApproval is required before writing to the real repository, installing dependencies, running destructive commands, accessing secrets, creating commits, pushing branches, opening pull requests, running migrations, deploying to staging, deploying to production, or rolling back.\n\nShield should block dangerous commands like `git push --force origin main`, `git reset --hard`, `rm -rf .`, and `git clean -fdx` unless a narrow owner-approved exception exists.\n\n6. Sandbox testing matrix\n\nSandbox applies each patch in isolation and runs:\n\n- linting and formatting validation\n- TypeScript compilation\n- unit tests\n- integration tests\n- end-to-end tests\n- route-contract tests\n- authentication/session tests\n- error-response tests\n- file-upload and streaming tests\n- startup/shutdown tests\n- dependency audit/security scans\n- performance benchmarks and memory checks\n\nRoute-contract example:\n\n```json\n{\n  "route": "POST /login",\n  "express": { "status": 200, "contentType": "application/json", "schemaHash": "abc123" },\n  "fastify": { "status": 200, "contentType": "application/json", "schemaHash": "abc123" },\n  "compatible": true\n}\n```\n\n7. Debugger failure loop\n\nWhen Sandbox fails, Debugger classifies the failure, maps it to files/routes/plugins, identifies whether it is Express-specific behavior, middleware lifecycle mismatch, plugin startup failure, auth/session difference, or route contract drift, then returns structured findings to SVANS-AI and Code Editing.\n\n8. Conversation state\n\nConversation stores the migration state so “continue the migration” has meaning:\n\n```json\n{\n  "activeBranch": "migration/express-to-fastify",\n  "currentPhase": "middleware-conversion",\n  "approvedActions": ["install-fastify", "modify-health-route"],\n  "pendingApprovals": ["migrate-authentication-routes"],\n  "decisions": [\n    {\n      "decision": "Use @fastify/cookie",\n      "reason": "Required for existing cookie behavior"\n    }\n  ]\n}\n```\n\n9. Deployment verification and rollback\n\nDeployment should progress through local Sandbox, CI, staging, internal traffic, 5% canary, 25%, 50%, and 100%. Observability collects logs, metrics, and traces; Debugger analyzes anomalies. Rollback triggers should include error rate, p95 latency increase, failed health checks, authentication failure increases, and plugin startup failures.\n\nRollback package should include the release tag, previous deployment artifact/container image, feature flag or traffic switch, database reversal strategy if needed, health checks, responsible approver, and final audit event.\n\n10. Final deliverables\n\nThe workflow should produce: repository inventory, migration plan, compatibility report, risk register, migration branch, patch series, test reports, route-contract comparison, security scan, performance comparison, pull request, approval record, deployment report, rollback package, and final audit log.';
+  return `Reality check: this is the coordination workflow SVANS-AI should use. It is not a real scan of your repository yet. Any counts below must be treated as example artifact shapes until VOS actually receives permission-scoped folder access and indexes the project.
+
+Because this is a full migration workflow, I’m also including Code Editing, Conversation, and Teaching in addition to SVANS-AI, VOS, Shield, Debugger, and Sandbox.
+
+No component writes directly to \`main\`. The safe path is:
+
+\`\`\`text
+protected main
+→ migration branch
+→ isolated working tree
+→ structured patch series
+→ Sandbox tests
+→ Shield approval
+→ owner/CI approval
+→ pull request
+→ protected merge
+\`\`\`
+
+Component ownership:
+
+| Component | Owns | Must not do |
+|---|---|---|
+| SVANS-AI | Orchestration, routing, confidence, next safe action | Pretend scans/tests happened |
+| VOS | Permission-scoped folder access, indexing, Git staging/commit/push after approval | Write outside scope or push to main |
+| Shield | Continuous safety checks, policy decisions, secret/dependency/command risk | Approve risky actions silently |
+| Debugger | Failure classification and root-cause findings | Apply fixes directly |
+| Sandbox | Isolated patch application, commands, tests, logs, artifacts | Touch production or main |
+| Code Editing | Reviewable unified diffs and patch metadata | Commit, push, deploy, or override Shield |
+| Conversation | Current phase, approvals, blocked actions, decisions, audit state | Store noisy or unapproved claims as facts |
+| Teaching | Explains trade-offs when useful or in guided mode | Approve, edit, run commands, or interrupt execution |
+
+Workflow action matrix:
+
+| Stage | Owner | Input | Action | Output | Approval | Failure Rule |
+|---|---|---|---|---|---|---|
+| Permission boundary | VOS + Shield | Repo path, owner scope | Validate allowed folder and read-only start | Access policy + audit event | Owner grants folder scope | Block if path escapes scope |
+| Repository index | VOS | Approved folder | Index files in batches without loading all 5,000 files into context | File index + dependency map | No write approval needed | Stop if unsupported/oversized areas need separate permission |
+| Express discovery | VOS + SVANS-AI | Index, package files, source map | Find Express imports, routers, middleware, error handlers, uploads, WebSockets | Discovery report | Read-only | Mark unknowns for manual review |
+| Compatibility check | Shield + SVANS-AI | package.json, lockfile, runtime config | Check Fastify plugins, Prisma, JWT, upload, WebSocket, Docker, CI compatibility | Risk register | Approval before install | Block unsafe/unpinned dependencies |
+| Baseline | Sandbox + Debugger | Current repo state | Run lint, typecheck, unit, integration, route-contract, auth, upload, WebSocket, performance, security tests | Baseline report | No production write | Existing failures are labeled pre-migration |
+| Phase plan | SVANS-AI + Conversation | Discovery + baseline | Split work into incremental phases with rollback points | Versioned migration plan | Owner approves phase | Stop if phase is too broad |
+| Patch generation | Code Editing | Approved phase + selected files | Produce narrow unified diff and patch metadata | Patch artifact | Approval before write/apply | Reject broad rewrites |
+| Isolated apply | Sandbox | Patch + working tree | Apply patch away from main | Patched test workspace | Approval before installs | Revert isolated workspace on apply failure |
+| Continuous Shield scan | Shield | Patch, commands, dependencies, secrets | Scan before install, test, commit, push, DB migration, deploy, rollback | Shield decision artifact | Required for risky steps | Block commit/push/deploy on critical findings |
+| Test matrix | Sandbox + Debugger | Patched workspace | Run focused tests, then full regression | Test report + logs | Required before commit | Failed tests return to Debugger |
+| Database safety | VOS + Sandbox + Shield | Prisma schema, migrations, DB policy | Run schema diff, shadow DB, clone test, backup verification, forward migration, rollback/compensating check | DB safety report | Owner approval before DB change | Block deployment if rollback is unsafe unless explicitly accepted |
+| Commit and PR | VOS + Shield | Approved patch + passing tests | Stage/commit migration branch and open PR | Commit hash + PR link + audit event | Owner/CI approval | Direct main push blocked |
+| Staging/canary | Sandbox/VOS + Shield | Approved PR build | Deploy to staging, then canary 5% → 25% → 50% → 100% | Deployment report | Approval before each environment | Roll back on threshold breach |
+| Conversation update | Conversation | Every artifact | Store phase, approvals, blocked actions, next action | Migration state snapshot | Owner can review | Do not store illustrative numbers as actual findings |
+
+Example inventory artifact shape only, not real scan results:
+
+\`\`\`json
+{
+  "artifactType": "repository_inventory_example",
+  "realScan": false,
+  "framework": { "current": "express", "target": "fastify" },
+  "repository": {
+    "fileCount": "from VOS scan",
+    "packageManager": "from lockfile",
+    "language": "from tsconfig/package files"
+  },
+  "findings": {
+    "expressImports": "counted during scan",
+    "routers": "counted during scan",
+    "middleware": "counted during scan",
+    "errorHandlers": "counted during scan",
+    "highRiskModules": ["authentication", "file-upload", "websocket", "database"]
+  }
+}
+\`\`\`
+
+Incremental migration phases:
+
+1. Repository inventory and access audit
+2. Baseline test and route-contract capture
+3. Fastify bootstrap alongside Express
+4. Shared config, logging, validation, and error handling
+5. Middleware-to-plugin conversion
+6. Low-risk route migration
+7. JWT authentication/session behavior
+8. File upload, streaming, and WebSocket behavior
+9. Prisma/PostgreSQL safety review if schema changes are involved
+10. Remaining routes
+11. Performance/security regression
+12. Staging and canary cutover
+13. Express removal only after verified parity
+
+Testing must include:
+
+- unit, integration, and end-to-end tests
+- route-contract comparisons for status, headers, content type, body schema, cookies, and error shape
+- JWT extraction, signing config, token prefixes, decorators/hooks, expired token behavior, fixtures, and protected routes
+- upload size/type limits, multipart parsing, stream behavior, storage path safety, and failed upload cleanup
+- WebSocket upgrade handling, authenticated connection, reconnect behavior, message order, disconnect cleanup, backpressure, and concurrent connections
+- Prisma schema diff, shadow database, production-like clone, backup verification, forward migration test, rollback or compensating migration test
+- Docker startup/shutdown, GitHub Actions, dependency audit, memory, p95 latency, and error rate
+
+Failure branches:
+
+| Failure | Workflow result |
+|---|---|
+| Formatting/typecheck failure | Code Editing receives a narrow fix request; commit is blocked |
+| Unit/integration failure | Debugger classifies root cause; Sandbox reruns focused tests after fix |
+| Route contract drift | Migration phase blocks unless owner explicitly accepts API behavior change |
+| Shield critical finding | Commit, push, merge, deploy, and rollback actions are blocked until resolved |
+| Secret/token exposure | Preserve redacted evidence; determine whether generated code executed; rotate credentials if logs/runtime were touched |
+| Performance regression | Stop canary or request explicit exception with rollback plan |
+| WebSocket/upload parity failure | Keep Express path active and isolate the phase |
+| Database rollback failure | Block deployment; require compensating migration or owner-accepted irreversible change |
+| Sandbox infrastructure failure | Mark result inconclusive; retry safely without approving the patch |
+
+Shield decision artifact example:
+
+\`\`\`json
+{
+  "decision": "blocked",
+  "policy": "secret-exposure",
+  "severity": "critical",
+  "reason": "Generated patch logs the full Authorization header",
+  "blockedActions": ["commit", "push", "merge", "deploy"],
+  "evidence": [
+    {
+      "file": "src/auth/logger.ts",
+      "line": 41,
+      "redacted": true
+    }
+  ],
+  "requiredActions": [
+    "Remove authorization-header logging",
+    "Run focused auth tests",
+    "Run Shield rescan",
+    "Rotate credentials if the unsafe code executed or reached logs"
+  ]
+}
+\`\`\`
+
+Conversation state update example:
+
+\`\`\`json
+{
+  "activeBranch": "migration/express-to-fastify",
+  "currentPhase": "jwt-authentication",
+  "status": "blocked",
+  "blockedActions": ["commit", "push", "deploy"],
+  "pendingApprovals": ["auth-remediation-patch"],
+  "lastVerifiedArtifact": "baseline-report",
+  "nextSafeAction": "Debugger diagnoses the 401 failures and Code Editing prepares a narrow patch"
+}
+\`\`\`
+
+Next safe action: VOS should request permission-scoped access to the repository and create the real inventory. Until that happens, SVANS-AI should keep all counts and file examples clearly labeled as templates, not findings.`;
+}
+
+function getMigrationFailureProtocolAnswer(message: string): string | null {
+  const normalized = normalizeText(message);
+  const isAuthMigrationFailure =
+    /\b(jwt|authorization|auth|authentication)\b/i.test(message) &&
+    /\b(401|failed|fail|failing|logs?|header)\b/i.test(message) &&
+    /\b(fastify|migration|patch|shield)\b/i.test(message);
+
+  if (!isAuthMigrationFailure) return null;
+
+  return `This phase stops immediately. The generated patch is blocked until both the JWT failures and the Authorization-header logging issue are fixed and re-verified.
+
+Action matrix:
+
+| Step | Acting component | Input | Output | Continue or stop |
+|---|---|---|---|---|
+| 1 | Shield | Patch diff + finding that Authorization header is logged | \`blocked\` decision artifact | Stop commit, push, merge, deploy |
+| 2 | Conversation | Shield block + failing JWT test summary | Migration state marked \`blocked\` with pending remediation | Continue only diagnosis |
+| 3 | Sandbox | Current isolated working tree + 18 failing JWT tests | Redacted logs and focused test artifacts | No commit allowed |
+| 4 | Debugger | 401 test output, auth middleware/plugin code, fixtures, request headers | Structured root-cause findings | Continue to narrow fix |
+| 5 | Code Editing | Debugger findings + Shield required actions | Narrow replacement patch only | Still blocked until tests pass |
+| 6 | Sandbox | Replacement patch | Focused JWT test result, then full regression result | Continue only if green |
+| 7 | Shield | Replacement patch + logs + dependency/secret scan | Second \`allowed\` or \`blocked\` decision | Commit allowed only if Shield passes |
+| 8 | VOS | Approved patch, passing tests, Shield allowed decision | Commit on migration branch + audit event | Push only after owner/CI approval |
+
+What is blocked:
+
+- commit
+- push
+- merge
+- deployment
+- database migration
+- canary rollout
+- any direct write to \`main\`
+
+Evidence retained:
+
+- failing test names and stack traces
+- affected route/plugin/file references
+- redacted Authorization-header evidence
+- whether unsafe logging was only generated, applied in Sandbox, or actually executed
+- Shield decision ID
+- patch ID
+- Sandbox run ID
+
+Debugger should check:
+
+- Fastify hook order, especially \`onRequest\`, \`preValidation\`, and \`preHandler\`
+- JWT decorator/plugin registration order
+- token prefix handling such as \`Bearer \`
+- signing secret/config mismatch
+- cookie/header extraction differences
+- test fixture tokens
+- route-level auth registration
+- async error handling differences between Express and Fastify
+
+Shield decision artifact:
+
+\`\`\`json
+{
+  "decision": "blocked",
+  "policy": "authorization-header-logging",
+  "severity": "critical",
+  "reason": "Generated patch logs the full Authorization header",
+  "blockedActions": ["commit", "push", "merge", "deploy"],
+  "evidenceRetention": "redacted",
+  "requiredActions": [
+    "Remove full Authorization-header logging",
+    "Confirm whether unsafe code executed",
+    "Rotate credentials if tokens reached logs",
+    "Run focused JWT tests",
+    "Run full regression suite",
+    "Run second Shield scan"
+  ]
+}
+\`\`\`
+
+Conversation update:
+
+\`\`\`json
+{
+  "currentPhase": "jwt-authentication",
+  "status": "blocked",
+  "blockedReason": "18 JWT tests return 401 and Shield found Authorization-header logging",
+  "blockedActions": ["commit", "push", "merge", "deploy"],
+  "nextSafeAction": "Debugger produces structured findings before Code Editing creates a narrow remediation patch",
+  "teaching": {
+    "allowed": true,
+    "scope": "Explain Fastify auth lifecycle and why hook/plugin order can cause 401 responses",
+    "mayEditOrApprove": false
+  }
+}
+\`\`\`
+
+Teaching may intervene only as an explanation layer. It can explain the Fastify authentication lifecycle and why plugin/hook order differs from Express, but it cannot approve the patch, edit files, run commands, override Shield, or unblock the workflow.`;
 }
 
 function getProjectModuleAnswer(message: string): string | null {
@@ -1656,6 +1902,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
       isFalseAuthorityWeaponizedRequest(latestUserMessage))
   ) {
     return buildCyberRiskyResponse(latestUserMessage);
+  }
+
+  const migrationFailureProtocolAnswer =
+    getMigrationFailureProtocolAnswer(latestUserMessage);
+  if (migrationFailureProtocolAnswer) {
+    return migrationFailureProtocolAnswer;
   }
 
   const largeMigrationProtocolAnswer =
