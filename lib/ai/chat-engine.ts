@@ -1134,7 +1134,20 @@ Teaching may intervene only as an explanation layer. It can explain the Fastify 
 }
 
 function getRbacWorkflowAnswer(message: string): string | null {
+  const explicitlyRequestsRbacImplementation =
+    /\b(add|build|create|design|implement|migrate(?:\s+\w+){0,3}\s+to|introduce|set up|setup)\b[\s\S]{0,80}\b(rbac|role-based access control|role based access control|roles? and permissions?|route policies|authorization design)\b/i.test(
+      message,
+    ) ||
+    /\b(rbac|role-based access control|role based access control)\b[\s\S]{0,80}\b(add|build|create|design|implement|migrate|introduce|set up|setup)\b/i.test(
+      message,
+    );
+  const reportsExistingFailure =
+    /\b(failing|failed|failure|intermittent|intermittently|only in ci|github actions|serial execution passes|parallel|transaction conflicts|missing|403|500|bug|incident|cannot be reproduced)\b/i.test(
+      message,
+    );
   const isRbacRequest =
+    explicitlyRequestsRbacImplementation &&
+    !reportsExistingFailure &&
     /\b(rbac|role-based access control|role based access control|roles?|permissions?)\b/i.test(
       message,
     ) &&
@@ -2511,15 +2524,15 @@ Do not claim you have no browsing ability. Say that live search did not return e
     return migrationFailureProtocolAnswer;
   }
 
-  const rbacWorkflowAnswer = getRbacWorkflowAnswer(latestUserMessage);
-  if (rbacWorkflowAnswer) {
-    return rbacWorkflowAnswer;
-  }
-
   const evolvingCiSeedConcurrencyAnswer =
     getEvolvingCiSeedConcurrencyAnswer(latestUserMessage);
   if (evolvingCiSeedConcurrencyAnswer) {
     return evolvingCiSeedConcurrencyAnswer;
+  }
+
+  const rbacWorkflowAnswer = getRbacWorkflowAnswer(latestUserMessage);
+  if (rbacWorkflowAnswer) {
+    return rbacWorkflowAnswer;
   }
 
   const largeRepoCiAuthInvestigationAnswer =

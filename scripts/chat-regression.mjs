@@ -639,8 +639,11 @@ assert(
     /No commit, push, merge, deploy/i.test(evolvingSeedConcurrencyCompact) &&
     !/Authorization-header logging issue|18 JWT tests return 401|Fastify hook order/i.test(
       evolvingSeedConcurrencyCompact,
+    ) &&
+    !/RBAC implementation workflow|RBAC design|Propose roles|route policy map|Prisma schema\/migrations|Commit to feature branch|prepare PR|Deployment verification/i.test(
+      evolvingSeedConcurrencyCompact,
     ),
-  "Evolving evidence seed-concurrency prompt was hijacked by stale JWT/header failure workflow.",
+  "Evolving evidence seed-concurrency prompt was hijacked by stale JWT/header or RBAC implementation workflow.",
 );
 
 const evolvingRepeatedHistory = [
