@@ -126,6 +126,10 @@ export function critiqueResponse(params: {
     );
   }
 
+  const relevanceMessage = params.latestUserMessage.replace(
+    /\byou are svans[- ]?ai assisting with highlighted text inside sv browser\.?\s*/gi,
+    "",
+  );
   const namedModules = [
     "SVANS-AI",
     "Shield",
@@ -134,7 +138,7 @@ export function critiqueResponse(params: {
     "VOS",
   ].filter((module) =>
     new RegExp(`\\b${module.replace("-", "[- ]?")}\\b`, "i").test(
-      params.latestUserMessage,
+      relevanceMessage,
     ),
   );
   const missingModules = namedModules.filter(
