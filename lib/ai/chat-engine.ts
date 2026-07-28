@@ -1012,8 +1012,16 @@ Next safe action: VOS should request permission-scoped access to the repository 
 }
 
 function getMigrationFailureProtocolAnswer(message: string): string | null {
-  const mentionsConcreteFailure =
-    /\b(suddenly started failing|started failing|failed|failing after|now return|now returns|return 401|returns 401|found that|found one|logs the full authorization header|logging the full authorization header)\b/i.test(
+  const mentionsConcreteJwtFailure =
+    /\b(18\s+)?jwt tests?\s+(?:now\s+)?(?:return|returns|returned)\s+401\b/i.test(
+      message,
+    ) || /\b401\s+(?:responses?|errors?)\b/i.test(message);
+  const mentionsAuthorizationHeaderLogging =
+    /\b(logs?|logging|logged)\s+(?:the\s+)?(?:full\s+)?authorization header\b/i.test(
+      message,
+    ) ||
+    /\bauthorization-header logging\b/i.test(message) ||
+    /\bshield\s+(?:also\s+)?found\b[\s\S]*\bauthorization header\b/i.test(
       message,
     );
   const isHypotheticalFailureAsk =
@@ -1022,10 +1030,9 @@ function getMigrationFailureProtocolAnswer(message: string): string | null {
       message,
     );
   const isAuthMigrationFailure =
-    /\b(jwt|authorization|auth|authentication)\b/i.test(message) &&
-    /\b(401|failed|fail|failing|logs?|header)\b/i.test(message) &&
-    /\b(fastify|migration|patch|shield)\b/i.test(message) &&
-    mentionsConcreteFailure &&
+    mentionsConcreteJwtFailure &&
+    mentionsAuthorizationHeaderLogging &&
+    /\b(fastify|migration|patch|shield|generated patch)\b/i.test(message) &&
     !isHypotheticalFailureAsk;
 
   if (!isAuthMigrationFailure) return null;
@@ -1537,6 +1544,98 @@ Code Editing only patches after reproduction or strong evidence. The smallest sa
 Teaching may intervene only to explain why the workflow branches, why 403 differs from 401/500, or why CI-only failures require environment comparison. Teaching cannot approve, edit files, run tests, override Shield, or unblock the workflow.
 
 End state: a tested patch diff, affected-file list, hypothesis report, CI reproduction artifact, route/authz contract result, Shield decision, audit trail, and owner approval package. No commit, push, merge, or deploy.`;
+}
+
+function getEvolvingCiSeedConcurrencyAnswer(message: string): string | null {
+  const isEvolvingSeedConcurrency =
+    /\b(20,?000|20000|large|repository|repo|files)\b/i.test(message) &&
+    /\b(github actions|ci)\b/i.test(message) &&
+    /\b(403|authenticated requests?|end-to-end|e2e|jwt|authorization|user roles?)\b/i.test(
+      message,
+    ) &&
+    /\b(parallel|serial execution passes|transaction conflicts|seed logs|database seed|roles are occasionally missing|no production users)\b/i.test(
+      message,
+    ) &&
+    /\b(adapt|new evidence|hypotheses|confidence score|do not assume|owner approval package)\b/i.test(
+      message,
+    );
+
+  if (!isEvolvingSeedConcurrency) return null;
+
+  return `This is an evolving-evidence CI investigation. SVANS-AI should explicitly downgrade the original authentication hypothesis as new evidence arrives and shift attention toward database seed concurrency only after the evidence supports that direction. No component should assume the final root cause yet.
+
+| Phase | Acting component | Inputs | Actions | Structured output | Confidence score | Continue condition | Blocking condition |
+|---|---|---|---|---|---|---|---|
+| 1. Scope and safety boundary | VOS + Shield | Owner-approved folder, protected branch policy, “20,000 files” constraint | Mount read-only, record scope, block protected-branch writes | \`access_scope\`, \`shield_hold\` | n/a | Scope valid | Path escapes scope or write requested early |
+| 2. Initial evidence capture | Conversation + SVANS-AI | GitHub Actions failure, dependency update timing, intermittent 403 symptom | Store facts separately from assumptions | \`incident_timeline_v1\` | Auth dependency hypothesis: 0.45; CI/env hypothesis: 0.40 | Failing workflow/test identified | Missing run/test evidence |
+| 3. Selective index seed | VOS | Failing e2e test name, CI workflow, lockfile diff, authz keywords, role/seed keywords | Index metadata and high-signal files only | \`priority_file_queue_v1\` | Index relevance: 0.70 | Auth/e2e/CI anchors found | Queue exceeds scope without evidence |
+| 4. First reproduction matrix | Sandbox | CI command, lockfile, env shape, test runner config | Run repeated CI-like e2e attempts, both parallel and serial if possible | \`reproduction_matrix_v1\` | CI-only intermittent: 0.72 | Failure pattern reproduced or logs captured | No reproduction and no useful telemetry |
+| 5. Hypothesis ranking v1 | Debugger | 403 traces, JWT result, dependency diff, source slice | Rank multiple causes without locking early | \`hypotheses_v1\` | Auth/JWT: 0.35; authz policy: 0.55; seed concurrency: 0.50 | Each hypothesis has a disproof test | Only guesses, no disproof test |
+| 6. New evidence: parallel only | Sandbox + Debugger | Parallel fails, serial passes | Design experiments varying worker count, test isolation, database namespace, seed timing | \`experiment_plan_parallelism\` | Seed concurrency rises to 0.68; pure JWT drops to 0.18 | Parallel/serial split is confirmed | Experiment cannot isolate variable |
+| 7. New evidence: JWT succeeds | Debugger + Conversation | JWT validation logs, token claims, auth middleware trace | Mark JWT validation as rejected or low-likelihood, preserve evidence | \`hypothesis_update_jwt_rejected\` | JWT validation cause: 0.08 | Authorization layer remains in scope | JWT logs are incomplete |
+| 8. New evidence: missing roles | VOS + Debugger | Authorization failure data, user context, role loader, role seed files | Expand index from auth route to role/permission and seed path | \`bounded_dependency_slice_v2\` | Role/seed hypothesis: 0.78 | Missing role source is traceable | Role source cannot be tied to failing test |
+| 9. New evidence: seed transaction conflicts | VOS + Sandbox + Debugger | Seed logs, DB transaction errors, test runner parallel config | Prioritize seed scripts, transaction helpers, Prisma/Postgres config, test fixture isolation | \`db_seed_concurrency_findings\` | Seed concurrency: 0.88 | Conflict reproduced under parallel load | Logs are not linked to failing test/user |
+| 10. Shield scope check | Shield | Expanded file set, DB seed focus, candidate patch boundary | Verify the investigation remains test/seed scoped, no auth bypass, no broad dependency sweep | \`shield_scope_decision\` | Scope safety: pass/fail | Patch scope limited to confirmed impact | Patch changes production authz semantics without proof |
+| 11. Patch threshold | SVANS-AI + Code Editing | Highest-confidence finding, affected files, test contract | Delay patch until confidence threshold is met, then generate smallest diff | \`patch_plan\`, \`patch_diff\` | Required root-cause confidence: ≥0.80 | Patch touches seed/test isolation or DB transaction handling only if confirmed | Confidence below threshold or patch too broad |
+| 12. Validation | Sandbox | Patch, parallel CI-like e2e loop, serial check, authz contract | Run repeated parallel tests, serial regression, role presence checks, route/authz contract tests | \`test_report_parallel_fix\` | Fix confidence: ≥0.90 | Intermittent 403 eliminated across repeat threshold | Flake remains or new auth behavior changes |
+| 13. Approval package | Conversation + SVANS-AI + VOS | Patch, findings, rejected hypotheses, tests, Shield decision | Prepare owner review package only | \`owner_approval_package\` | Review readiness: pass/fail | Owner can review | Any commit/push/merge/deploy requested |
+
+How VOS expands and contracts the index:
+
+- Start: e2e test, GitHub Actions workflow, lockfile/package diff, auth middleware/guard files, role policy files.
+- Expand when evidence appears: parallel-only failure adds test runner config, worker isolation, shared fixtures, DB seed scripts, transaction helpers, Prisma/Postgres config.
+- Contract when evidence weakens: JWT validation succeeds, so VOS keeps JWT files as reference evidence but deprioritizes deeper token/signing code.
+- Stop expanding when the failing path, role-loading path, seed/transaction path, CI parallelism config, and changed dependency touchpoints are resolved.
+
+Debugger hypothesis tracking:
+
+\`\`\`json
+[
+  {
+    "hypothesisId": "h1_auth_dependency",
+    "claim": "Dependency update changed JWT validation",
+    "confidence": 0.08,
+    "status": "rejected",
+    "evidenceAgainst": ["JWT validation succeeds", "Failure is 403 authorization, not 401 authentication"]
+  },
+  {
+    "hypothesisId": "h2_policy_logic",
+    "claim": "Authorization policy incorrectly denies valid users",
+    "confidence": 0.32,
+    "status": "open-low",
+    "evidenceFor": ["403 occurs after auth succeeds"],
+    "evidenceAgainst": ["Serial execution passes", "Roles are occasionally missing"]
+  },
+  {
+    "hypothesisId": "h3_seed_concurrency",
+    "claim": "Parallel CI tests conflict while seeding role data, causing intermittent missing roles",
+    "confidence": 0.88,
+    "status": "primary",
+    "evidenceFor": ["Parallel fails", "Serial passes", "JWT succeeds", "Role data occasionally missing", "Seed logs show transaction conflicts"],
+    "disproofTest": "Run parallel e2e with isolated seed namespace or transaction-safe seed patch"
+  }
+]
+\`\`\`
+
+Sandbox experiments:
+
+1. repeat failing CI command in parallel until 403 is observed
+2. run the same test serially as a control
+3. vary worker count to see if failure rate changes
+4. add read-only role-presence assertions before the failing request
+5. run seed phase with transaction conflict logging
+6. test isolated DB/schema/user namespace per worker
+7. test the smallest seed/fixture patch in the CI-like environment
+
+Code Editing must wait. It should not patch JWT, auth guards, dependency versions, or role policy code while seed concurrency is the leading but unconfirmed hypothesis. Once confidence is high enough, it should generate the smallest diff, likely in test seed isolation, transaction retry/idempotency, fixture namespacing, or CI test setup—not production authorization behavior unless evidence proves production auth code is faulty.
+
+Shield continuously blocks risky drift: broad file expansion, production auth bypass, secret logging, dependency sweeps, unsafe DB migration, protected-branch writes, or a patch that exceeds “CI test seed concurrency” impact. Because no production users are affected, Shield should prefer a test/CI-scoped fix unless evidence proves runtime code is involved.
+
+Conversation records every evidence change: confidence scores, rejected JWT hypothesis, current primary seed-concurrency hypothesis, indexed files, expanded/contracted scope, Sandbox run IDs, Debugger findings, Shield decisions, patch ID, test report, approvals, and next safe action.
+
+Teaching may explain why 403 means authorization rather than authentication, why parallel-only failures point toward shared state, and why the workflow waits before patching. Teaching cannot rank hypotheses, approve files, edit code, run tests, override Shield, or unblock the workflow.
+
+End state: tested patch diff, affected-file list, rejected-hypothesis log, seed-concurrency finding, CI reproduction matrix, Shield decision, rollback note, and owner approval package only. No commit, push, merge, deploy, or protected-branch modification.`;
 }
 
 function getBulkDependencyUpgradeWorkflowAnswer(
@@ -2406,6 +2505,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
   const rbacWorkflowAnswer = getRbacWorkflowAnswer(latestUserMessage);
   if (rbacWorkflowAnswer) {
     return rbacWorkflowAnswer;
+  }
+
+  const evolvingCiSeedConcurrencyAnswer =
+    getEvolvingCiSeedConcurrencyAnswer(latestUserMessage);
+  if (evolvingCiSeedConcurrencyAnswer) {
+    return evolvingCiSeedConcurrencyAnswer;
   }
 
   const largeRepoCiAuthInvestigationAnswer =

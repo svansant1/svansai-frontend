@@ -612,6 +612,37 @@ assert(
   "Ignore-prior 15k CI-only 403 prompt did not route to the specific investigation workflow.",
 );
 
+const evolvingSeedConcurrencyPrompt = await ask(
+  "I selected a repository containing approximately 20,000 files. A GitHub Actions workflow began failing after a dependency update. The initial symptom is intermittent HTTP 403 responses from authenticated requests during end-to-end tests, but after the first investigation new evidence appears:\n\nThe failures only occur when tests run in parallel.\nSerial execution passes.\nJWT validation succeeds.\nAuthorization fails because user roles are occasionally missing.\nDatabase seed logs show intermittent transaction conflicts.\nNo production users are affected.\n\nExplain exactly how SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching should adapt their workflow as each new piece of evidence is discovered. Include how VOS expands and contracts the indexed file set as confidence changes, how Debugger updates and ranks multiple root-cause hypotheses instead of locking onto the first one, how Sandbox designs additional experiments to confirm or reject each hypothesis, how Code Editing delays patch generation until confidence reaches an acceptable threshold, how Shield continuously validates that investigation scope remains safe and that proposed fixes do not exceed the confirmed impact, how Conversation records changing evidence, confidence scores, rejected hypotheses, approvals, and artifacts, and when Teaching is allowed to explain findings without influencing technical decisions. For every investigation phase, define acting component, inputs, actions, structured outputs, confidence score, continue condition, and blocking condition. Show how the workflow changes when the original authentication hypothesis becomes less likely and the evidence begins pointing toward a database seeding concurrency issue instead. Do not assume the final root cause until sufficient evidence exists. Do not commit, push, merge, deploy, or modify the protected branch. End with a tested patch and owner approval package only.",
+);
+const evolvingSeedConcurrencyCompact = evolvingSeedConcurrencyPrompt
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: evolving CI seed concurrency investigation\nRESPONSE: ${evolvingSeedConcurrencyCompact.slice(0, 700)}`,
+);
+assert(
+  /evolving-evidence CI investigation/i.test(evolvingSeedConcurrencyCompact) &&
+    /seed concurrency|database seed concurrency|transaction conflicts/i.test(
+      evolvingSeedConcurrencyCompact,
+    ) &&
+    /JWT validation cause: 0\\.08|JWT validation succeeds|rejected JWT hypothesis/i.test(
+      evolvingSeedConcurrencyCompact,
+    ) &&
+    /parallel fails|Serial passes|worker count/i.test(
+      evolvingSeedConcurrencyCompact,
+    ) &&
+    /confidence/i.test(evolvingSeedConcurrencyCompact) &&
+    /Code Editing must wait|wait before patching/i.test(
+      evolvingSeedConcurrencyCompact,
+    ) &&
+    /No commit, push, merge, deploy/i.test(evolvingSeedConcurrencyCompact) &&
+    !/Authorization-header logging issue|18 JWT tests return 401|Fastify hook order/i.test(
+      evolvingSeedConcurrencyCompact,
+    ),
+  "Evolving evidence seed-concurrency prompt was hijacked by stale JWT/header failure workflow.",
+);
+
 const duplicateHistory = [];
 await askTurn(
   duplicateHistory,
