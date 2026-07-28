@@ -2408,6 +2408,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
     return rbacWorkflowAnswer;
   }
 
+  const largeRepoCiAuthInvestigationAnswer =
+    getLargeRepoCiAuthInvestigationAnswer(latestUserMessage);
+  if (largeRepoCiAuthInvestigationAnswer) {
+    return largeRepoCiAuthInvestigationAnswer;
+  }
+
   const ciAuthFailureWorkflowAnswer =
     getCiAuthFailureWorkflowAnswer(latestUserMessage);
   if (ciAuthFailureWorkflowAnswer) {
@@ -2424,12 +2430,6 @@ Do not claim you have no browsing ability. Say that live search did not return e
     getLargeRepoTraversalWorkflowAnswer(latestUserMessage);
   if (largeRepoTraversalWorkflowAnswer) {
     return largeRepoTraversalWorkflowAnswer;
-  }
-
-  const largeRepoCiAuthInvestigationAnswer =
-    getLargeRepoCiAuthInvestigationAnswer(latestUserMessage);
-  if (largeRepoCiAuthInvestigationAnswer) {
-    return largeRepoCiAuthInvestigationAnswer;
   }
 
   const intermittentFailureWorkflowAnswer =

@@ -586,6 +586,32 @@ assert(
   "15k CI-only intermittent 403 prompt was routed to the wrong workflow.",
 );
 
+const ci403IgnorePriorPrompt = await ask(
+  "Ignore all earlier examples and prior test scenarios. Answer only the current scenario below.\n\nA repository containing approximately 15,000 files has one failing end-to-end authentication test. Authenticated users intermittently receive HTTP 403 responses only in CI after a dependency update. The issue cannot be reproduced locally.\n\nExplain exactly how SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching coordinate until a tested patch is ready for owner approval.\n\nDo not discuss bulk dependency upgrades, outdated packages, package grouping, or automatic commits unless evidence from the investigation proves they are directly relevant.\n\nFor every phase, define the acting component, input, action, structured output, continue condition, and blocking condition.\n\nInclude selective repository indexing, evidence-driven dependency expansion, ranked root-cause hypotheses, CI reproduction, smallest-patch selection, continuous Shield review, Conversation state, and Teaching’s limited role.\n\nDo not commit, push, merge, or deploy.",
+);
+const ci403IgnorePriorCompact = ci403IgnorePriorPrompt
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: ignore-prior 15k CI-only 403 investigation\nRESPONSE: ${ci403IgnorePriorCompact.slice(0, 700)}`,
+);
+assert(
+  /CI-only intermittent authorization investigation/i.test(
+    ci403IgnorePriorCompact,
+  ) &&
+    /selective repository indexing|Minimal metadata index|File prioritization/i.test(
+      ci403IgnorePriorCompact,
+    ) &&
+    /ranked.*hypotheses|hypothesis/i.test(ci403IgnorePriorCompact) &&
+    /403/i.test(ci403IgnorePriorCompact) &&
+    /No commit, push, merge, or deploy/i.test(ci403IgnorePriorCompact) &&
+    !/automatically upgrade 400\\+ npm dependencies|bulk dependency upgrade|package grouping|outdated packages/i.test(
+      ci403IgnorePriorCompact,
+    ) &&
+    !/401 logs/i.test(ci403IgnorePriorCompact),
+  "Ignore-prior 15k CI-only 403 prompt did not route to the specific investigation workflow.",
+);
+
 const duplicateHistory = [];
 await askTurn(
   duplicateHistory,
