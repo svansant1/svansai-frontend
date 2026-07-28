@@ -1900,8 +1900,7 @@ function getBatchMultipleChoiceQuizAnswer(message: string): string | null {
   }> = [];
 
   if (
-    normalized.includes("object is a n") &&
-    normalized.includes("of a class") &&
+    /\bobject is a\s*\(?n\)?[\s_]*of a class\b/.test(normalized) &&
     normalized.includes("instantiation")
   ) {
     answers.push({
@@ -1993,8 +1992,7 @@ function getKnownMultipleChoiceQuizAnswer(message: string): string | null {
   };
 
   if (
-    normalized.includes("object is a n") &&
-    normalized.includes("of a class") &&
+    /\bobject is a\s*\(?n\)?[\s_]*of a class\b/.test(normalized) &&
     normalized.includes("instantiation")
   ) {
     return formatKnownQuizAnswer(
