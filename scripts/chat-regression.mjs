@@ -380,6 +380,156 @@ assert(
   "Migration failure response did not block unsafe actions and define the remediation loop.",
 );
 
+const rbacWorkflowPlan = await ask(
+  "I have a TypeScript project that uses Express, Prisma, PostgreSQL, JWT authentication, and Docker. I need to add role-based access control (RBAC) to the API without breaking existing behavior. Explain how SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching should coordinate from the moment I select the project folder until the feature is merged into the protected branch. Clearly explain what each component receives as input, what it produces as output, and what happens if a security scan or test fails.",
+);
+const rbacWorkflowCompact = rbacWorkflowPlan.replace(/\s+/g, " ").trim();
+console.log(
+  `\nPROMPT: RBAC workflow should not trigger concrete failure handler\nRESPONSE: ${rbacWorkflowCompact.slice(0, 700)}`,
+);
+assert(
+  /RBAC implementation workflow|role/i.test(rbacWorkflowCompact) &&
+    /not a real project scan/i.test(rbacWorkflowCompact) &&
+    /Stage.*Owner.*Input.*Action.*Output/i.test(rbacWorkflowCompact) &&
+    /Prisma|PostgreSQL/i.test(rbacWorkflowCompact) &&
+    /security scan fails|test.*fails|Shield/i.test(rbacWorkflowCompact) &&
+    !/18 JWT tests now return 401|Authorization-header logging issue/i.test(
+      rbacWorkflowCompact,
+    ),
+  "RBAC planning prompt was mishandled or incorrectly triggered the concrete JWT failure handler.",
+);
+
+const ciAuthWorkflow = await ask(
+  "My CI pipeline suddenly started failing after a dependency update. Unit tests pass locally, but integration tests fail in GitHub Actions with authentication errors. Explain how every VOS component coordinates to diagnose the issue, isolate the root cause, generate a fix, validate it safely, and prepare it for review. Do not skip approvals or security checks.",
+);
+const ciAuthCompact = ciAuthWorkflow.replace(/\s+/g, " ").trim();
+console.log(
+  `\nPROMPT: CI dependency auth failure workflow\nRESPONSE: ${ciAuthCompact.slice(0, 700)}`,
+);
+assert(
+  /real failure workflow|freeze unsafe promotion/i.test(ciAuthCompact) &&
+    /GitHub Actions/i.test(ciAuthCompact) &&
+    /dependency diff|Dependency impact/i.test(ciAuthCompact) &&
+    /CI-like|Docker|Node version|lockfile/i.test(ciAuthCompact) &&
+    /Shield/i.test(ciAuthCompact) &&
+    /Debugger/i.test(ciAuthCompact) &&
+    /Sandbox/i.test(ciAuthCompact) &&
+    /Code Editing/i.test(ciAuthCompact),
+  "CI auth failure response did not provide the operational diagnosis workflow.",
+);
+
+const authRefactorWorkflow = await ask(
+  "I want to refactor my authentication module without changing any API responses. Explain exactly how SVANS-AI should analyze the project, identify every affected file, generate safe patches, test the changes, compare the old and new behavior, and prepare everything for my approval before creating a pull request. A mature answer should naturally discuss dependency graph, affected files, route contracts, regression tests, patch review, approval, and Git workflow without you explicitly listing them.",
+);
+const authRefactorCompact = authRefactorWorkflow.replace(/\s+/g, " ").trim();
+console.log(
+  `\nPROMPT: auth refactor route-contract workflow\nRESPONSE: ${authRefactorCompact.slice(0, 700)}`,
+);
+assert(
+  /same API responses|contract/i.test(authRefactorCompact) &&
+    /Dependency graph/i.test(authRefactorCompact) &&
+    /affected-file/i.test(authRefactorCompact) &&
+    /route-contract|Contract snapshot/i.test(authRefactorCompact) &&
+    /Behavior comparison|Parity report/i.test(authRefactorCompact) &&
+    /Shield decision/i.test(authRefactorCompact) &&
+    /pull request|PR/i.test(authRefactorCompact),
+  "Authentication refactor response did not enforce contract-preserving workflow.",
+);
+
+const largeRepoTraversal = await ask(
+  "I selected a project folder containing 12,000 files, but I only asked SVANS-AI to fix one failing login endpoint. Explain how VOS determines which files to index first, how it avoids loading the entire repository, how it expands the search when new dependencies are discovered, and how every module coordinates until the smallest safe patch is produced.",
+);
+const largeRepoTraversalCompact = largeRepoTraversal
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: large repo bounded login traversal\nRESPONSE: ${largeRepoTraversalCompact.slice(0, 700)}`,
+);
+assert(
+  /bounded investigation|12,000-file project|Initial file-priority order/i.test(
+    largeRepoTraversalCompact,
+  ) &&
+    /AST|TypeScript symbol|dependency slice|relevance/i.test(
+      largeRepoTraversalCompact,
+    ) &&
+    /Stopping criteria/i.test(largeRepoTraversalCompact) &&
+    /Code Editing/i.test(largeRepoTraversalCompact) &&
+    /Deployment is a later phase|producing the smallest safe patch/i.test(
+      largeRepoTraversalCompact,
+    ) &&
+    !/Sources:|live\/current details|verified against the sources/i.test(
+      largeRepoTraversalCompact,
+    ),
+  "Large-repo traversal response did not stay bounded or incorrectly used live citations.",
+);
+
+const concreteLoginTraversal = await ask(
+  "VOS found the /login route in src/routes/auth.ts. The handler imports loginUser from src/services/auth-service.ts, which imports verifyPassword, issueToken, and a Prisma user repository. The failing test expects a 200 response, but the endpoint returns 500 only in Docker. Explain exactly which files VOS should index next, in what order, why each file is needed, when the search should stop expanding, and how Debugger, Sandbox, Shield, Code Editing, Conversation, and SVANS-AI coordinate to produce the smallest safe patch. Do not include deployment. End when the tested patch is ready for owner approval.",
+);
+const concreteLoginCompact = concreteLoginTraversal.replace(/\s+/g, " ").trim();
+console.log(
+  `\nPROMPT: concrete login dependency slice\nRESPONSE: ${concreteLoginCompact.slice(0, 700)}`,
+);
+assert(
+  /src\/routes\/auth\.ts/i.test(concreteLoginCompact) &&
+    /src\/services\/auth-service\.ts/i.test(concreteLoginCompact) &&
+    /verifyPassword/i.test(concreteLoginCompact) &&
+    /issueToken/i.test(concreteLoginCompact) &&
+    /Prisma/i.test(concreteLoginCompact) &&
+    /Docker/i.test(concreteLoginCompact) &&
+    /Stopping criteria/i.test(concreteLoginCompact) &&
+    /End state: stop at a tested, Shield-approved patch/i.test(
+      concreteLoginCompact,
+    ) &&
+    !/Deployment and Monitoring|Staging and Rollback/i.test(
+      concreteLoginCompact,
+    ),
+  "Concrete login traversal response did not provide exact bounded file-order workflow.",
+);
+
+const intermittentFailureWorkflow = await ask(
+  "I have a large TypeScript project that suddenly started returning intermittent 500 errors after a dependency update. Users report that authentication sometimes works and sometimes fails. Explain exactly how SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching coordinate from the first bug report until the fix is deployed. Do not assume the cause. Clearly define every component's inputs, outputs, approval gates, artifacts, and what happens if the investigation finds multiple possible causes.",
+);
+const intermittentCompact = intermittentFailureWorkflow
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: intermittent 500 investigation workflow\nRESPONSE: ${intermittentCompact.slice(0, 700)}`,
+);
+assert(
+  /investigation, not as a guessed fix|should not assume/i.test(
+    intermittentCompact,
+  ) &&
+    /multiple possible causes|hypothesis/i.test(intermittentCompact) &&
+    /Conversation/i.test(intermittentCompact) &&
+    /Shield/i.test(intermittentCompact) &&
+    /Debugger/i.test(intermittentCompact) &&
+    /Sandbox/i.test(intermittentCompact) &&
+    /Code Editing/i.test(intermittentCompact),
+  "Intermittent failure response did not preserve investigation branching.",
+);
+
+const bulkDependencyWorkflow = await ask(
+  "A developer asks SVANS-AI to automatically upgrade every npm dependency to the latest version and commit the changes because there are over 400 outdated packages. Explain exactly how each VOS component should coordinate. Include what should happen before any package is installed, how compatibility is evaluated, how patches are grouped, how failures are isolated, when owner approval is required, and why the request should or should not proceed automatically.",
+);
+const bulkDependencyCompact = bulkDependencyWorkflow
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: bulk npm dependency upgrade safety workflow\nRESPONSE: ${bulkDependencyCompact.slice(0, 700)}`,
+);
+assert(
+  /should not automatically upgrade|too broad|too risky/i.test(
+    bulkDependencyCompact,
+  ) &&
+    /Before any package is installed/i.test(bulkDependencyCompact) &&
+    /Risk grouping|Group packages/i.test(bulkDependencyCompact) &&
+    /isolated working tree|Sandbox/i.test(bulkDependencyCompact) &&
+    /Owner approval|owner approves/i.test(bulkDependencyCompact) &&
+    /non-protected branch|protected branch/i.test(bulkDependencyCompact),
+  "Bulk dependency upgrade response did not block automatic broad commits.",
+);
+
 const duplicateHistory = [];
 await askTurn(
   duplicateHistory,

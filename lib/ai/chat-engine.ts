@@ -236,12 +236,27 @@ const LIVE_INFO_PATTERNS = [
 
 function needsLiveSearch(message: string): boolean {
   const lower = message.toLowerCase();
+  const hasUrl =
+    /\bhttps?:\/\/\S+/i.test(message) ||
+    /\bwww\.[a-z0-9-]+(?:\.[a-z]{2,})(?:\/[^\s]*)?\b/i.test(message);
+  const explicitlyRequestsWeb =
+    /\b(search|browse|look up|lookup|internet|web|website|site|url|domain|online)\b/i.test(
+      message,
+    );
+  const isLocalRepositoryWorkflow =
+    /\b(project|repo|repository|folder|files?|typescript|javascript|node|npm|express|prisma|postgres|postgresql|jwt|api|endpoint|route|vos|svans-ai|sandbox|debugger|shield|code editing)\b/i.test(
+      message,
+    ) &&
+    /\b(index|dependency graph|patch|test|debug|refactor|fix|ci|github actions|workflow|coordinate|component|approval|protected branch|pull request|pr)\b/i.test(
+      message,
+    );
+
+  if (isLocalRepositoryWorkflow && !hasUrl && !explicitlyRequestsWeb) {
+    return false;
+  }
 
   return (
-    LIVE_INFO_PATTERNS.some((pattern) => lower.includes(pattern)) ||
-    /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z]{2,})(?:\/[^\s]*)?\b/i.test(
-      message,
-    )
+    LIVE_INFO_PATTERNS.some((pattern) => lower.includes(pattern)) || hasUrl
   );
 }
 
@@ -997,11 +1012,21 @@ Next safe action: VOS should request permission-scoped access to the repository 
 }
 
 function getMigrationFailureProtocolAnswer(message: string): string | null {
-  const normalized = normalizeText(message);
+  const mentionsConcreteFailure =
+    /\b(suddenly started failing|started failing|failed|failing after|now return|now returns|return 401|returns 401|found that|found one|logs the full authorization header|logging the full authorization header)\b/i.test(
+      message,
+    );
+  const isHypotheticalFailureAsk =
+    /\bwhat happens if\b/i.test(message) ||
+    /\bif (?:a )?(?:security scan|test|tests|security check|check) fails?\b/i.test(
+      message,
+    );
   const isAuthMigrationFailure =
     /\b(jwt|authorization|auth|authentication)\b/i.test(message) &&
     /\b(401|failed|fail|failing|logs?|header)\b/i.test(message) &&
-    /\b(fastify|migration|patch|shield)\b/i.test(message);
+    /\b(fastify|migration|patch|shield)\b/i.test(message) &&
+    mentionsConcreteFailure &&
+    !isHypotheticalFailureAsk;
 
   if (!isAuthMigrationFailure) return null;
 
@@ -1090,6 +1115,362 @@ Conversation update:
 \`\`\`
 
 Teaching may intervene only as an explanation layer. It can explain the Fastify authentication lifecycle and why plugin/hook order differs from Express, but it cannot approve the patch, edit files, run commands, override Shield, or unblock the workflow.`;
+}
+
+function getRbacWorkflowAnswer(message: string): string | null {
+  const isRbacRequest =
+    /\b(rbac|role-based access control|role based access control|roles?|permissions?)\b/i.test(
+      message,
+    ) &&
+    /\b(express|prisma|postgres|postgresql|jwt|api|docker|typescript)\b/i.test(
+      message,
+    ) &&
+    /\b(svans-ai|vos|shield|debugger|sandbox|code editing|conversation|teaching|coordinate)\b/i.test(
+      message,
+    );
+
+  if (!isRbacRequest) return null;
+
+  return `Reality check: this is the RBAC implementation workflow, not a real project scan yet. SVANS-AI should not claim it found affected files, roles, routes, or Prisma models until VOS has permission-scoped access and produces the real index.
+
+Because you asked for the full VOS workflow, the active components are SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching.
+
+| Stage | Owner | Input | Action | Output | Approval | Failure rule |
+|---|---|---|---|---|---|---|
+| Folder permission | VOS + Shield | Selected project folder and owner scope | Validate read-only access boundary | Access policy + audit event | Owner grants scope | Block if path escapes approved folder |
+| Project indexing | VOS | Approved folder | Build batched file index without loading every file at once | Dependency graph, route map, Prisma map | No writes yet | Mark unknown/oversized files for review |
+| Auth discovery | SVANS-AI + VOS | Index, Express routes, JWT middleware, Prisma schema | Identify login flow, protected routes, current user object, role-like fields, and policy gaps | Auth/authorization discovery report | Read-only | Stop if existing behavior is unclear |
+| RBAC design | SVANS-AI + Teaching | Discovery report | Propose roles, permissions, default deny/allow behavior, migration impact, and route policy map | RBAC plan | Owner approves design | Do not edit until behavior is approved |
+| Security review | Shield | RBAC plan, route policy map, Prisma changes | Check privilege escalation, insecure defaults, secret exposure, unsafe logging, dependency risk | Shield decision artifact | Required before patching | Block on critical security risk |
+| Patch generation | Code Editing | Approved RBAC plan and affected files | Generate narrow unified diffs for schema, middleware, route guards, tests, and docs | Patch set + metadata | Approval before write/apply | Reject broad rewrites |
+| Isolated validation | Sandbox | Patch set + isolated working tree | Apply patches away from protected branch and run tests | Test report + logs | Required before commit | Failed tests go to Debugger |
+| Debug loop | Debugger | Failed tests/logs/route diffs | Classify root cause and recommend smallest fix | Structured findings | No approval to edit directly | Code Editing prepares new narrow patch |
+| Database safety | VOS + Sandbox + Shield | Prisma schema/migrations | Run schema diff, shadow DB, production-like clone, backup verification, forward migration, rollback/compensating check | DB safety report | Owner approval before DB change | Block deployment if rollback is unsafe |
+| Final review | SVANS-AI + Shield | Passing tests, Shield scan, patch summary | Present risks, changed files, route-contract results, and approval request | Owner review packet | Owner approves commit/PR | No commit without explicit approval |
+| Git workflow | VOS | Approved patch, passing tests, Shield allowed decision | Commit to feature branch and prepare PR to protected branch | Commit hash, PR draft, audit log | Owner/CI approval | Direct protected-branch writes blocked |
+| Deployment verification | Sandbox/VOS + Debugger | Approved PR build | Verify Docker startup, health checks, auth/RBAC behavior, logs, metrics | Deployment verification report | Required before merge/release | Roll back or block on threshold breach |
+
+Testing strategy:
+
+- unit tests for role parsing, permission checks, and deny/allow behavior
+- integration tests for every protected route
+- route-contract tests proving existing status codes, headers, body shape, cookies, and error responses stay unchanged unless approved
+- JWT tests for valid, expired, malformed, missing, and wrong-role tokens
+- Prisma tests for schema compatibility and migration safety
+- Docker and GitHub Actions checks so the feature works in CI, not just locally
+- security tests for privilege escalation, horizontal access, unsafe defaults, and sensitive logging
+
+If a test or security scan fails, the workflow blocks commit, push, merge, deployment, and database migration. Shield stores a redacted decision artifact, Debugger produces root-cause findings, Code Editing creates a narrow remediation patch, Sandbox reruns focused tests first, then full regression, and VOS may commit only after owner approval plus a passing Shield rescan.
+
+Conversation should store the current phase, affected-file list, approved RBAC design, blocked actions, decision history, patch IDs, test run IDs, and next safe action. Teaching may explain RBAC trade-offs and Express/JWT/Prisma design choices, but it cannot approve, edit, run commands, override Shield, or unblock the workflow.`;
+}
+
+function getCiAuthFailureWorkflowAnswer(message: string): string | null {
+  const isCiAuthFailure =
+    /\b(ci|github actions|pipeline|workflow)\b/i.test(message) &&
+    /\b(dependency update|dependencies|package update|lockfile)\b/i.test(
+      message,
+    ) &&
+    /\b(authentication|auth|jwt|401|token)\b/i.test(message) &&
+    /\b(fail|failing|failed)\b/i.test(message);
+
+  if (!isCiAuthFailure) return null;
+
+  return `This is a real failure workflow, not a feature plan. SVANS-AI should first freeze unsafe promotion: no commit, push, merge, deployment, or dependency rollout until the CI-only authentication failure is reproduced and explained.
+
+| Stage | Owner | Input | Action | Output | Approval | Failure rule |
+|---|---|---|---|---|---|---|
+| Preserve evidence | Conversation + VOS | Failed GitHub Actions run, dependency update context | Record run ID, branch, commit, package diff, failing job names | Incident state snapshot | Read-only | Do not overwrite evidence |
+| Shield freeze | Shield | Failure context, changed dependencies, auth logs | Block deploy/merge and scan for unsafe logging or secret exposure | Shield decision artifact | Required | Critical findings block all promotion |
+| Reproduce CI | Sandbox | Lockfile, Docker/CI config, env shape without secrets | Run integration tests in CI-like container | Reproduction report | No production access | Mark inconclusive if local environment differs |
+| Dependency diff | VOS + Debugger | package.json, lockfile, CI logs | Identify updated auth/JWT/HTTP/test/Postgres packages and transitive changes | Dependency impact report | Read-only | Suspect packages are isolated one by one |
+| Root cause | Debugger | 401 logs, request headers, token fixtures, env vars, clock/timezone, DB seed state | Determine why CI auth differs from local | Structured findings | No direct edits | Unknown cause blocks patching |
+| Patch | Code Editing | Debugger findings | Generate narrow fix: lock dependency, update config, adjust fixtures, seed data, or auth test setup | Reviewable patch | Owner approval before write/commit | Broad rewrites rejected |
+| Validate | Sandbox | Patch + CI-like environment | Run focused integration tests, then full test matrix | Test report | Required | Failed tests return to Debugger |
+| Security check | Shield | Patch, logs, dependency tree | Rescan secrets, dependency risk, unsafe auth behavior | Allowed/blocked decision | Required before commit | Block on critical/high risk |
+| Review prep | SVANS-AI + VOS | Passing reports, Shield allowed decision | Prepare PR summary with root cause, files changed, tests, rollback plan | Review packet + branch/PR draft | Owner approval | Protected branch write blocked |
+
+Debugger should specifically compare local vs GitHub Actions for environment variables, JWT secret availability, token expiration/clock skew, Prisma seed data, Postgres service readiness, dependency versions, lockfile drift, Node version, Docker image changes, and whether integration tests depend on implicit local state.
+
+The fix should be the smallest safe change. For example: pin or update the changed dependency intentionally, correct CI env mapping, make test fixtures deterministic, wait for Postgres readiness, or update JWT parsing only if route-contract tests prove API behavior stays the same.
+
+Conversation updates the incident state with the failing workflow run, suspected dependency, blocked actions, reproduction status, root-cause confidence, patch ID, Shield decision, and next safe action. Teaching can explain why CI and local auth behavior diverged, but it cannot approve or run the workflow.`;
+}
+
+function getAuthRefactorWorkflowAnswer(message: string): string | null {
+  const isAuthRefactor =
+    /\b(refactor|restructure|clean up|rewrite internally)\b/i.test(message) &&
+    /\b(authentication|auth module|jwt|login)\b/i.test(message) &&
+    /\b(api responses?|behavior|route contracts?|pull request|pr)\b/i.test(
+      message,
+    );
+
+  if (!isAuthRefactor) return null;
+
+  return `For an authentication refactor, SVANS-AI should treat “same API responses” as the contract. The refactor is not approved because the code looks cleaner; it is approved only if old and new behavior match.
+
+| Stage | Owner | Input | Action | Output | Approval | Failure rule |
+|---|---|---|---|---|---|---|
+| Scope and branch | VOS + Shield | Selected folder, protected branch rules | Create/confirm feature branch and isolated working tree | Branch plan + audit event | Owner approves write scope | Direct protected-branch edits blocked |
+| Dependency graph | VOS | Project index | Map imports into/out of the auth module, middleware, services, routes, tests, Prisma models, and config | Dependency graph + affected-file list | Read-only | Unknown dynamic imports get flagged |
+| Route contracts | Sandbox + SVANS-AI | Existing API routes and tests | Capture baseline responses for success, failure, missing token, expired token, invalid role, and server error cases | Contract snapshot | Required before patch | No refactor without baseline |
+| Patch plan | SVANS-AI + Code Editing | Affected files + contracts | Split refactor into narrow patches with rollback points | Patch plan | Owner approves plan | Reject broad all-at-once rewrite |
+| Patch generation | Code Editing | Approved patch plan | Generate unified diffs only for selected affected files | Patch artifact + metadata | Approval before apply/commit | No behavioral change unless explicit |
+| Isolated test | Sandbox | Patch + working tree | Run unit, integration, regression, auth, route-contract, Prisma, Docker/CI checks | Test report | Required | Failures go to Debugger |
+| Behavior comparison | Sandbox + Debugger | Baseline contract + patched result | Compare status, headers, cookies, body schema, error shape, logs, latency | Parity report | Required | Contract drift blocks PR |
+| Security review | Shield | Patch, auth flow, logs, dependencies | Check sensitive logging, token handling, privilege escalation, unsafe defaults | Shield decision | Required | Critical findings block commit |
+| Review packet | SVANS-AI + Conversation | Patch, tests, parity, Shield result | Summarize changed files, why each changed, risk, rollback, approvals | Owner approval packet | Owner approves commit/PR | VOS cannot open PR early |
+| Git workflow | VOS | Approved patch and passing checks | Stage, commit to feature branch, prepare PR to protected branch | Commit hash, PR draft, audit log | Owner/CI approval | Direct merge blocked |
+
+Affected files are identified from the dependency graph, not guessed. SVANS-AI should include direct auth files, route middleware, controllers, services, Prisma access, token utilities, test fixtures, Docker/CI config if auth tests depend on environment, and docs only if behavior or setup changed.
+
+Regression protection should include route-contract tests, JWT edge cases, existing integration tests, negative authorization cases, database-backed user lookup, Docker startup, and GitHub Actions parity. If old and new responses differ, the workflow stops unless you explicitly approve that API behavior change.
+
+Conversation stores the branch, affected-file list, baseline contract artifact, patch IDs, approvals, blocked actions, test reports, Shield decisions, and next safe action. Teaching may explain the refactor strategy and trade-offs, but it cannot approve patches, edit files, run commands, or override Shield.`;
+}
+
+function getLargeRepoTraversalWorkflowAnswer(message: string): string | null {
+  const isLargeRepoLoginFix =
+    /\b(12,?000|12000|large|thousands? of files|many files)\b/i.test(message) &&
+    /\b(login|auth|authentication|endpoint|route)\b/i.test(message) &&
+    /\b(index|files? to index|avoids loading|entire repository|dependency graph|smallest safe patch|patch)\b/i.test(
+      message,
+    );
+
+  const isConcreteLoginSlice =
+    /\b\/login\b/i.test(message) &&
+    /\b(src\/routes\/auth\.ts|auth-service|verifyPassword|issueToken|Prisma|Docker|500)\b/i.test(
+      message,
+    ) &&
+    /\b(index next|which files|what order|search should stop|smallest safe patch|owner approval)\b/i.test(
+      message,
+    );
+
+  if (!isLargeRepoLoginFix && !isConcreteLoginSlice) return null;
+
+  if (isConcreteLoginSlice) {
+    return `This should stay bounded. VOS already found the starting slice, so it should not widen to the whole 12,000-file project unless the evidence forces it.
+
+Files to index next, in order:
+
+| Order | File or target | Why VOS reads it | Expansion rule |
+|---|---|---|---|
+| 1 | \`src/routes/auth.ts\` | Confirms the \`/login\` route registration, HTTP method, middleware stack, and handler call | Expand only through imports used by the login path |
+| 2 | \`src/services/auth-service.ts\` | Contains \`loginUser\`, the center of the failing path | Follow only symbols used by \`loginUser\` |
+| 3 | File exporting \`verifyPassword\` | Checks password comparison, hashing library, async behavior, and Docker-sensitive native dependencies | Expand to hash config only if referenced |
+| 4 | File exporting \`issueToken\` | Checks JWT signing, secret lookup, expiration, issuer/audience, and error handling | Expand to env/config loader if token config is imported |
+| 5 | Prisma user repository file | Checks user lookup, selected columns, null handling, and Docker database differences | Expand to Prisma schema and seed/test fixtures |
+| 6 | \`prisma/schema.prisma\` | Verifies user model fields used by login and any required role/status flags | Do not inspect unrelated models unless referenced |
+| 7 | Login integration test and fixtures | Confirms expected 200 response, payload, seeded user, password hash, and Docker-specific setup | Expand to test helpers only if imported |
+| 8 | Docker compose / test container config | Needed because the 500 happens only in Docker | Read env mapping, Postgres readiness, service names, and command order |
+| 9 | Auth/JWT/password package versions in manifests/lockfile | Checks dependency drift or native bcrypt/argon behavior | Expand only to changed packages or failing native bindings |
+
+How VOS avoids loading everything:
+
+1. Build a tiny metadata index first: package manifests, lockfile, tsconfig, test config, Docker config, and route registry candidates.
+2. Search for exact anchors: \`/login\`, \`loginUser\`, \`verifyPassword\`, \`issueToken\`, failing test name, and stack-trace file paths.
+3. Parse only candidate files with AST/symbol resolution.
+4. Build a bounded dependency slice: route → handler → service → password verifier/token issuer/user repository → Prisma/config/test fixture.
+5. Queue newly discovered imports with relevance scores instead of loading them immediately.
+
+Search expansion rules:
+
+| Trigger | Expand to |
+|---|---|
+| unresolved import or symbol | exporting file only |
+| stack trace outside indexed slice | exact stack file and caller/callee |
+| env/config lookup | config loader and Docker/CI env source |
+| Prisma call | repository, schema model, seed/test fixture |
+| failing test helper | imported helper and fixture only |
+| runtime package/native binding error | package manifest, lockfile, Docker image |
+
+Stopping criteria:
+
+- the Docker-only 500 is reproduced
+- all symbols on the failing login path are resolved
+- at least one root-cause hypothesis has strong evidence
+- affected tests and route contract are identified
+- the proposed patch touches only confirmed-path files
+- no unresolved high-confidence dependency remains
+
+Component coordination:
+
+| Component | Input | Action | Output |
+|---|---|---|---|
+| SVANS-AI | User goal + VOS slice | Keeps scope narrow and chooses next safe action | Investigation plan |
+| VOS | Folder + anchors + import graph | Reads only prioritized files and records audit trail | Bounded dependency slice |
+| Debugger | Docker 500 logs, stack trace, source slice, tests | Produces ranked root-cause hypotheses | Structured finding with confidence |
+| Sandbox | Current code + Docker config | Reproduces failing login test before edits | Reproduction artifact |
+| Code Editing | Highest-confidence finding | Creates the smallest diff | Patch artifact |
+| Shield | Patch + touched files + logs | Checks auth bypass, secret exposure, unsafe logging, excessive scope | Allow/block decision |
+| Conversation | Artifacts and decisions | Stores indexed files, hypotheses, patch ID, tests, Shield result | State snapshot |
+| Teaching | Optional explanation request | Explains why the slice/patch is chosen | Explanation only; no authority |
+
+Debugger finding shape:
+
+\`\`\`json
+{
+  "findingId": "finding_login_001",
+  "rootCause": "Docker test environment does not provide the JWT secret used by issueToken",
+  "confidence": 0.91,
+  "affectedFiles": [
+    "src/services/auth-service.ts",
+    "src/auth/token.ts",
+    "docker-compose.test.yml"
+  ],
+  "evidence": [
+    "Docker-only 500 stack trace points to issueToken",
+    "Local env includes JWT_SECRET but Docker test env does not",
+    "Login route contract expected 200 but received 500"
+  ],
+  "recommendedChange": "Make test Docker env provide the expected JWT secret or fail with a controlled auth configuration error"
+}
+\`\`\`
+
+Test order:
+
+1. reproduce the failing Docker login test
+2. run the focused login test after the patch
+3. run related authentication integration tests
+4. run route-contract comparison for \`/login\`
+5. run affected regression tests
+6. run the full suite only after the focused tests pass
+
+End state: stop at a tested, Shield-approved patch package for owner approval. Do not include deployment yet unless the owner asks for release planning.`;
+  }
+
+  return `For a 12,000-file project, VOS should work like a bounded investigation engine, not a full-repository reader. The goal is to produce the smallest safe patch for the failing login endpoint, so every indexed file needs a reason.
+
+Initial file-priority order:
+
+1. package manifests, lockfile, tsconfig, test config, and framework entry points
+2. route registration files and files containing \`/login\`
+3. the login handler/controller
+4. authentication middleware/hooks used by the login path
+5. imported auth service functions
+6. password verification and token issuing utilities
+7. user repository and Prisma calls
+8. Prisma schema and seed/test fixtures only if the path touches the database
+9. related tests, fixtures, and mocks
+10. Docker/CI/env files only if the failure differs by environment
+
+Traversal algorithm:
+
+| Step | VOS action | Output |
+|---|---|---|
+| 1 | Build metadata index without loading source bodies | project map |
+| 2 | Search anchors: \`/login\`, handler names, failing test names, stack locations | candidate file list |
+| 3 | Parse candidates with AST and TypeScript symbol resolution | route/handler map |
+| 4 | Follow imports only from the confirmed login path | bounded dependency slice |
+| 5 | Score new files by relevance, confidence, and distance from failing endpoint | expansion queue |
+| 6 | Stop when the failing path is resolved and the root cause is reproducible | minimal investigation set |
+
+Expansion happens only when there is evidence: unresolved imports, referenced symbols, stack traces, failing tests, config lookups, Prisma calls, framework plugin registration, or environment sources. VOS should cap each expansion wave, track graph depth, and ask owner approval before broadening outside the login/auth scope.
+
+Stopping criteria:
+
+- all symbols used by the failing login path are resolved
+- Sandbox reproduces the failure
+- Debugger has a ranked root cause with evidence
+- affected tests and route contracts are known
+- Code Editing can patch only confirmed-path files
+- Shield finds no excessive scope, auth bypass, secret exposure, or unsafe logging
+
+Module ownership:
+
+| Component | Owns |
+|---|---|
+| SVANS-AI | scope control, orchestration, confidence scoring, next safe action |
+| VOS | file indexing, AST/import graph traversal, audit trail |
+| Debugger | root-cause hypotheses and structured findings |
+| Sandbox | reproduction and test execution in isolation |
+| Code Editing | smallest unified diff |
+| Shield | security/scope approval or block |
+| Conversation | investigation state, indexed scope, decisions, patch/test artifacts |
+| Teaching | optional explanation, no approval or execution authority |
+
+The workflow ends at a tested patch, Shield decision, affected-file list, route-contract comparison, rollback note, and owner approval packet. Deployment is a later phase, not part of producing the smallest safe patch.`;
+}
+
+function getIntermittentFailureWorkflowAnswer(message: string): string | null {
+  const isIntermittentFailure =
+    /\b(intermittent|sometimes|suddenly|after a dependency update|500 errors?|authentication sometimes)\b/i.test(
+      message,
+    ) &&
+    /\b(500|auth|authentication|dependency update|bug report|multiple possible causes|possible causes)\b/i.test(
+      message,
+    ) &&
+    /\b(svans-ai|vos|shield|debugger|sandbox|code editing|conversation|teaching|coordinate)\b/i.test(
+      message,
+    );
+
+  if (!isIntermittentFailure) return null;
+
+  return `This should be handled as an investigation, not as a guessed fix. SVANS-AI should not assume the dependency update caused the intermittent 500s until Sandbox and Debugger reproduce the pattern.
+
+| Stage | Owner | Input | Action | Output | Approval | Failure/branch rule |
+|---|---|---|---|---|---|---|
+| Intake | Conversation + SVANS-AI | First bug report, affected endpoint, dependency update timing | Record symptoms, scope, known unknowns | Incident state | Read-only | Do not store assumptions as facts |
+| Safety freeze | Shield | Production risk + auth instability | Block deploy/merge until triaged | Shield hold decision | Required | Critical secret/logging issue escalates |
+| Evidence capture | VOS | Logs, CI runs, package diff, route ownership | Index only relevant files and artifacts | Evidence bundle | Read-only | Expand only with evidence |
+| Reproduction | Sandbox | Current branch + dependency versions + Docker/CI env | Attempt deterministic reproduction with repeated auth requests | Reproduction matrix | No writes | If non-reproducible, collect more telemetry |
+| Hypothesis ranking | Debugger | Logs, stack traces, package diff, source slice | Produce ranked possible causes with confidence | Structured findings | No edits | Multiple causes remain separate branches |
+| Patch proposal | Code Editing | Highest-confidence finding only | Generate narrow diff | Patch artifact | Owner approval before apply/commit | No broad dependency sweep |
+| Validation | Sandbox | Patch + test plan | Run focused failing path, auth regression, affected integration, route contracts, then full regression | Test report | Required | Failed tests return to Debugger |
+| Security review | Shield | Patch, logs, dependency diff | Check auth bypass, secret exposure, unsafe logging, dependency risk | Allow/block artifact | Required before commit | Block commit/push/deploy on high risk |
+| Review package | SVANS-AI + VOS + Conversation | Findings, patch, tests, Shield decision | Prepare owner approval packet | Review-ready patch | Owner approves | Protected branch untouched |
+
+If investigation finds multiple possible causes, Conversation stores each as a separate hypothesis with evidence and confidence. Debugger should not collapse them into one answer early. Sandbox tests the highest-risk/highest-confidence branch first, while SVANS-AI explains what would disprove each hypothesis.
+
+Example hypothesis artifact:
+
+\`\`\`json
+{
+  "hypothesisId": "hyp_auth_002",
+  "cause": "JWT dependency update changed default verification behavior",
+  "confidence": 0.72,
+  "evidence": ["Package diff", "Intermittent 500 stack trace", "Auth test flake pattern"],
+  "disproofTest": "Pin previous JWT version and rerun repeated auth integration test",
+  "status": "testing"
+}
+\`\`\`
+
+The workflow continues only when the failure is reproduced or enough evidence exists to justify a narrow diagnostic patch. It stops before commit until tests pass, Shield allows the patch, and the owner approves the review package.`;
+}
+
+function getBulkDependencyUpgradeWorkflowAnswer(
+  message: string,
+): string | null {
+  const isBulkDependencyUpgrade =
+    /\b(upgrade|update)\b/i.test(message) &&
+    /\b(every|all|400|hundreds?)\b/i.test(message) &&
+    /\b(npm|dependencies|packages?|latest version)\b/i.test(message) &&
+    /\b(commit|automatically|approval|vos|shield|sandbox|debugger|code editing)\b/i.test(
+      message,
+    );
+
+  if (!isBulkDependencyUpgrade) return null;
+
+  return `SVANS-AI should not automatically upgrade 400+ npm dependencies and commit them. That request is too broad, too risky, and likely to mix unrelated breaking changes into one unreadable patch.
+
+Safe coordination:
+
+| Stage | Owner | Input | Action | Output | Approval | Failure rule |
+|---|---|---|---|---|---|---|
+| Inventory | VOS | package manifests + lockfile | List direct/transitive outdated packages | Dependency inventory | Read-only | No install yet |
+| Risk grouping | SVANS-AI + Shield | Inventory, changelog metadata if available, dependency usage graph | Group packages by runtime/dev/security/major/minor/patch | Upgrade plan | Owner approves groups | Do not group unrelated majors |
+| Branch/worktree | VOS + Shield | Approved plan | Create migration branch and isolated working tree | Safe workspace | Owner approval | Protected branch blocked |
+| Install batch | Sandbox | One approved package group | Run install in isolation | Lockfile diff + install logs | Required per batch | Failed install isolates batch |
+| Compatibility | Debugger + Sandbox | Test failures, package diff, source usage | Identify breaking changes and affected files | Structured findings | No direct edits | Failed batch does not contaminate others |
+| Patch | Code Editing | Findings for one group | Generate narrow compatibility patches | Patch artifact | Owner approval before commit | Broad rewrites rejected |
+| Security | Shield | Updated dependency tree + patch | Audit vulnerabilities, license/policy risk, scripts, secrets | Allow/block decision | Required | High/critical findings block |
+| Review | SVANS-AI + VOS | Passing batch reports | Prepare separate commits/PRs by risk group | Review packet | Owner/CI approval | No automatic merge |
+
+Before any package is installed, VOS must inventory the dependency graph, Shield must classify risk, and SVANS-AI must propose batches. Safer grouping is usually: security patch releases first, low-risk dev dependencies, test tooling, framework/runtime minors, then major upgrades one family at a time.
+
+If a batch fails, Sandbox keeps it isolated, Debugger identifies the breaking package or interaction, Code Editing creates a targeted compatibility patch only if justified, Shield rescans, and Conversation records the failed batch and rollback point.
+
+The default answer to “upgrade everything and commit” is no. The safe answer is: inventory, group, isolate, test, review, then commit only approved batches to a non-protected branch.`;
 }
 
 function getProjectModuleAnswer(message: string): string | null {
@@ -1908,6 +2289,41 @@ Do not claim you have no browsing ability. Say that live search did not return e
     getMigrationFailureProtocolAnswer(latestUserMessage);
   if (migrationFailureProtocolAnswer) {
     return migrationFailureProtocolAnswer;
+  }
+
+  const rbacWorkflowAnswer = getRbacWorkflowAnswer(latestUserMessage);
+  if (rbacWorkflowAnswer) {
+    return rbacWorkflowAnswer;
+  }
+
+  const ciAuthFailureWorkflowAnswer =
+    getCiAuthFailureWorkflowAnswer(latestUserMessage);
+  if (ciAuthFailureWorkflowAnswer) {
+    return ciAuthFailureWorkflowAnswer;
+  }
+
+  const authRefactorWorkflowAnswer =
+    getAuthRefactorWorkflowAnswer(latestUserMessage);
+  if (authRefactorWorkflowAnswer) {
+    return authRefactorWorkflowAnswer;
+  }
+
+  const largeRepoTraversalWorkflowAnswer =
+    getLargeRepoTraversalWorkflowAnswer(latestUserMessage);
+  if (largeRepoTraversalWorkflowAnswer) {
+    return largeRepoTraversalWorkflowAnswer;
+  }
+
+  const intermittentFailureWorkflowAnswer =
+    getIntermittentFailureWorkflowAnswer(latestUserMessage);
+  if (intermittentFailureWorkflowAnswer) {
+    return intermittentFailureWorkflowAnswer;
+  }
+
+  const bulkDependencyUpgradeWorkflowAnswer =
+    getBulkDependencyUpgradeWorkflowAnswer(latestUserMessage);
+  if (bulkDependencyUpgradeWorkflowAnswer) {
+    return bulkDependencyUpgradeWorkflowAnswer;
   }
 
   const largeMigrationProtocolAnswer =
