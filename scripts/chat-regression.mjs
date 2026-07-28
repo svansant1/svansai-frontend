@@ -487,6 +487,37 @@ assert(
   "Concrete login traversal response did not provide exact bounded file-order workflow.",
 );
 
+const typoConcreteLoginTraversal = await ask(
+  "OS found the /login route in src/routes/auth.ts. The handler imports loginUser from src/services/auth-service.ts, which imports verifyPassword, issueToken, and a Prisma user repository. The failing test expects a 200 response, but the endpoint returns 500 only in Docker. Explain exactly which files VOS should index next, in what order, why each file is needed, when the search should stop expanding, and how Debugger, Sandbox, Shield, Code Editing, Conversation, and SVANS-AI coordinate to produce the smallest safe patch. Do not include deployment. End when the tested patch is ready for owner approval.",
+);
+const typoConcreteLoginCompact = typoConcreteLoginTraversal
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: typo OS/VOS Docker login slice\nRESPONSE: ${typoConcreteLoginCompact.slice(0, 700)}`,
+);
+assert(
+  /failure occurs only in Docker|Docker-only 500/i.test(
+    typoConcreteLoginCompact,
+  ) &&
+    /Dockerfile/i.test(typoConcreteLoginCompact) &&
+    /Docker Compose|compose/i.test(typoConcreteLoginCompact) &&
+    /Environment loader|JWT_SECRET|DATABASE_URL/i.test(
+      typoConcreteLoginCompact,
+    ) &&
+    /Prisma Client|prisma\/schema\.prisma/i.test(typoConcreteLoginCompact) &&
+    /reproduce the Docker-only failure before any edit/i.test(
+      typoConcreteLoginCompact,
+    ) &&
+    /Code Editing.*smallest diff|Creates the smallest diff/i.test(
+      typoConcreteLoginCompact,
+    ) &&
+    !/Sources:|Better Business Bureau|complaintinfo|live\/current details/i.test(
+      typoConcreteLoginCompact,
+    ),
+  "Typo OS/VOS Docker login prompt did not trigger the Docker-aware bounded traversal without web sources.",
+);
+
 const intermittentFailureWorkflow = await ask(
   "I have a large TypeScript project that suddenly started returning intermittent 500 errors after a dependency update. Users report that authentication sometimes works and sometimes fails. Explain exactly how SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching coordinate from the first bug report until the fix is deployed. Do not assume the cause. Clearly define every component's inputs, outputs, approval gates, artifacts, and what happens if the investigation finds multiple possible causes.",
 );

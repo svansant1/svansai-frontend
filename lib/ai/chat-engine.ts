@@ -244,10 +244,10 @@ function needsLiveSearch(message: string): boolean {
       message,
     );
   const isLocalRepositoryWorkflow =
-    /\b(project|repo|repository|folder|files?|typescript|javascript|node|npm|express|prisma|postgres|postgresql|jwt|api|endpoint|route|vos|svans-ai|sandbox|debugger|shield|code editing)\b/i.test(
+    /\b(project|repo|repository|folder|files?|typescript|javascript|node|npm|express|prisma|postgres|postgresql|jwt|api|endpoint|route|vos|svans-ai|sandbox|debugger|shield|code editing|src\/|docker|loginUser|verifyPassword|issueToken)\b/i.test(
       message,
     ) &&
-    /\b(index|dependency graph|patch|test|debug|refactor|fix|ci|github actions|workflow|coordinate|component|approval|protected branch|pull request|pr)\b/i.test(
+    /\b(index|dependency graph|patch|test|debug|refactor|fix|ci|github actions|workflow|coordinate|component|approval|protected branch|pull request|pr|failing|returns 500|smallest safe patch)\b/i.test(
       message,
     );
 
@@ -1242,14 +1242,14 @@ function getLargeRepoTraversalWorkflowAnswer(message: string): string | null {
     /\b(src\/routes\/auth\.ts|auth-service|verifyPassword|issueToken|Prisma|Docker|500)\b/i.test(
       message,
     ) &&
-    /\b(index next|which files|what order|search should stop|smallest safe patch|owner approval)\b/i.test(
+    /\b(index next|which files|what order|in what order|search should stop|stop expanding|smallest safe patch|owner approval|ready for owner approval)\b/i.test(
       message,
     );
 
   if (!isLargeRepoLoginFix && !isConcreteLoginSlice) return null;
 
   if (isConcreteLoginSlice) {
-    return `This should stay bounded. VOS already found the starting slice, so it should not widen to the whole 12,000-file project unless the evidence forces it.
+    return `Because the failure occurs only in Docker, VOS should not keep traversing only the authentication dependency graph. It should first reproduce the container failure, then prioritize environment, Prisma, package, and startup files that can explain why local returns 200 but Docker returns 500. This should stay bounded; VOS should not widen to the whole project unless evidence forces it.
 
 Files to index next, in order:
 
@@ -1260,10 +1260,14 @@ Files to index next, in order:
 | 3 | File exporting \`verifyPassword\` | Checks password comparison, hashing library, async behavior, and Docker-sensitive native dependencies | Expand to hash config only if referenced |
 | 4 | File exporting \`issueToken\` | Checks JWT signing, secret lookup, expiration, issuer/audience, and error handling | Expand to env/config loader if token config is imported |
 | 5 | Prisma user repository file | Checks user lookup, selected columns, null handling, and Docker database differences | Expand to Prisma schema and seed/test fixtures |
-| 6 | \`prisma/schema.prisma\` | Verifies user model fields used by login and any required role/status flags | Do not inspect unrelated models unless referenced |
-| 7 | Login integration test and fixtures | Confirms expected 200 response, payload, seeded user, password hash, and Docker-specific setup | Expand to test helpers only if imported |
-| 8 | Docker compose / test container config | Needed because the 500 happens only in Docker | Read env mapping, Postgres readiness, service names, and command order |
-| 9 | Auth/JWT/password package versions in manifests/lockfile | Checks dependency drift or native bcrypt/argon behavior | Expand only to changed packages or failing native bindings |
+| 6 | \`Dockerfile\` | Checks build stages, copied files, Prisma Client generation, working directory, runtime user, and native dependencies | Expand to entrypoint/start script if referenced |
+| 7 | Docker Compose/test compose files | Checks env vars, service names, networks, volumes, database host, and Postgres readiness | Expand only to referenced env files/scripts |
+| 8 | Environment loader/config schema | Compares \`JWT_SECRET\`, \`DATABASE_URL\`, \`NODE_ENV\`, and required variables between local and Docker | Expand to config sources only |
+| 9 | \`prisma/schema.prisma\` and Prisma generation scripts | Verifies provider, binary targets, generated client location, migrations, and user model fields | Do not inspect unrelated models unless referenced |
+| 10 | \`package.json\` and lockfile | Checks install mode, lifecycle scripts, omitted dev dependencies, Prisma/bcrypt/argon/JWT versions | Expand only to changed packages or failing native bindings |
+| 11 | Docker entrypoint/start/test script | Checks migrations, Prisma generation, working directory, wait-for-db behavior, and startup order | Expand to exact invoked script |
+| 12 | Login integration test and fixtures | Confirms expected 200 response, payload, seeded user, password hash, and Docker-specific setup | Expand to test helpers only if imported |
+| 13 | Stack-trace files outside this slice | Only read files proven by the container stack trace | Expand one caller/callee wave at a time |
 
 How VOS avoids loading everything:
 
@@ -1287,7 +1291,9 @@ Search expansion rules:
 Stopping criteria:
 
 - the Docker-only 500 is reproduced
+- the exact exception and failing line are known
 - all symbols on the failing login path are resolved
+- local-versus-container env/config/package differences have been compared
 - at least one root-cause hypothesis has strong evidence
 - affected tests and route contract are identified
 - the proposed patch touches only confirmed-path files
@@ -1310,31 +1316,39 @@ Debugger finding shape:
 
 \`\`\`json
 {
-  "findingId": "finding_login_001",
-  "rootCause": "Docker test environment does not provide the JWT secret used by issueToken",
-  "confidence": 0.91,
+  "findingId": "login-docker-001",
+  "rootCause": "Prisma Client was generated for the host environment but not inside the Docker runtime image",
+  "confidence": 0.93,
+  "failingFile": "src/repositories/user-repository.ts",
   "affectedFiles": [
-    "src/services/auth-service.ts",
-    "src/auth/token.ts",
-    "docker-compose.test.yml"
+    "Dockerfile",
+    "package.json",
+    "prisma/schema.prisma"
   ],
   "evidence": [
-    "Docker-only 500 stack trace points to issueToken",
-    "Local env includes JWT_SECRET but Docker test env does not",
-    "Login route contract expected 200 but received 500"
+    "Container stack trace points to Prisma user lookup",
+    "Missing Prisma engine binary inside runtime container",
+    "Local login test passes outside Docker"
   ],
-  "recommendedChange": "Make test Docker env provide the expected JWT secret or fail with a controlled auth configuration error"
+  "recommendedPatchScope": [
+    "Dockerfile",
+    "package.json"
+  ]
 }
 \`\`\`
 
 Test order:
 
-1. reproduce the failing Docker login test
-2. run the focused login test after the patch
-3. run related authentication integration tests
-4. run route-contract comparison for \`/login\`
-5. run affected regression tests
-6. run the full suite only after the focused tests pass
+1. reproduce the Docker-only failure before any edit
+2. run the targeted login test in Docker
+3. compare local versus container env/config/package state
+4. apply the narrow patch in Sandbox only
+5. rerun the targeted Docker login test
+6. run related authentication integration tests
+7. run route-contract comparison for \`/login\`
+8. run affected regression tests
+9. run the full suite only after focused tests pass
+10. run Shield rescan for auth bypass, secret exposure, unsafe logging, and excessive scope
 
 End state: stop at a tested, Shield-approved patch package for owner approval. Do not include deployment yet unless the owner asks for release planning.`;
   }
