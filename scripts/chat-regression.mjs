@@ -643,6 +643,37 @@ assert(
   "Evolving evidence seed-concurrency prompt was hijacked by stale JWT/header failure workflow.",
 );
 
+const evolvingRepeatedHistory = [
+  {
+    role: "user",
+    content:
+      "I selected a repository containing approximately 20,000 files. A GitHub Actions workflow began failing after a dependency update. The initial symptom is intermittent HTTP 403 responses from authenticated requests during end-to-end tests, but after the first investigation new evidence appears:\n\nThe failures only occur when tests run in parallel.\nSerial execution passes.\nJWT validation succeeds.\nAuthorization fails because user roles are occasionally missing.\nDatabase seed logs show intermittent transaction conflicts.\nNo production users are affected.\n\nExplain exactly how SVANS-AI, VOS, Shield, Debugger, Sandbox, Code Editing, Conversation, and Teaching should adapt their workflow as each new piece of evidence is discovered.\n\nInclude:\n\nhow VOS expands and contracts the indexed file set as confidence changes\nhow Debugger updates and ranks multiple root-cause hypotheses instead of locking onto the first one\nhow Sandbox designs additional experiments to confirm or reject each hypothesis\nhow Code Editing delays patch generation until confidence reaches an acceptable threshold\nhow Shield continuously validates that investigation scope remains safe and that proposed fixes do not exceed the confirmed impact\nhow Conversation records changing evidence, confidence scores, rejected hypotheses, approvals, and artifacts\nwhen Teaching is allowed to explain findings without influencing technical decisions\n\nFor every investigation phase, define:\n\nacting component\ninputs\nactions\nstructured outputs\nconfidence score\ncontinue condition\nblocking condition\n\nShow how the workflow changes when the original authentication hypothesis becomes less likely and the evidence begins pointing toward a database seeding concurrency issue instead.\n\nDo not assume the final root cause until sufficient evidence exists.\n\nDo not commit, push, merge, deploy, or modify the protected branch.\n\nEnd with a tested patch and owner approval package only.",
+  },
+  {
+    role: "assistant",
+    content:
+      "This is an evolving-evidence CI investigation. The workflow should downgrade JWT and focus on seed concurrency as evidence changes.",
+  },
+];
+const evolvingRepeatedAnswer = await ask(
+  evolvingRepeatedHistory[0].content,
+  evolvingRepeatedHistory,
+);
+const evolvingRepeatedCompact = evolvingRepeatedAnswer
+  .replace(/\s+/g, " ")
+  .trim();
+console.log(
+  `\nPROMPT: repeated evolving workflow should bypass duplicate guard\nRESPONSE: ${evolvingRepeatedCompact.slice(0, 700)}`,
+);
+assert(
+  /evolving-evidence CI investigation/i.test(evolvingRepeatedCompact) &&
+    /seed concurrency|transaction conflicts/i.test(evolvingRepeatedCompact) &&
+    !/same question again|expand on my last answer|different angle/i.test(
+      evolvingRepeatedCompact,
+    ),
+  "Repeated explicit workflow prompt was blocked by duplicate-question guard.",
+);
+
 const duplicateHistory = [];
 await askTurn(
   duplicateHistory,

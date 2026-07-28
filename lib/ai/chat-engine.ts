@@ -453,6 +453,15 @@ function getDuplicateQuestionResponse(
   if (!latestUserMessage || !previousUserMessage || !lastAssistantMessage)
     return null;
 
+  const isExplicitWorkflowRequest =
+    /\b(SVANS-AI|VOS|Shield|Debugger|Sandbox|Code Editing|Conversation|Teaching)\b/i.test(
+      latestUserMessage,
+    ) &&
+    /\b(phase|phases|workflow|coordinate|acting component|inputs?|outputs?|structured outputs?|continue condition|blocking condition|confidence score|owner approval|approval package)\b/i.test(
+      latestUserMessage,
+    );
+  if (isExplicitWorkflowRequest) return null;
+
   const latest = normalizeText(latestUserMessage);
   const previous = normalizeText(previousUserMessage);
   const likelySame =
