@@ -822,7 +822,17 @@ function getProjectModuleAnswer(message: string): string | null {
     normalized.includes("shield") &&
     normalized.includes("work together")
   ) {
-    return "Sandbox should be the isolated testing space, Debugger should inspect failures and explain what broke, Shield should watch for risk and enforce safety rules, and SVANS-AI should coordinate the conversation across all of them. In practice: Sandbox runs experiments, Debugger turns the results into fixes, Shield blocks unsafe paths, and SVANS-AI explains the next best action.";
+    const includesVos = normalized.includes("vos");
+    const folderProject =
+      normalized.includes("folder") ||
+      normalized.includes("workspace") ||
+      normalized.includes("coding project");
+
+    if (includesVos || folderProject) {
+      return "For a folder-based coding project, SVANS-AI should act as the coordinator and VOS should be the local workspace bridge.\n\nHere is the clean workflow:\n\n1. VOS gets permission-scoped access to the selected folder. It should read the folder tree, identify important files, and keep an audit trail of what was accessed. It should not write changes without owner approval.\n\n2. SVANS-AI decides the goal and routes the work. It should summarize the project, identify the active task, choose whether the request needs Debugger, Sandbox, Shield, or VOS, and explain the next best action.\n\n3. Debugger handles failures. If there are errors, broken builds, stack traces, bad responses, or failing tests, Debugger should isolate the cause and recommend the smallest fix.\n\n4. Sandbox runs experiments safely. New code, risky refactors, generated patches, and test runs should happen in an isolated workspace before anything touches the real project.\n\n5. Shield reviews risk. It should check secrets, unsafe commands, privacy issues, destructive file actions, dependency risks, and anything that needs owner approval.\n\nA practical loop would be: VOS reads the approved folder → SVANS-AI builds the plan → Debugger diagnoses issues → Sandbox tests possible fixes → Shield reviews safety → SVANS-AI presents the final recommendation or asks for approval before changes are applied.";
+    }
+
+    return "SVANS-AI should coordinate the whole workflow, Shield should watch for risk, Debugger should inspect failures, and Sandbox should test changes safely. In practice: SVANS-AI decides the route, Debugger explains what broke, Sandbox tries fixes in isolation, Shield blocks unsafe actions, and SVANS-AI gives the next best action.";
   }
 
   if (

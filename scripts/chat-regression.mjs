@@ -279,6 +279,23 @@ assert(
   "Real-fix response did not name concrete engineering improvements.",
 );
 
+const moduleCoordination = await ask(
+  "I want SVANS-AI, Shield, Debugger, Sandbox, and VOS to work together on a folder-based coding project. How should they coordinate?",
+);
+const moduleCoordinationCompact = moduleCoordination.replace(/\s+/g, " ");
+console.log(
+  `\nPROMPT: module coordination with VOS\nRESPONSE: ${moduleCoordinationCompact.slice(0, 500)}`,
+);
+assert(
+  /\bVOS\b/i.test(moduleCoordinationCompact) &&
+    /folder|workspace|permission/i.test(moduleCoordinationCompact) &&
+    /SVANS-AI/i.test(moduleCoordinationCompact) &&
+    /Shield/i.test(moduleCoordinationCompact) &&
+    /Debugger/i.test(moduleCoordinationCompact) &&
+    /Sandbox/i.test(moduleCoordinationCompact),
+  "Module coordination response did not include VOS/folder permission workflow.",
+);
+
 console.log("\nConversation quality regression prompts completed.");
 
 const longQuizHistory = [];
