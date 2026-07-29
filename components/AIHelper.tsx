@@ -452,6 +452,42 @@ function renderMessageContent(content: string) {
   });
 }
 
+function normalizeQuizPaste(text: string): string {
+  const normalized = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+
+  const looksLikeQuiz =
+    /\bGroup of answer choices\b/i.test(normalized) &&
+    /\bQuestion\s+\d+/i.test(normalized);
+
+  if (!looksLikeQuiz) {
+    return text;
+  }
+
+  return normalized
+    .replace(
+      /\s*Flag question:\s*Question\s+(\d+)\s*/gi,
+      "\n\n--------------------\n\nQuestion $1\n\n",
+    )
+    .replace(
+      /\bQuestion\s+(\d+)\s+Question\s+\1\s*(\d+)\s*pts?\b/gi,
+      "Question $1\n$2 pts\n\n",
+    )
+    .replace(
+      /^Question\s+(\d+)\s*(\d+)\s*pts?\s*/i,
+      "Question $1\n$2 pts\n\n",
+    )
+    .replace(
+      /\s*Group of answer choices\s*/gi,
+      "\n\nGroup of answer choices\n",
+    )
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default function AIHelper({
   user,
   onRequestLogin,
@@ -1079,46 +1115,80 @@ export default function AIHelper({
     }
   };
 
-  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const pastedText = e.clipboardData.getData("text");
-    if (pastedText && input.length + pastedText.length > MAX_MESSAGE_CHARS) {
-      setFileError(
-        `That paste is larger than one chat message can handle. Split it into smaller parts or attach it as a .txt/PDF file. Example: "Explain the kernel with an example" or "Quiz me on file systems."`,
+  const handlePaste = async (
+  e: React.ClipboardEvent<HTMLTextAreaElement>,
+) => {
+  const pastedText = e.clipboardData.getData("text/plain");
+
+  if (pastedText && input.length + pastedText.length > MAX_MESSAGE_CHARS) {
+    e.preventDefault();
+
+    setFileError(
+      `That paste is larger than one chat message can handle. Split it into smaller parts or attach it as a .txt/PDF file. Example: "Explain the kernel with an example" or "Quiz me on file systems."`,
+    );
+
+    return;
+  }
+
+  const formattedText = normalizeQuizPaste(pastedText);
+
+  if (formattedText !== pastedText) {
+    e.preventDefault();
+
+    const textarea = e.currentTarget;
+    const selectionStart = textarea.selectionStart;
+    const selectionEnd = textarea.selectionEnd;
+
+    const nextInput =
+      input.slice(0, selectionStart) +
+      formattedText +
+      input.slice(selectionEnd);
+
+    setInput(nextInput);
+
+    window.requestAnimationFrame(() => {
+      const cursorPosition = selectionStart + formattedText.length;
+
+      textareaRef.current?.setSelectionRange(
+        cursorPosition,
+        cursorPosition,
       );
-    }
+    });
+  }
 
-    const items = e.clipboardData.items;
+  const items = e.clipboardData.items;
 
-    for (let i = 0; i < items.length; i += 1) {
-      if (!items[i].type.includes("image")) continue;
+  for (let i = 0; i < items.length; i += 1) {
+    if (!items[i].type.includes("image")) continue;
 
-      const file = items[i].getAsFile();
-      if (!file) continue;
+    const file = items[i].getAsFile();
+    if (!file) continue;
 
-      const reader = new FileReader();
+    const reader = new FileReader();
 
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result;
-        if (typeof dataUrl !== "string") return;
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result;
+      if (typeof dataUrl !== "string") return;
 
-        setAttachedFiles((current) =>
-          [
-            ...current,
-            {
-              name: "pasted-image.png",
-              type: file.type,
-              base64: dataUrl.split(",")[1] || "",
-              dataUrl,
-              size: file.size,
-            },
-          ].slice(0, MAX_ATTACHMENTS),
-        );
-      };
+      setAttachedFiles((current) =>
+        [
+          ...current,
+          {
+            name: "pasted-image.png",
+            type: file.type,
+            base64: dataUrl.split(",")[1] || "",
+            dataUrl,
+            size: file.size,
+          },
+        ].slice(0, MAX_ATTACHMENTS),
+      );
+    };
 
-      reader.readAsDataURL(file);
-      if (attachedFiles.length >= MAX_ATTACHMENTS) break;
-    }
-  };
+    reader.readAsDataURL(file);
+
+    if (attachedFiles.length >= MAX_ATTACHMENTS) break;
+  }
+};
 
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>,
