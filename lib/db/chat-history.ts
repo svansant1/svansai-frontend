@@ -17,7 +17,16 @@ export type MessageRecord = {
   created_at: string;
 };
 
-export async function listConversations(userId: string): Promise<ConversationRecord[]> {
+const MESSAGE_PAGE_SIZE = 1000;
+const MESSAGE_INSERT_BATCH_SIZE = 100;
+
+function sameMessage(a?: ChatMessage, b?: ChatMessage): boolean {
+  return Boolean(a && b && a.role === b.role && a.content === b.content);
+}
+
+export async function listConversations(
+  userId: string,
+): Promise<ConversationRecord[]> {
   const { data, error } = await supabase
     .from("conversations")
     .select("id,user_id,title,created_at,updated_at")
@@ -34,7 +43,7 @@ export async function listConversations(userId: string): Promise<ConversationRec
 
 export async function createConversation(
   userId: string,
-  firstMessage?: string
+  firstMessage?: string,
 ): Promise<ConversationRecord | null> {
   const title = buildConversationTitle(firstMessage);
 
@@ -54,7 +63,7 @@ export async function createConversation(
 
 export async function updateConversationTitle(
   conversationId: string,
-  title: string
+  title: string,
 ): Promise<void> {
   const { error } = await supabase
     .from("conversations")
@@ -78,20 +87,33 @@ export async function touchConversation(conversationId: string): Promise<void> {
 }
 
 export async function getConversationMessages(
-  conversationId: string
+  conversationId: string,
 ): Promise<ChatMessage[]> {
-  const { data, error } = await supabase
-    .from("conversation_messages")
-    .select("role,content,created_at")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true });
+  const rows: Array<{ role: string; content: string }> = [];
 
-  if (error) {
-    console.error("GET_MESSAGES_ERROR:", error);
-    return [];
+  for (let from = 0; ; from += MESSAGE_PAGE_SIZE) {
+    const to = from + MESSAGE_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from("conversation_messages")
+      .select("role,content,created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.error("GET_MESSAGES_ERROR:", error);
+      return rows.map((row) => ({
+        role: row.role as "user" | "assistant",
+        content: row.content as string,
+      }));
+    }
+
+    rows.push(...(data ?? []));
+
+    if (!data || data.length < MESSAGE_PAGE_SIZE) break;
   }
 
-  return (data ?? []).map((row) => ({
+  return rows.map((row) => ({
     role: row.role as "user" | "assistant",
     content: row.content as string,
   }));
@@ -99,21 +121,28 @@ export async function getConversationMessages(
 
 export async function appendMessages(
   conversationId: string,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
 ): Promise<void> {
   if (!messages.length) return;
 
-  const rows = messages.map((m) => ({
-    conversation_id: conversationId,
-    role: m.role,
-    content: m.content,
-  }));
+  for (
+    let index = 0;
+    index < messages.length;
+    index += MESSAGE_INSERT_BATCH_SIZE
+  ) {
+    const batch = messages.slice(index, index + MESSAGE_INSERT_BATCH_SIZE);
+    const rows = batch.map((m) => ({
+      conversation_id: conversationId,
+      role: m.role,
+      content: m.content,
+    }));
 
-  const { error } = await supabase.from("conversation_messages").insert(rows);
+    const { error } = await supabase.from("conversation_messages").insert(rows);
 
-  if (error) {
-    console.error("APPEND_MESSAGES_ERROR:", error);
-    return;
+    if (error) {
+      console.error("APPEND_MESSAGES_ERROR:", error);
+      return;
+    }
   }
 
   await touchConversation(conversationId);
@@ -121,22 +150,49 @@ export async function appendMessages(
 
 export async function replaceConversationMessages(
   conversationId: string,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
 ): Promise<void> {
-  const { error: deleteError } = await supabase
-    .from("conversation_messages")
-    .delete()
-    .eq("conversation_id", conversationId);
+  const existing = await getConversationMessages(conversationId);
 
-  if (deleteError) {
-    console.error("REPLACE_MESSAGES_DELETE_ERROR:", deleteError);
+  if (!existing.length) {
+    await appendMessages(conversationId, messages);
     return;
   }
 
-  await appendMessages(conversationId, messages);
+  if (messages.length < existing.length) {
+    console.warn("SKIP_TRUNCATED_CONVERSATION_SAVE:", {
+      conversationId,
+      existing: existing.length,
+      incoming: messages.length,
+    });
+    await touchConversation(conversationId);
+    return;
+  }
+
+  const prefixMatches = existing.every((message, index) =>
+    sameMessage(message, messages[index]),
+  );
+
+  if (!prefixMatches) {
+    console.warn("CONVERSATION_PREFIX_MISMATCH_APPEND_ONLY:", {
+      conversationId,
+      existing: existing.length,
+      incoming: messages.length,
+    });
+  }
+
+  const newMessages = messages.slice(existing.length);
+  if (!newMessages.length) {
+    await touchConversation(conversationId);
+    return;
+  }
+
+  await appendMessages(conversationId, newMessages);
 }
 
-export async function deleteConversation(conversationId: string): Promise<void> {
+export async function deleteConversation(
+  conversationId: string,
+): Promise<void> {
   const { error } = await supabase
     .from("conversations")
     .delete()

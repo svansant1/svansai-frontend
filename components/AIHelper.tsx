@@ -90,6 +90,9 @@ const MAX_FILE_MB = 10;
 const MAX_ATTACHMENTS = 30;
 const MAX_TOTAL_FILE_MB = 40;
 const MAX_MESSAGE_CHARS = 30_000;
+const LONG_CHAT_MESSAGE_THRESHOLD = 90;
+const LONG_CHAT_CHAR_THRESHOLD = 55_000;
+const HANDOFF_STORAGE_PREFIX = "svansai-continuation-";
 const ACCEPTED_EXTENSION_PATTERN =
   /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|txt|json|html|css|csv|tsv|xlsx|pdf)$/i;
 
@@ -146,6 +149,107 @@ const RESPONSE_MODES: Array<{
     title: "Diagnose problems and find the smallest fix",
   },
 ];
+
+function createContinuationKeyword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(6);
+
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 255);
+    }
+  }
+
+  return `SV-CONTINUE-${Array.from(bytes)
+    .map((byte) => alphabet[byte % alphabet.length])
+    .join("")}`;
+}
+
+function buildContinuationContext(messages: ChatMessage[]): string {
+  const visibleMessages = messages.filter((message) => message.content.trim());
+  const firstUserMessage = visibleMessages.find(
+    (message) => message.role === "user",
+  );
+  const recentMessages = visibleMessages.slice(-24);
+  const userTopics = visibleMessages
+    .filter((message) => message.role === "user")
+    .slice(-12)
+    .map((message, index) => {
+      const clean = message.content.replace(/\s+/g, " ").trim();
+      return `${index + 1}. ${clean.length > 220 ? `${clean.slice(0, 220)}...` : clean}`;
+    });
+
+  const recentTranscript = recentMessages
+    .map((message) => {
+      const clean = message.content.replace(/\s+/g, " ").trim();
+      return `${message.role === "user" ? "User" : "SVANS-AI"}: ${
+        clean.length > 420 ? `${clean.slice(0, 420)}...` : clean
+      }`;
+    })
+    .join("\n");
+
+  return [
+    "SVANS-AI continuation package.",
+    "Use this as context from the previous long chat. Do not paste this package back to the user unless asked.",
+    firstUserMessage
+      ? `Original starting point: ${firstUserMessage.content
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 500)}`
+      : "Original starting point: not available.",
+    userTopics.length
+      ? `Recent user goals/questions:\n${userTopics.join("\n")}`
+      : "Recent user goals/questions: not available.",
+    `Recent transcript slice:\n${recentTranscript}`,
+  ].join("\n\n");
+}
+
+function saveContinuationContext(keyword: string, messages: ChatMessage[]) {
+  if (typeof window === "undefined") return null;
+  const context = buildContinuationContext(messages);
+  const payload = {
+    keyword,
+    createdAt: new Date().toISOString(),
+    messageCount: messages.length,
+    context,
+  };
+
+  try {
+    localStorage.setItem(
+      `${HANDOFF_STORAGE_PREFIX}${keyword}`,
+      JSON.stringify(payload),
+    );
+    return true;
+  } catch (error) {
+    console.error("CONTINUATION_CONTEXT_SAVE_ERROR:", error);
+    return false;
+  }
+}
+
+function storeContinuationContext(messages: ChatMessage[]): string | null {
+  const keyword = createContinuationKeyword();
+  return saveContinuationContext(keyword, messages) ? keyword : null;
+}
+
+function loadContinuationContext(input: string): string | null {
+  if (typeof window === "undefined") return null;
+  const keyword = input.match(/\bSV-CONTINUE-[A-Z0-9]{6,12}\b/i)?.[0];
+  if (!keyword) return null;
+
+  try {
+    const raw = localStorage.getItem(
+      `${HANDOFF_STORAGE_PREFIX}${keyword.toUpperCase()}`,
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { context?: string };
+    return typeof parsed.context === "string" ? parsed.context : null;
+  } catch (error) {
+    console.error("CONTINUATION_CONTEXT_LOAD_ERROR:", error);
+    return null;
+  }
+}
 
 function formatLabel(value: string) {
   return value
@@ -476,14 +580,8 @@ function normalizeQuizPaste(text: string): string {
       /\bQuestion\s+(\d+)\s+Question\s+\1\s*(\d+)\s*pts?\b/gi,
       "Question $1\n$2 pts\n\n",
     )
-    .replace(
-      /^Question\s+(\d+)\s*(\d+)\s*pts?\s*/i,
-      "Question $1\n$2 pts\n\n",
-    )
-    .replace(
-      /\s*Group of answer choices\s*/gi,
-      "\n\nGroup of answer choices\n",
-    )
+    .replace(/^Question\s+(\d+)\s*(\d+)\s*pts?\s*/i, "Question $1\n$2 pts\n\n")
+    .replace(/\s*Group of answer choices\s*/gi, "\n\nGroup of answer choices\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -525,6 +623,10 @@ export default function AIHelper({
     "personal_preference",
   );
   const [memorySummary, setMemorySummary] = useState("");
+  const [continuationKeyword, setContinuationKeyword] = useState<string | null>(
+    null,
+  );
+  const [continuationStatus, setContinuationStatus] = useState("");
   const [showAttachmentDetails, setShowAttachmentDetails] = useState(false);
   const attachedFile = attachedFiles[0] ?? null;
   const attachmentTotalKb = Math.round(
@@ -546,6 +648,13 @@ export default function AIHelper({
         : attachedFiles.length === 1
           ? attachedFiles[0]?.name
           : `${attachedFiles.length} files`;
+  const chatCharacterCount = useMemo(
+    () => messages.reduce((sum, message) => sum + message.content.length, 0),
+    [messages],
+  );
+  const isLongChat =
+    messages.length >= LONG_CHAT_MESSAGE_THRESHOLD ||
+    chatCharacterCount >= LONG_CHAT_CHAR_THRESHOLD;
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -649,6 +758,26 @@ export default function AIHelper({
       behavior: "smooth",
     });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (!isLongChat) {
+      setContinuationKeyword(null);
+      setContinuationStatus("");
+      return;
+    }
+
+    setContinuationKeyword((current) => {
+      if (current) {
+        saveContinuationContext(current, messages);
+        return current;
+      }
+      return storeContinuationContext(messages);
+    });
+  }, [isLongChat, messages]);
+
+  useEffect(() => {
+    setContinuationStatus("");
+  }, [continuationKeyword]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -1012,6 +1141,7 @@ export default function AIHelper({
     setInput("");
 
     const filesToSend = attachedFiles;
+    const continuationContext = loadContinuationContext(userMessage.content);
 
     setAttachedFiles([]);
     setShowAttachmentDetails(false);
@@ -1021,11 +1151,20 @@ export default function AIHelper({
     notifyThinking(true, inferThinkingStatus(userMessage.content, filesToSend));
 
     try {
+      const requestMessages = nextMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      if (continuationContext) {
+        requestMessages.unshift({
+          role: "user",
+          content: `${continuationContext}\n\nThe user has entered the continuation keyword in a new chat. Use this context to continue naturally, then answer the user's latest message directly.`,
+        });
+      }
+
       const body: Record<string, unknown> = {
-        messages: nextMessages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages: requestMessages,
         sessionId,
         responseMode,
       };
@@ -1115,80 +1254,75 @@ export default function AIHelper({
     }
   };
 
-  const handlePaste = async (
-  e: React.ClipboardEvent<HTMLTextAreaElement>,
-) => {
-  const pastedText = e.clipboardData.getData("text/plain");
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedText = e.clipboardData.getData("text/plain");
 
-  if (pastedText && input.length + pastedText.length > MAX_MESSAGE_CHARS) {
-    e.preventDefault();
+    if (pastedText && input.length + pastedText.length > MAX_MESSAGE_CHARS) {
+      e.preventDefault();
 
-    setFileError(
-      `That paste is larger than one chat message can handle. Split it into smaller parts or attach it as a .txt/PDF file. Example: "Explain the kernel with an example" or "Quiz me on file systems."`,
-    );
-
-    return;
-  }
-
-  const formattedText = normalizeQuizPaste(pastedText);
-
-  if (formattedText !== pastedText) {
-    e.preventDefault();
-
-    const textarea = e.currentTarget;
-    const selectionStart = textarea.selectionStart;
-    const selectionEnd = textarea.selectionEnd;
-
-    const nextInput =
-      input.slice(0, selectionStart) +
-      formattedText +
-      input.slice(selectionEnd);
-
-    setInput(nextInput);
-
-    window.requestAnimationFrame(() => {
-      const cursorPosition = selectionStart + formattedText.length;
-
-      textareaRef.current?.setSelectionRange(
-        cursorPosition,
-        cursorPosition,
+      setFileError(
+        `That paste is larger than one chat message can handle. Split it into smaller parts or attach it as a .txt/PDF file. Example: "Explain the kernel with an example" or "Quiz me on file systems."`,
       );
-    });
-  }
 
-  const items = e.clipboardData.items;
+      return;
+    }
 
-  for (let i = 0; i < items.length; i += 1) {
-    if (!items[i].type.includes("image")) continue;
+    const formattedText = normalizeQuizPaste(pastedText);
 
-    const file = items[i].getAsFile();
-    if (!file) continue;
+    if (formattedText !== pastedText) {
+      e.preventDefault();
 
-    const reader = new FileReader();
+      const textarea = e.currentTarget;
+      const selectionStart = textarea.selectionStart;
+      const selectionEnd = textarea.selectionEnd;
 
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result;
-      if (typeof dataUrl !== "string") return;
+      const nextInput =
+        input.slice(0, selectionStart) +
+        formattedText +
+        input.slice(selectionEnd);
 
-      setAttachedFiles((current) =>
-        [
-          ...current,
-          {
-            name: "pasted-image.png",
-            type: file.type,
-            base64: dataUrl.split(",")[1] || "",
-            dataUrl,
-            size: file.size,
-          },
-        ].slice(0, MAX_ATTACHMENTS),
-      );
-    };
+      setInput(nextInput);
 
-    reader.readAsDataURL(file);
+      window.requestAnimationFrame(() => {
+        const cursorPosition = selectionStart + formattedText.length;
 
-    if (attachedFiles.length >= MAX_ATTACHMENTS) break;
-  }
-};
+        textareaRef.current?.setSelectionRange(cursorPosition, cursorPosition);
+      });
+    }
+
+    const items = e.clipboardData.items;
+
+    for (let i = 0; i < items.length; i += 1) {
+      if (!items[i].type.includes("image")) continue;
+
+      const file = items[i].getAsFile();
+      if (!file) continue;
+
+      const reader = new FileReader();
+
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result;
+        if (typeof dataUrl !== "string") return;
+
+        setAttachedFiles((current) =>
+          [
+            ...current,
+            {
+              name: "pasted-image.png",
+              type: file.type,
+              base64: dataUrl.split(",")[1] || "",
+              dataUrl,
+              size: file.size,
+            },
+          ].slice(0, MAX_ATTACHMENTS),
+        );
+      };
+
+      reader.readAsDataURL(file);
+
+      if (attachedFiles.length >= MAX_ATTACHMENTS) break;
+    }
+  };
 
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>,
@@ -1576,6 +1710,100 @@ export default function AIHelper({
           boxSizing: "border-box",
         }}
       >
+        {continuationKeyword && (
+          <div
+            style={{
+              marginBottom: "10px",
+              padding: "12px 14px",
+              borderRadius: "16px",
+              border: "1px solid rgba(251,191,36,0.34)",
+              background:
+                "linear-gradient(135deg, rgba(251,191,36,0.12), rgba(56,189,248,0.08))",
+              color: "white",
+              boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
+            }}
+          >
+            <div
+              style={{
+                color: "#fde68a",
+                fontSize: "0.72rem",
+                fontWeight: 950,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                marginBottom: "5px",
+              }}
+            >
+              Long chat handoff ready
+            </div>
+            <div
+              style={{
+                fontSize: "0.86rem",
+                lineHeight: 1.5,
+                color: "rgba(255,255,255,0.86)",
+                marginBottom: "9px",
+              }}
+            >
+              This chat is getting long. To avoid context or history issues,
+              start a new chat and paste this keyword so SVANS-AI can continue
+              with the important context from here.
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <code
+                style={{
+                  padding: "6px 9px",
+                  borderRadius: "10px",
+                  background: "rgba(15,23,42,0.56)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: "#bae6fd",
+                  fontWeight: 900,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {continuationKeyword}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(
+                    `Continue from ${continuationKeyword}`,
+                  );
+                  setContinuationStatus("Keyword copied.");
+                }}
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(125,211,252,0.24)",
+                  background: "rgba(56,189,248,0.12)",
+                  color: "#e0f2fe",
+                  cursor: "pointer",
+                  fontWeight: 850,
+                  fontSize: "0.78rem",
+                }}
+              >
+                Copy keyword
+              </button>
+              {continuationStatus && (
+                <span
+                  style={{
+                    color: "rgba(255,255,255,0.62)",
+                    fontSize: "0.76rem",
+                    fontWeight: 750,
+                  }}
+                >
+                  {continuationStatus}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {attachedFiles.length > 0 && (
           <div
             style={{
