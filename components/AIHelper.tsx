@@ -90,8 +90,8 @@ const MAX_FILE_MB = 10;
 const MAX_ATTACHMENTS = 30;
 const MAX_TOTAL_FILE_MB = 40;
 const MAX_MESSAGE_CHARS = 30_000;
-const LONG_CHAT_MESSAGE_THRESHOLD = 90;
-const LONG_CHAT_CHAR_THRESHOLD = 55_000;
+const LONG_CHAT_MESSAGE_THRESHOLD = 220;
+const LONG_CHAT_CHAR_THRESHOLD = 140_000;
 const HANDOFF_STORAGE_PREFIX = "svansai-continuation-";
 const ACCEPTED_EXTENSION_PATTERN =
   /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|txt|json|html|css|csv|tsv|xlsx|pdf)$/i;
@@ -627,6 +627,8 @@ export default function AIHelper({
     null,
   );
   const [continuationStatus, setContinuationStatus] = useState("");
+  const [dismissedContinuationKeyword, setDismissedContinuationKeyword] =
+    useState<string | null>(null);
   const [showAttachmentDetails, setShowAttachmentDetails] = useState(false);
   const attachedFile = attachedFiles[0] ?? null;
   const attachmentTotalKb = Math.round(
@@ -655,6 +657,9 @@ export default function AIHelper({
   const isLongChat =
     messages.length >= LONG_CHAT_MESSAGE_THRESHOLD ||
     chatCharacterCount >= LONG_CHAT_CHAR_THRESHOLD;
+  const showContinuationBanner =
+    Boolean(continuationKeyword) &&
+    dismissedContinuationKeyword !== continuationKeyword;
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -763,6 +768,7 @@ export default function AIHelper({
     if (!isLongChat) {
       setContinuationKeyword(null);
       setContinuationStatus("");
+      setDismissedContinuationKeyword(null);
       return;
     }
 
@@ -1710,19 +1716,44 @@ export default function AIHelper({
           boxSizing: "border-box",
         }}
       >
-        {continuationKeyword && (
+        {showContinuationBanner && continuationKeyword && (
           <div
             style={{
-              marginBottom: "10px",
-              padding: "12px 14px",
-              borderRadius: "16px",
+              position: "relative",
+              marginBottom: "8px",
+              padding: "9px 42px 9px 12px",
+              borderRadius: "14px",
               border: "1px solid rgba(251,191,36,0.34)",
               background:
                 "linear-gradient(135deg, rgba(251,191,36,0.12), rgba(56,189,248,0.08))",
               color: "white",
-              boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.16)",
             }}
           >
+            <button
+              type="button"
+              aria-label="Dismiss long chat handoff"
+              onClick={() => {
+                setDismissedContinuationKeyword(continuationKeyword);
+                setContinuationStatus("");
+              }}
+              style={{
+                position: "absolute",
+                top: "8px",
+                right: "9px",
+                width: "24px",
+                height: "24px",
+                borderRadius: "999px",
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(15,23,42,0.42)",
+                color: "rgba(255,255,255,0.82)",
+                cursor: "pointer",
+                fontWeight: 900,
+                lineHeight: "20px",
+              }}
+            >
+              ×
+            </button>
             <div
               style={{
                 color: "#fde68a",
@@ -1730,22 +1761,22 @@ export default function AIHelper({
                 fontWeight: 950,
                 letterSpacing: "0.08em",
                 textTransform: "uppercase",
-                marginBottom: "5px",
+                marginBottom: "3px",
               }}
             >
-              Long chat handoff ready
+              Chat handoff ready
             </div>
             <div
               style={{
-                fontSize: "0.86rem",
-                lineHeight: 1.5,
+                fontSize: "0.8rem",
+                lineHeight: 1.35,
                 color: "rgba(255,255,255,0.86)",
-                marginBottom: "9px",
+                marginBottom: "7px",
               }}
             >
-              This chat is getting long. To avoid context or history issues,
-              start a new chat and paste this keyword so SVANS-AI can continue
-              with the important context from here.
+              This chat is near the handoff point. Start a new chat and paste
+              this keyword if you want SVANS-AI to continue with the important
+              context.
             </div>
             <div
               style={{
@@ -1757,13 +1788,14 @@ export default function AIHelper({
             >
               <code
                 style={{
-                  padding: "6px 9px",
+                  padding: "5px 8px",
                   borderRadius: "10px",
                   background: "rgba(15,23,42,0.56)",
                   border: "1px solid rgba(255,255,255,0.12)",
                   color: "#bae6fd",
                   fontWeight: 900,
                   letterSpacing: "0.04em",
+                  fontSize: "0.78rem",
                 }}
               >
                 {continuationKeyword}
@@ -1777,14 +1809,14 @@ export default function AIHelper({
                   setContinuationStatus("Keyword copied.");
                 }}
                 style={{
-                  padding: "7px 10px",
+                  padding: "6px 9px",
                   borderRadius: "999px",
                   border: "1px solid rgba(125,211,252,0.24)",
                   background: "rgba(56,189,248,0.12)",
                   color: "#e0f2fe",
                   cursor: "pointer",
                   fontWeight: 850,
-                  fontSize: "0.78rem",
+                  fontSize: "0.74rem",
                 }}
               >
                 Copy keyword

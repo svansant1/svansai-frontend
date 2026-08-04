@@ -2,7 +2,7 @@ import "./globals.css";
 
 // app/layout.js
 export const metadata = {
-  title: "SVANS-AI",
+  title: "SVANS",
   description: "Your AI Guide for Anything",
   icons: {
     // This looks for public/icon.png
