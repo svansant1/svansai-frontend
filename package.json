@@ -9,8 +9,8 @@
     "dev": "next dev --hostname 0.0.0.0",
     "desktop": "electron desktop/main.cjs",
     "desktop:dev": "node desktop/dev-runner.cjs",
-    "desktop:pack": "npm run build && electron-builder --dir",
-    "desktop:dist": "npm run build && electron-builder",
+    "desktop:pack": "node desktop/stage-desktop-app.cjs && electron-builder --config desktop/electron-builder.cjs --dir",
+    "desktop:dist": "node desktop/stage-desktop-app.cjs && electron-builder --config desktop/electron-builder.cjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -54,21 +54,16 @@
   "build": {
     "appId": "com.vansantplatform.svansai",
     "productName": "SVANS-AI Desktop",
-    "asar": false,
+    "asar": true,
+    "extraMetadata": {
+      "dependencies": {}
+    },
     "directories": {
       "output": "dist-desktop"
     },
     "files": [
-      "app/**/*",
-      "components/**/*",
       "desktop/**/*",
-      "lib/**/*",
-      "public/**/*",
-      "scripts/**/*",
-      "next.config.ts",
-      "package.json",
-      ".next/**/*",
-      "node_modules/**/*"
+      "package.json"
     ],
     "win": {
       "target": [

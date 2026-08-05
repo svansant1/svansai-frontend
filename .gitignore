@@ -8,6 +8,7 @@ node_modules/
 out/
 dist/
 dist-desktop/
+.desktop-app/
 build/
 public/downloads/*.zip
 

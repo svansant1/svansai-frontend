@@ -11,7 +11,7 @@ const IS_DEV = process.env.SVANSAI_DESKTOP_DEV === "1" || !app.isPackaged;
 const APP_PORT = Number(process.env.SVANSAI_DESKTOP_PORT || 3187);
 const APP_URL =
   process.env.SVANSAI_DESKTOP_URL ||
-  (IS_DEV ? "http://127.0.0.1:3000" : `http://127.0.0.1:${APP_PORT}`);
+  (IS_DEV ? "http://127.0.0.1:3000" : "https://svansai-frontend.onrender.com");
 const MAX_TREE_ENTRIES = 2500;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
@@ -362,7 +362,7 @@ async function waitForServer(url, attempts = 80) {
 }
 
 function startNextServer() {
-  if (IS_DEV || nextProcess) return;
+  if (IS_DEV || nextProcess || !APP_URL.includes(`127.0.0.1:${APP_PORT}`)) return;
 
   const appRoot = app.getAppPath();
   const nextBin = path.join(
@@ -405,7 +405,7 @@ function startNextServer() {
 
 async function createWindow() {
   startNextServer();
-  if (!IS_DEV) {
+  if (!IS_DEV && APP_URL.includes(`127.0.0.1:${APP_PORT}`)) {
     await waitForServer(APP_URL);
   }
 
