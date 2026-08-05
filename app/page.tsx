@@ -2060,7 +2060,8 @@ export default function HomePage() {
               alignItems: "center",
               justifyContent: isMobile ? "center" : "flex-end",
               marginBottom: isMobile ? "16px" : 0,
-              flexWrap: "wrap",
+              flexDirection: "column",
+              flexWrap: "nowrap",
               zIndex: 3,
             }}
           >
@@ -2073,28 +2074,6 @@ export default function HomePage() {
                 flexWrap: "wrap",
               }}
             >
-              <a
-                href={DESKTOP_DOWNLOAD_URL}
-                download
-                style={{
-                  ...pillButtonStyle({
-                    textDecoration: "none",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "7px",
-                    background:
-                      "linear-gradient(135deg, rgba(56,189,248,0.26), rgba(168,85,247,0.14))",
-                    border: "1px solid rgba(125,211,252,0.34)",
-                    boxShadow:
-                      "0 14px 28px rgba(14,165,233,0.14), inset 0 1px 0 rgba(255,255,255,0.1)",
-                  }),
-                }}
-              >
-                <span aria-hidden="true">⬇</span>
-                <span>Desktop App</span>
-              </a>
-
               <div
                 style={{
                   display: "flex",
@@ -2142,6 +2121,29 @@ export default function HomePage() {
                 </button>
               )}
             </div>
+
+            <a
+              href={DESKTOP_DOWNLOAD_URL}
+              download
+              style={{
+                ...pillButtonStyle({
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "7px",
+                  minWidth: "132px",
+                  background:
+                    "linear-gradient(135deg, rgba(56,189,248,0.26), rgba(168,85,247,0.14))",
+                  border: "1px solid rgba(125,211,252,0.34)",
+                  boxShadow:
+                    "0 14px 28px rgba(14,165,233,0.14), inset 0 1px 0 rgba(255,255,255,0.1)",
+                }),
+              }}
+            >
+              <span aria-hidden="true">⬇</span>
+              <span>Desktop App</span>
+            </a>
           </div>
 
           <motion.p
