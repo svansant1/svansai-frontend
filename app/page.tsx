@@ -41,7 +41,7 @@ const MASCOT_KEY = "svansai-mascot-position";
 const ACTIVE_CONVERSATION_KEY = "svansai-active-conversation-id";
 const VISITOR_ID_KEY = "svansai-visitor-id";
 const DESKTOP_DOWNLOAD_URL =
-  "https://vansantplatform.com/downloads/SVANS-AI-Desktop.exe";
+  "https://github.com/svansant1/vansantplatform/raw/db32dcb8c4bb7e065a99f6f5001f846d510903d3/frontend/public/downloads/SVANS-AI-Desktop.exe";
 
 const clampMascotPosition = (
   position: MascotPosition,
