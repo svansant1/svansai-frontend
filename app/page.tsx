@@ -41,7 +41,7 @@ const MASCOT_KEY = "svansai-mascot-position";
 const ACTIVE_CONVERSATION_KEY = "svansai-active-conversation-id";
 const VISITOR_ID_KEY = "svansai-visitor-id";
 const DESKTOP_DOWNLOAD_URL =
-  "/downloads/SVANS-AI-Desktop-Windows-v0.1.0.zip";
+  "https://vansantplatform.com/svans-ai";
 
 const clampMascotPosition = (
   position: MascotPosition,
@@ -2124,7 +2124,6 @@ export default function HomePage() {
 
             <a
               href={DESKTOP_DOWNLOAD_URL}
-              download
               style={{
                 ...pillButtonStyle({
                   textDecoration: "none",
