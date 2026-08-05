@@ -7,7 +7,9 @@ node_modules/
 .next/
 out/
 dist/
+dist-desktop/
 build/
+public/downloads/*.zip
 
 # Environment variables
 
