@@ -2054,49 +2054,17 @@ export default function HomePage() {
             style={{
               position: isMobile ? "static" : "absolute",
               top: isMobile ? undefined : "14px",
+              left: isMobile ? undefined : "18px",
               right: isMobile ? undefined : "18px",
               display: "flex",
               gap: "8px",
               alignItems: "center",
-              justifyContent: isMobile ? "center" : "flex-end",
+              justifyContent: isMobile ? "center" : "space-between",
               marginBottom: isMobile ? "16px" : 0,
               flexWrap: "wrap",
+              zIndex: 3,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "5px",
-                padding: "7px 12px",
-                borderRadius: "999px",
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.055)",
-                color: "rgba(255,255,255,0.72)",
-                fontSize: "11px",
-                fontWeight: 700,
-                letterSpacing: "0.06em",
-                boxShadow: "0 10px 24px rgba(0,0,0,0.14)",
-              }}
-              title="Total unique views"
-            >
-              <span>👁</span>
-              <span>{totalViews.toLocaleString()}</span>
-            </div>
-
-            <button
-              onClick={() => {
-                if (!user) {
-                  setShowLogin(true);
-                } else {
-                  setShowFeedback(true);
-                }
-              }}
-              style={pillButtonStyle()}
-            >
-              Feedback
-            </button>
-
             <a
               href={DESKTOP_DOWNLOAD_URL}
               download
@@ -2106,27 +2074,75 @@ export default function HomePage() {
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  gap: "7px",
                   background:
-                    "linear-gradient(135deg, rgba(56,189,248,0.22), rgba(168,85,247,0.12))",
-                  border: "1px solid rgba(125,211,252,0.26)",
+                    "linear-gradient(135deg, rgba(56,189,248,0.26), rgba(168,85,247,0.14))",
+                  border: "1px solid rgba(125,211,252,0.34)",
+                  boxShadow:
+                    "0 14px 28px rgba(14,165,233,0.14), inset 0 1px 0 rgba(255,255,255,0.1)",
                 }),
               }}
             >
-              Desktop
+              <span aria-hidden="true">⬇</span>
+              <span>Desktop App</span>
             </a>
 
-            {user ? (
-              <button onClick={handleLogout} style={pillButtonStyle()}>
-                Log Out
-              </button>
-            ) : (
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                flexWrap: "wrap",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  padding: "7px 12px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.055)",
+                  color: "rgba(255,255,255,0.72)",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  boxShadow: "0 10px 24px rgba(0,0,0,0.14)",
+                }}
+                title="Total unique views"
+              >
+                <span>👁</span>
+                <span>{totalViews.toLocaleString()}</span>
+              </div>
+
               <button
-                onClick={() => setShowLogin(true)}
+                onClick={() => {
+                  if (!user) {
+                    setShowLogin(true);
+                  } else {
+                    setShowFeedback(true);
+                  }
+                }}
                 style={pillButtonStyle()}
               >
-                Login
+                Feedback
               </button>
-            )}
+
+              {user ? (
+                <button onClick={handleLogout} style={pillButtonStyle()}>
+                  Log Out
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowLogin(true)}
+                  style={pillButtonStyle()}
+                >
+                  Login
+                </button>
+              )}
+            </div>
           </div>
 
           <motion.p
