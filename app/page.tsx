@@ -2054,39 +2054,16 @@ export default function HomePage() {
             style={{
               position: isMobile ? "static" : "absolute",
               top: isMobile ? undefined : "14px",
-              left: isMobile ? undefined : "18px",
               right: isMobile ? undefined : "18px",
               display: "flex",
               gap: "8px",
               alignItems: "center",
-              justifyContent: isMobile ? "center" : "space-between",
+              justifyContent: isMobile ? "center" : "flex-end",
               marginBottom: isMobile ? "16px" : 0,
               flexWrap: "wrap",
               zIndex: 3,
             }}
           >
-            <a
-              href={DESKTOP_DOWNLOAD_URL}
-              download
-              style={{
-                ...pillButtonStyle({
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "7px",
-                  background:
-                    "linear-gradient(135deg, rgba(56,189,248,0.26), rgba(168,85,247,0.14))",
-                  border: "1px solid rgba(125,211,252,0.34)",
-                  boxShadow:
-                    "0 14px 28px rgba(14,165,233,0.14), inset 0 1px 0 rgba(255,255,255,0.1)",
-                }),
-              }}
-            >
-              <span aria-hidden="true">⬇</span>
-              <span>Desktop App</span>
-            </a>
-
             <div
               style={{
                 display: "flex",
@@ -2096,6 +2073,28 @@ export default function HomePage() {
                 flexWrap: "wrap",
               }}
             >
+              <a
+                href={DESKTOP_DOWNLOAD_URL}
+                download
+                style={{
+                  ...pillButtonStyle({
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "7px",
+                    background:
+                      "linear-gradient(135deg, rgba(56,189,248,0.26), rgba(168,85,247,0.14))",
+                    border: "1px solid rgba(125,211,252,0.34)",
+                    boxShadow:
+                      "0 14px 28px rgba(14,165,233,0.14), inset 0 1px 0 rgba(255,255,255,0.1)",
+                  }),
+                }}
+              >
+                <span aria-hidden="true">⬇</span>
+                <span>Desktop App</span>
+              </a>
+
               <div
                 style={{
                   display: "flex",
