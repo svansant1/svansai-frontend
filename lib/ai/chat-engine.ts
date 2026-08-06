@@ -2299,7 +2299,18 @@ function getDiscussionReplyDraftAnswer(message: string): string | null {
       message,
     );
 
-  if (!asksForReply || !hasControlStructurePost) return null;
+  if (!asksForReply) return null;
+
+  const hasNetworkSecurityPost =
+    /\b(network security|firewall|firewalls?|packet inspection|stateful|access control lists?|acls?|vpn|suspicious ip|remote worker)\b/i.test(
+      message,
+    );
+
+  if (hasNetworkSecurityPost) {
+    return "Here’s a more natural reply you could use:\n\nHi Jasmine,\n\nI liked how you broke down firewall essentials into layered defense, packet inspection, and ACLs. The part about stateful firewalls stood out to me because it shows that modern firewalls are not just looking at one packet by itself, but also paying attention to the bigger picture of the connection.\n\nYour workplace example was also realistic. If someone could not connect through a VPN, checking firewall logs, ports, and ACL rules would be a practical place to start. I also think blocking a suspicious IP address is a good example of how these concepts apply beyond just learning the terms. It shows how network security is really about controlling access while still allowing legitimate users to do their jobs.";
+  }
+
+  if (!hasControlStructurePost) return null;
 
   return "Here’s a solid reply you could use:\n\nGood afternoon Aaron,\n\nYou explained the three control structures clearly. I like how you pointed out that sequence is the foundation because most programs still need instructions to run in an organized order before selection or iteration are added. Your explanation of selection also makes sense because if/else statements allow the program to make decisions instead of following only one path.\n\nI also agree that these structures do not always have to follow one strict order. In many programs, they work together. For example, a program might start with a sequence of setup steps, use selection to decide what action to take, and then use iteration to repeat a task until a condition is met. That combination is what makes program flow more flexible and useful.";
 }
@@ -2343,11 +2354,22 @@ function getFilesystemPermissionModelAnswer(message: string): string | null {
   if (looksLikeQuizBlock(message)) return null;
 
   const normalized = normalizeText(message);
+  if (
+    /\b(write|draft|make|create|give)\b.*\breply\b/i.test(normalized) ||
+    /\b(reply discussion|discussion reply|reply to this discussion|discussion post)\b/i.test(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+
   const asksAboutPermissions =
-    /\b(permission|access|full access|some access|ask for access|c drive|filesystem|file system|folders?)\b/i.test(
+    /\b(permission|full access|some access|ask for access|c drive|filesystem|file system|local files?|local folders?|workspace access|folder access)\b/i.test(
       normalized,
     ) &&
-    /\b(add|have|give|allow|grant|ask|permission|access)\b/i.test(normalized);
+    /\b(add|have|give|allow|grant|ask|permission|access|connect)\b/i.test(
+      normalized,
+    );
 
   if (!asksAboutPermissions) return null;
 

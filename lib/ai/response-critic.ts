@@ -190,6 +190,19 @@ export function critiqueResponse(params: {
   }
 
   if (
+    /\b(write|draft|make|create|give)\b.*\breply\b/i.test(
+      params.latestUserMessage,
+    ) &&
+    /\b(permissioned|permission model|local vos desktop app|public web chat|selected folder access|trusted workspace access|full local access)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push(
+      "response gave filesystem permission guidance instead of drafting the requested discussion reply",
+    );
+  }
+
+  if (
     /\[attached:/i.test(params.latestUserMessage) &&
     /\b(please share|go ahead and share|provide the file|upload the file|attach the file|specific text or document|once you share)\b/i.test(
       response,

@@ -95,6 +95,16 @@ function chooseRoute(
   hasFile: boolean,
 ): TaskRoute {
   const normalized = message.toLowerCase();
+  const isExplicitWritingRequest =
+    /\b(rewrite|refine|proofread|grammar|write|draft|make|create|email|reply|discussion post)\b/.test(
+      normalized,
+    ) &&
+    /\b(reply|discussion|post|email|paragraph|human|human like|natural|rewrite|refine|proofread|grammar)\b/.test(
+      normalized,
+    );
+
+  if (isExplicitWritingRequest) return "write";
+
   if (
     mode === "debug" ||
     /\b(error|bug|broken|stack trace|not working|debug)\b/.test(normalized)
