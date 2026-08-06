@@ -2141,7 +2141,19 @@ export default function HomePage() {
                 }),
               }}
             >
-              <span aria-hidden="true">⬇</span>
+              <Image
+                src="/mascot/sv-robot.png"
+                alt=""
+                width={24}
+                height={24}
+                aria-hidden="true"
+                style={{
+                  width: "24px",
+                  height: "24px",
+                  objectFit: "contain",
+                  filter: "drop-shadow(0 0 8px rgba(56,189,248,0.38))",
+                }}
+              />
               <span>Desktop App</span>
             </a>
           </div>
