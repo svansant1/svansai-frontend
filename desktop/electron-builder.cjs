@@ -8,6 +8,11 @@ module.exports = {
   },
   files: ["!node_modules/**/*", "desktop/**/*", "package.json"],
   win: {
+    icon: "desktop/assets/svans-ai.ico",
     target: ["nsis"],
+  },
+  nsis: {
+    installerIcon: "desktop/assets/svans-ai.ico",
+    uninstallerIcon: "desktop/assets/svans-ai.ico",
   },
 };
