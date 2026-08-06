@@ -144,7 +144,7 @@ export default function DesktopCommandCenter() {
               textTransform: "uppercase",
             }}
           >
-            SVANS-AI Desktop Command Center
+            Local Workspace Command Center
           </span>
           <span
             style={{
@@ -157,7 +157,9 @@ export default function DesktopCommandCenter() {
               whiteSpace: "nowrap",
             }}
           >
-            {workspaceLabel}
+            {status?.workspace.root
+              ? workspaceLabel
+              : "Connect a folder when you want SVANS-AI to inspect local files"}
           </span>
         </span>
         <span
@@ -178,6 +180,19 @@ export default function DesktopCommandCenter() {
             padding: "10px 12px 12px",
           }}
         >
+          <p
+            style={{
+              margin: "0 0 10px",
+              color: "rgba(255,255,255,0.68)",
+              fontSize: "0.78rem",
+              lineHeight: 1.45,
+            }}
+          >
+            This panel gives the desktop app permission-based access to a local
+            project folder for scanning, search, Git checks, safe command runs,
+            and audited file actions.
+          </p>
+
           <div
             style={{
               display: "flex",

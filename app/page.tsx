@@ -86,6 +86,7 @@ export default function HomePage() {
     useState(false);
 
   const [isMobile, setIsMobile] = useState(false);
+  const [isDesktopShell, setIsDesktopShell] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -111,6 +112,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    setIsDesktopShell(Boolean(window.svansDesktop));
 
     const mode = getStarterQuoteMode();
     setStarterQuoteMode(mode);
@@ -2122,40 +2124,42 @@ export default function HomePage() {
               )}
             </div>
 
-            <a
-              href={DESKTOP_DOWNLOAD_URL}
-              download
-              style={{
-                ...pillButtonStyle({
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "7px",
-                  minWidth: "132px",
-                  background:
-                    "linear-gradient(135deg, rgba(56,189,248,0.26), rgba(168,85,247,0.14))",
-                  border: "1px solid rgba(125,211,252,0.34)",
-                  boxShadow:
-                    "0 14px 28px rgba(14,165,233,0.14), inset 0 1px 0 rgba(255,255,255,0.1)",
-                }),
-              }}
-            >
-              <Image
-                src="/mascot/sv-robot.png"
-                alt=""
-                width={24}
-                height={24}
-                aria-hidden="true"
+            {!isDesktopShell && (
+              <a
+                href={DESKTOP_DOWNLOAD_URL}
+                download
                 style={{
-                  width: "24px",
-                  height: "24px",
-                  objectFit: "contain",
-                  filter: "drop-shadow(0 0 8px rgba(56,189,248,0.38))",
+                  ...pillButtonStyle({
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "7px",
+                    minWidth: "132px",
+                    background:
+                      "linear-gradient(135deg, rgba(56,189,248,0.26), rgba(168,85,247,0.14))",
+                    border: "1px solid rgba(125,211,252,0.34)",
+                    boxShadow:
+                      "0 14px 28px rgba(14,165,233,0.14), inset 0 1px 0 rgba(255,255,255,0.1)",
+                  }),
                 }}
-              />
-              <span>Desktop App</span>
-            </a>
+              >
+                <Image
+                  src="/mascot/sv-robot.png"
+                  alt=""
+                  width={24}
+                  height={24}
+                  aria-hidden="true"
+                  style={{
+                    width: "24px",
+                    height: "24px",
+                    objectFit: "contain",
+                    filter: "drop-shadow(0 0 8px rgba(56,189,248,0.38))",
+                  }}
+                />
+                <span>Desktop App</span>
+              </a>
+            )}
           </div>
 
           <motion.p
