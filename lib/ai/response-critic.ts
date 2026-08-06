@@ -189,6 +189,17 @@ export function critiqueResponse(params: {
     );
   }
 
+  if (
+    /\[attached:/i.test(params.latestUserMessage) &&
+    /\b(please share|go ahead and share|provide the file|upload the file|attach the file|specific text or document|once you share)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push(
+      "response asked for an attachment or document even though the user already attached one",
+    );
+  }
+
   const teachingFirst =
     /teaching-first|teach the concept|clue or checkpoint/i.test(
       params.conversationState.modeBehavior,

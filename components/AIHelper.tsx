@@ -95,6 +95,8 @@ const LONG_CHAT_CHAR_THRESHOLD = 140_000;
 const HANDOFF_STORAGE_PREFIX = "svansai-continuation-";
 const ACCEPTED_EXTENSION_PATTERN =
   /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|txt|json|html|css|csv|tsv|xlsx|pdf)$/i;
+const ACCEPTED_DOTFILE_PATTERN =
+  /(^|[\\/])\.(gitignore|dockerignore|env\.example|env|npmrc|nvmrc|prettierrc|eslintrc|editorconfig)$/i;
 
 const PASSWORD_PROMPT = "enter owner password:";
 const PASSWORD_SUCCESS = "owner mode enabled";
@@ -950,8 +952,11 @@ export default function AIHelper({
 
     const validSelected = rawSelected.filter((file) => {
       const acceptedExtension = ACCEPTED_EXTENSION_PATTERN.test(file.name);
+      const acceptedDotfile = ACCEPTED_DOTFILE_PATTERN.test(file.name);
       return (
-        (ACCEPTED_TYPES.includes(file.type) || acceptedExtension) &&
+        (ACCEPTED_TYPES.includes(file.type) ||
+          acceptedExtension ||
+          acceptedDotfile) &&
         file.size <= MAX_FILE_MB * 1024 * 1024
       );
     });

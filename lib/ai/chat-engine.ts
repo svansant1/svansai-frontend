@@ -380,6 +380,9 @@ function isPdfAttachment(file?: AttachedFile) {
   return !!file && file.type === "application/pdf";
 }
 
+const TEXT_LIKE_DOTFILE_PATTERN =
+  /(^|[\\/])\.(gitignore|dockerignore|env\.example|env|npmrc|nvmrc|prettierrc|eslintrc|editorconfig)$/i;
+
 function isTextLikeAttachment(file?: AttachedFile) {
   if (!file) return false;
 
@@ -403,7 +406,7 @@ function isTextLikeAttachment(file?: AttachedFile) {
 
   return /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|json|txt|html|css|csv|tsv|xlsx)$/i.test(
     file.name,
-  );
+  ) || TEXT_LIKE_DOTFILE_PATTERN.test(file.name);
 }
 
 function isDataAttachment(file?: AttachedFile) {
@@ -2858,10 +2861,12 @@ Do not claim you have no browsing ability. Say that live search did not return e
     }
   }
 
-  const filesystemPermissionModelAnswer =
-    getFilesystemPermissionModelAnswer(latestUserMessage);
-  if (filesystemPermissionModelAnswer) {
-    return filesystemPermissionModelAnswer;
+  if (attachedFiles.length === 0) {
+    const filesystemPermissionModelAnswer =
+      getFilesystemPermissionModelAnswer(latestUserMessage);
+    if (filesystemPermissionModelAnswer) {
+      return filesystemPermissionModelAnswer;
+    }
   }
 
   const studyMaterialAcknowledgement =

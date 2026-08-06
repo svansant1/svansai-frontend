@@ -10,6 +10,9 @@ export type FileUnderstandingResult = {
   error?: string;
 };
 
+const TEXT_LIKE_DOTFILE_PATTERN =
+  /(^|[\\/])\.(gitignore|dockerignore|env\.example|env|npmrc|nvmrc|prettierrc|eslintrc|editorconfig)$/i;
+
 export async function understandAttachedFile(file: AttachedFile): Promise<FileUnderstandingResult> {
   if (file.type.startsWith("image/")) {
     return { kind: "image" };
@@ -50,7 +53,8 @@ export async function understandAttachedFile(file: AttachedFile): Promise<FileUn
     file.type.startsWith("text/") ||
     file.type === "application/csv" ||
     file.type === "application/vnd.ms-excel" ||
-    file.name.match(/\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|json|csv|tsv)$/i)
+    file.name.match(/\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|json|txt|html|css|csv|tsv)$/i) ||
+    TEXT_LIKE_DOTFILE_PATTERN.test(file.name)
   ) {
     const extractedText = Buffer.from(file.base64, "base64").toString("utf-8");
     if (
