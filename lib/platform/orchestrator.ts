@@ -158,6 +158,10 @@ function capabilitiesForRequest(
     /\b(group of answer choices|answer choices|flag question|question\s+\d+|quiz|exam|test question)\b/i.test(
       message,
     );
+  const explicitlyRequestsWeb =
+    /\b(search|browse|look up|lookup|source|sources|cite|citation|current|latest|today|recent|verify online|web research)\b/i.test(
+      normalized,
+    );
   const capabilities = new Set<PlatformCapability>(["conversation"]);
   if (/\b(teach|learn|study|quiz|homework|explain|guide)\b/.test(normalized))
     capabilities.add("teaching");
@@ -168,9 +172,11 @@ function capabilitiesForRequest(
   )
     capabilities.add("writing");
   if (
-    /\b(latest|current|today|news|research|sources|look up|lookup|search|browse|internet|online|website|site|webpage|web page|url|domain|scam|fraud|legit|legitimate|trustworthy|reputation|reviews|complaints|bbb)\b/.test(
-      normalized,
-    ) ||
+    (!looksLikeQuizBlock &&
+      /\b(latest|current|today|news|research|sources|look up|lookup|search|browse|internet|online|website|site|webpage|web page|url|domain|scam|fraud|legit|legitimate|trustworthy|reputation|reviews|complaints|bbb)\b/.test(
+        normalized,
+      )) ||
+    (looksLikeQuizBlock && explicitlyRequestsWeb) ||
     /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z]{2,})(?:\/[^\s]*)?\b/i.test(
       message,
     )

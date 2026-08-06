@@ -234,6 +234,12 @@ const LIVE_INFO_PATTERNS = [
   "online",
 ];
 
+function isEducationalQuizBlock(message: string): boolean {
+  return /\b(group of answer choices|answer choices|flag question|question\s+\d+|quiz|exam|test question)\b/i.test(
+    message,
+  );
+}
+
 function needsLiveSearch(message: string): boolean {
   const lower = message.toLowerCase();
   const hasUrl =
@@ -252,6 +258,16 @@ function needsLiveSearch(message: string): boolean {
     );
 
   if (isLocalRepositoryWorkflow && !hasUrl && !explicitlyRequestsWeb) {
+    return false;
+  }
+
+  if (
+    isEducationalQuizBlock(message) &&
+    !hasUrl &&
+    !/\b(search|browse|look up|lookup|source|sources|cite|citation|current|latest|today|recent|verify online|web research)\b/i.test(
+      message,
+    )
+  ) {
     return false;
   }
 

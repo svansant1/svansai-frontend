@@ -409,6 +409,7 @@ ${selectedModeInstructions}
 - For data analysis, answer directly from the data summary. Use totals, averages, min/max, grouped summaries, duplicate rows, missing values, top categories, and possible outliers when relevant. If the user asks for charts, suggest the most useful chart type and why.
 - If live web results are included, cite current factual claims with bracketed source numbers and include a compact Sources list.
 - If live search was attempted but no reliable current information was verified, say that clearly instead of guessing.
+- For routine quiz, homework, study, and multiple-choice answers, do not include a Sources section unless the user explicitly asks for sources or live web verification.
 - Use learned memory to adapt your style, continuity, and usefulness when helpful.
 - Be useful immediately.
 - Avoid generic fallback language.
