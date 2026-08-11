@@ -305,6 +305,99 @@ function extractAssistantImage(content: string) {
   };
 }
 
+const WORKSPACE_CONTEXT_TRIGGER =
+  /\b(folder|workspace|project|repo|repository|files?|game|app|code|review|look over|inspect|improve|fix|debug|scan|what is in|structure|functional)\b/i;
+
+const WORKSPACE_KEY_FILE_PATTERN =
+  /(^|[\\/])(package\.json|readme\.md|index\.html|vite\.config\.[cm]?[jt]s|next\.config\.[cm]?[jt]s|tsconfig\.json|src[\\/]app\.(tsx|jsx|ts|js)|src[\\/]main\.(tsx|jsx|ts|js)|src[\\/]index\.(tsx|jsx|ts|js)|app[\\/]page\.tsx|pages[\\/]index\.(tsx|jsx|ts|js)|game\.(js|ts)|script\.(js|ts)|main\.(js|ts)|index\.(js|ts|css))$/i;
+
+function shouldIncludeWorkspaceContext(message: string) {
+  return WORKSPACE_CONTEXT_TRIGGER.test(message);
+}
+
+async function buildDesktopWorkspaceContext(message: string) {
+  if (typeof window === "undefined" || !window.svansDesktop) return "";
+  if (!shouldIncludeWorkspaceContext(message)) return "";
+
+  try {
+    const status = await window.svansDesktop.status();
+    if (
+      !status.workspace.root ||
+      status.workspace.mode === "none" ||
+      status.workspace.expired
+    ) {
+      return "";
+    }
+
+    const [summaryResult, treeResult] = await Promise.all([
+      window.svansDesktop.getWorkspaceSummary(),
+      window.svansDesktop.getWorkspaceTree({ maxEntries: 260 }),
+    ]);
+
+    const entries = treeResult.tree?.entries ?? [];
+    const visibleEntries = entries.slice(0, 160);
+    const keyFiles = entries
+      .filter((entry) => entry.type === "file")
+      .map((entry) => entry.path)
+      .filter((path) => WORKSPACE_KEY_FILE_PATTERN.test(path))
+      .slice(0, 8);
+
+    const keyFilePreviews: string[] = [];
+    for (const relativePath of keyFiles) {
+      try {
+        const file = await window.svansDesktop.readFile(relativePath);
+        if (file.allowed && file.content) {
+          keyFilePreviews.push(
+            `--- ${relativePath} (${file.size ?? file.content.length} bytes) ---\n${file.content.slice(0, 6000)}`,
+          );
+        }
+      } catch {
+        // Keep workspace context useful even if one file cannot be read.
+      }
+    }
+
+    const summary = summaryResult.summary;
+    return `
+DESKTOP WORKSPACE CONTEXT:
+SVANS-AI is running inside the desktop app with an approved local workspace.
+- Workspace name/path: ${status.workspace.root}
+- Permission mode: ${status.workspace.mode}
+- Permission expires at: ${
+      status.workspace.expiresAt
+        ? new Date(status.workspace.expiresAt).toISOString()
+        : "not set"
+    }
+- File count: ${summary?.fileCount ?? "unknown"}
+- Directory count: ${summary?.directoryCount ?? "unknown"}
+- Total bytes: ${summary?.totalBytes ?? "unknown"}
+- Top extensions: ${
+      summary?.topExtensions
+        ?.map((item) => `${item.extension || "(none)"}:${item.count}`)
+        .join(", ") || "unknown"
+    }
+- Tree truncated: ${treeResult.tree?.truncated ? "yes" : "no"}
+
+Workspace tree sample:
+${visibleEntries
+  .map(
+    (entry) =>
+      `${entry.type === "directory" ? "[dir]" : entry.type === "file" ? "[file]" : "[error]"} ${entry.path}${entry.size ? ` (${entry.size} bytes)` : ""}`,
+  )
+  .join("\n")}
+
+${
+  keyFilePreviews.length
+    ? `Key file previews:\n${keyFilePreviews.join("\n\n")}`
+    : "No key file previews were available from the first scan. Use the tree sample to ask for or inspect specific files."
+}
+
+Instruction: Use this desktop workspace context as primary evidence. Do not ask the user to attach the folder again. If more detail is needed, say which specific file or scan action is needed from the already-selected workspace.
+`.trim();
+  } catch {
+    return "";
+  }
+}
+
 function renderInlineMarkdown(text: string) {
   const nodes: React.ReactNode[] = [];
   const pattern =
@@ -1171,6 +1264,16 @@ export default function AIHelper({
         requestMessages.unshift({
           role: "user",
           content: `${continuationContext}\n\nThe user has entered the continuation keyword in a new chat. Use this context to continue naturally, then answer the user's latest message directly.`,
+        });
+      }
+
+      const desktopWorkspaceContext = await buildDesktopWorkspaceContext(
+        userMessage.content,
+      );
+      if (desktopWorkspaceContext) {
+        requestMessages.unshift({
+          role: "user",
+          content: desktopWorkspaceContext,
         });
       }
 
