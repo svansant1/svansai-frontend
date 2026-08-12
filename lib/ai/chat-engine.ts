@@ -240,6 +240,17 @@ function isEducationalQuizBlock(message: string): boolean {
   );
 }
 
+function isWritingOrDiscussionHelp(message: string): boolean {
+  return (
+    /\b(discussion post|reply discussion|discussion reply|classmates|professor|how is this|how does this sound|does this sound|refine|rewrite|revise|polish|clean up|make this sound|more human|human like|human-like|grammar|tone|paragraph|post)\b/i.test(
+      message,
+    ) ||
+    /\b(good morning|good afternoon|good evening),?\s+(professor|class|classmates)\b/i.test(
+      message,
+    )
+  );
+}
+
 function needsLiveSearch(message: string): boolean {
   const lower = message.toLowerCase();
   const hasUrl =
@@ -258,6 +269,16 @@ function needsLiveSearch(message: string): boolean {
     );
 
   if (isLocalRepositoryWorkflow && !hasUrl && !explicitlyRequestsWeb) {
+    return false;
+  }
+
+  if (
+    isWritingOrDiscussionHelp(message) &&
+    !hasUrl &&
+    !/\b(search|browse|look up|lookup|source|sources|cite|citation|current|latest|today|recent|verify online|web research|research this|find sources)\b/i.test(
+      message,
+    )
+  ) {
     return false;
   }
 
