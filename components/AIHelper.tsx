@@ -94,7 +94,7 @@ const LONG_CHAT_MESSAGE_THRESHOLD = 220;
 const LONG_CHAT_CHAR_THRESHOLD = 140_000;
 const HANDOFF_STORAGE_PREFIX = "svansai-continuation-";
 const ACCEPTED_EXTENSION_PATTERN =
-  /\.(py|ts|tsx|js|jsx|mjs|cjs|java|c|h|cpp|cc|cxx|hpp|hh|hxx|cs|go|rb|rs|swift|kt|kts|php|vue|svelte|astro|md|markdown|txt|text|log|sql|xml|svg|yml|yaml|toml|ini|conf|config|properties|lock|html|htm|css|scss|sass|less|csv|tsv|json|xlsx|xls|pdf|sh|bash|zsh|ps1|psm1|psd1|bat|cmd|gradle|dockerfile)$/i;
+  /\.(py|ts|tsx|js|jsx|mjs|cjs|java|c|h|cpp|cc|cxx|hpp|hh|hxx|cs|go|rb|rs|swift|kt|kts|php|vue|svelte|astro|md|markdown|txt|text|log|sql|xml|svg|yml|yaml|toml|ini|conf|config|properties|lock|html|htm|css|scss|sass|less|csv|tsv|json|xlsx|xls|docx|pdf|sh|bash|zsh|ps1|psm1|psd1|bat|cmd|gradle|dockerfile)$/i;
 const ACCEPTED_DOTFILE_PATTERN =
   /(^|[\\/])\.(gitignore|dockerignore|env\.example|env|npmrc|nvmrc|prettierrc|eslintrc|editorconfig|babelrc|swcrc)$/i;
 const ACCEPTED_SPECIAL_FILENAME_PATTERN =
@@ -122,6 +122,7 @@ const ACCEPTED_TYPES = [
   "application/csv",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/x-python",
   "text/x-python",
   "text/x-java-source",
@@ -172,6 +173,9 @@ function inferAttachmentType(name: string, type = "") {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   }
   if (extension === "xls") return "application/vnd.ms-excel";
+  if (extension === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
 
   if (
     ACCEPTED_EXTENSION_PATTERN.test(name) ||
@@ -1130,7 +1134,7 @@ export default function AIHelper({
 
     if (!validSelected.length) {
       setFileError(
-        `No supported files were found. ${skippedFiles.slice(0, 3).join(" ")} Supported files include code, text, markdown, PDFs, images, CSV/TSV, JSON, XML/YAML/SQL/log files, HTML/CSS, and Excel files up to ${MAX_FILE_MB}MB each.`,
+        `No supported files were found. ${skippedFiles.slice(0, 3).join(" ")} Supported files include Word docs, code, text, markdown, PDFs, images, CSV/TSV, JSON, XML/YAML/SQL/log files, HTML/CSS, and Excel files up to ${MAX_FILE_MB}MB each.`,
       );
       return;
     }
@@ -2644,7 +2648,7 @@ export default function AIHelper({
               multiple
               accept={
                 ACCEPTED_TYPES.join(",") +
-                ",.py,.ts,.tsx,.js,.jsx,.mjs,.cjs,.java,.c,.h,.cpp,.cc,.cxx,.hpp,.cs,.go,.rb,.rs,.swift,.kt,.kts,.php,.vue,.svelte,.astro,.md,.markdown,.txt,.text,.log,.sql,.xml,.svg,.yml,.yaml,.toml,.ini,.conf,.config,.properties,.lock,.json,.html,.htm,.css,.scss,.sass,.less,.csv,.tsv,.xlsx,.xls,.pdf,.sh,.bash,.zsh,.ps1,.psm1,.psd1,.bat,.cmd,.gradle,.dockerfile"
+                ",.py,.ts,.tsx,.js,.jsx,.mjs,.cjs,.java,.c,.h,.cpp,.cc,.cxx,.hpp,.cs,.go,.rb,.rs,.swift,.kt,.kts,.php,.vue,.svelte,.astro,.md,.markdown,.txt,.text,.log,.sql,.xml,.svg,.yml,.yaml,.toml,.ini,.conf,.config,.properties,.lock,.json,.html,.htm,.css,.scss,.sass,.less,.csv,.tsv,.xlsx,.xls,.docx,.pdf,.sh,.bash,.zsh,.ps1,.psm1,.psd1,.bat,.cmd,.gradle,.dockerfile"
               }
               onChange={handleFileSelect}
               style={{ display: "none" }}

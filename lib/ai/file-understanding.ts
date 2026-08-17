@@ -2,6 +2,7 @@ import type { AttachedFile } from "@/lib/ai/file-types";
 import { formatDataSummary, summarizeDelimitedData } from "@/lib/ai/data-understanding";
 import { extractPdfTextWithOcr } from "@/lib/ai/ocr";
 import { summarizeWorkbook } from "@/lib/ai/workbook-understanding";
+import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 
 export type FileUnderstandingResult = {
@@ -46,6 +47,27 @@ export async function understandAttachedFile(file: AttachedFile): Promise<FileUn
       return { kind: "data", extractedText: await summarizeWorkbook(file.base64) };
     } catch {
       return { kind: "data", error: "The Excel workbook could not be parsed." };
+    }
+  }
+
+  if (
+    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    /\.docx$/i.test(file.name)
+  ) {
+    try {
+      const buffer = Buffer.from(file.base64, "base64");
+      const result = await mammoth.extractRawText({ buffer });
+      const extractedText = result.value
+        .replace(/\u0000/g, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+        .slice(0, 60_000);
+
+      return extractedText
+        ? { kind: "text", extractedText }
+        : { kind: "text", error: "No readable text was found in this Word document." };
+    } catch {
+      return { kind: "text", error: "The Word document could not be parsed." };
     }
   }
 

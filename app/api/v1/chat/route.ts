@@ -41,6 +41,7 @@ const SUPPORTED_FILE_TYPES = new Set([
   "application/csv",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
 function configuredApiKeys() {

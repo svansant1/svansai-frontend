@@ -67,6 +67,9 @@ export function inferSupportedFileType(name: string, type = ""): string {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   }
   if (extension === "xls") return "application/vnd.ms-excel";
+  if (extension === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
 
   if (
     /\.(txt|text|log|sql|xml|svg|yml|yaml|toml|ini|conf|config|env|properties|lock|sh|bash|zsh|ps1|psm1|psd1|bat|cmd|dockerfile|gradle|php|rb|rs|go|swift|kt|kts|vue|svelte|astro|scss|sass|less)$/i.test(
@@ -93,7 +96,10 @@ export function hasValidFileSignature(type: string, base64: string): boolean {
     type === "application/csv" ||
     type === "application/vnd.ms-excel"
   ) return true;
-  if (type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+  if (
+    type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
     const bytes = Buffer.from(base64.slice(0, 64), "base64");
     return bytes[0] === 0x50 && bytes[1] === 0x4b;
   }

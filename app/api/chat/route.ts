@@ -44,6 +44,7 @@ const SUPPORTED_FILE_TYPES = new Set([
   "application/csv",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
 export async function POST(req: Request) {
