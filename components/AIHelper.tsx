@@ -8,6 +8,7 @@ import {
   getTotalViews,
 } from "@/lib/db/engagement";
 import { supabase } from "@/lib/supabase";
+import SvansVoiceConversation from "./SvansVoiceConversation";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -816,6 +817,13 @@ export default function AIHelper({
   const showContinuationBanner =
     Boolean(continuationKeyword) &&
     dismissedContinuationKeyword !== continuationKeyword;
+  const latestAssistantText = useMemo(
+    () =>
+      [...messages]
+        .reverse()
+        .find((message) => message.role === "assistant")?.content ?? "",
+    [messages],
+  );
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1283,12 +1291,13 @@ export default function AIHelper({
     });
   };
 
-  const handleSend = async () => {
-    if ((!input.trim() && attachedFiles.length === 0) || loading) return;
+  const handleSend = async (spokenInput?: string) => {
+    const effectiveInput = spokenInput?.trim() || input.trim();
+    if ((!effectiveInput && attachedFiles.length === 0) || loading) return;
 
-    if (input.length > MAX_MESSAGE_CHARS) {
+    if (effectiveInput.length > MAX_MESSAGE_CHARS) {
       setFileError(
-        `That paste is too long for one message (${input.length.toLocaleString()} characters). Split it into smaller parts or attach it as a .txt/PDF file. Example: "Summarize the OS components section" or "Make 10 quiz questions from this section."`,
+        `That message is too long for one request (${effectiveInput.length.toLocaleString()} characters). Split it into smaller parts or attach it as a .txt/PDF file.`,
       );
       return;
     }
@@ -1304,7 +1313,7 @@ export default function AIHelper({
     const userMessage: ChatMessage = {
       role: "user",
       content:
-        input.trim() ||
+        effectiveInput ||
         (attachedFiles.length
           ? attachedFiles.every((file) => isImageType(file.type))
             ? `Please analyze this image. [Attached: ${attachedFiles.map((file) => file.name).join(", ")}]`
@@ -1578,6 +1587,13 @@ export default function AIHelper({
                 ? `LOGGED IN AS ${user.email}`
                 : "GUEST MODE"}
         </p>
+        {!isPasswordMode && (
+          <SvansVoiceConversation
+            assistantText={latestAssistantText}
+            busy={loading}
+            onUtterance={handleSend}
+          />
+        )}
       </div>
 
       <div
@@ -2720,7 +2736,7 @@ export default function AIHelper({
             )}
 
             <button
-              onClick={handleSend}
+              onClick={() => void handleSend()}
               disabled={loading}
               style={{
                 flex: 1,
