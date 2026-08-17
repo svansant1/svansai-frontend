@@ -24,6 +24,67 @@ export function estimatedBase64Bytes(value: string): number {
   return Math.max(0, Math.floor((value.length * 3) / 4) - padding);
 }
 
+export function inferSupportedFileType(name: string, type = ""): string {
+  const normalizedType = type.trim().toLowerCase();
+  const lowerName = name.toLowerCase();
+  const extension = lowerName.match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+
+  if (
+    normalizedType === "image/svg+xml" ||
+    normalizedType === "application/xml" ||
+    normalizedType === "text/xml" ||
+    normalizedType === "application/x-yaml" ||
+    normalizedType === "text/yaml" ||
+    normalizedType === "application/yaml" ||
+    normalizedType === "application/x-sh" ||
+    normalizedType === "application/x-shellscript"
+  ) {
+    return "text/plain";
+  }
+
+  if (normalizedType && normalizedType !== "application/octet-stream") {
+    return normalizedType;
+  }
+
+  if (/\.(md|markdown)$/i.test(lowerName)) return "text/markdown";
+  if (/\.(csv)$/i.test(lowerName)) return "text/csv";
+  if (/\.(tsv)$/i.test(lowerName)) return "text/tab-separated-values";
+  if (/\.(json)$/i.test(lowerName)) return "application/json";
+  if (/\.(html|htm)$/i.test(lowerName)) return "text/html";
+  if (/\.(css)$/i.test(lowerName)) return "text/css";
+  if (/\.(js|jsx|mjs|cjs)$/i.test(lowerName)) return "text/javascript";
+  if (/\.(ts|tsx)$/i.test(lowerName)) return "text/typescript";
+  if (/\.(py)$/i.test(lowerName)) return "text/x-python";
+  if (/\.(java)$/i.test(lowerName)) return "text/x-java-source";
+  if (/\.(c|h)$/i.test(lowerName)) return "text/x-c";
+  if (/\.(cpp|cc|cxx|hpp|hh|hxx)$/i.test(lowerName)) return "text/x-cpp";
+  if (extension === "pdf") return "application/pdf";
+  if (extension === "png") return "image/png";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "gif") return "image/gif";
+  if (extension === "webp") return "image/webp";
+  if (extension === "xlsx") {
+    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  }
+  if (extension === "xls") return "application/vnd.ms-excel";
+
+  if (
+    /\.(txt|text|log|sql|xml|svg|yml|yaml|toml|ini|conf|config|env|properties|lock|sh|bash|zsh|ps1|psm1|psd1|bat|cmd|dockerfile|gradle|php|rb|rs|go|swift|kt|kts|vue|svelte|astro|scss|sass|less)$/i.test(
+      lowerName,
+    ) ||
+    /(^|[\\/])(dockerfile|makefile|gemfile|rakefile|procfile|license|readme|changelog|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i.test(
+      lowerName,
+    ) ||
+    /(^|[\\/])\.(gitignore|dockerignore|env\.example|env|npmrc|nvmrc|prettierrc|eslintrc|editorconfig|babelrc|swcrc)$/i.test(
+      lowerName,
+    )
+  ) {
+    return "text/plain";
+  }
+
+  return normalizedType;
+}
+
 export function hasValidFileSignature(type: string, base64: string): boolean {
   if (
     type.startsWith("text/") ||

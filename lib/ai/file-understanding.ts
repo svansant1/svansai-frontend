@@ -53,7 +53,8 @@ export async function understandAttachedFile(file: AttachedFile): Promise<FileUn
     file.type.startsWith("text/") ||
     file.type === "application/csv" ||
     file.type === "application/vnd.ms-excel" ||
-    file.name.match(/\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|json|txt|html|css|csv|tsv)$/i) ||
+    file.name.match(/\.(py|ts|tsx|js|jsx|mjs|cjs|java|c|h|cpp|cc|cxx|hpp|hh|hxx|cs|go|rb|rs|swift|kt|kts|php|vue|svelte|astro|md|markdown|json|txt|text|log|sql|xml|svg|yml|yaml|toml|ini|conf|config|properties|lock|html|htm|css|scss|sass|less|csv|tsv|sh|bash|zsh|ps1|psm1|psd1|bat|cmd|gradle|dockerfile)$/i) ||
+    /(^|[\\/])(dockerfile|makefile|gemfile|rakefile|procfile|license|readme|changelog|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i.test(file.name) ||
     TEXT_LIKE_DOTFILE_PATTERN.test(file.name)
   ) {
     const extractedText = Buffer.from(file.base64, "base64").toString("utf-8");

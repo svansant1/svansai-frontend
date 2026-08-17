@@ -86,17 +86,19 @@ type AIHelperProps = {
 };
 
 const GUEST_LIMIT = 5;
-const MAX_FILE_MB = 10;
+const MAX_FILE_MB = 25;
 const MAX_ATTACHMENTS = 30;
-const MAX_TOTAL_FILE_MB = 40;
+const MAX_TOTAL_FILE_MB = 80;
 const MAX_MESSAGE_CHARS = 30_000;
 const LONG_CHAT_MESSAGE_THRESHOLD = 220;
 const LONG_CHAT_CHAR_THRESHOLD = 140_000;
 const HANDOFF_STORAGE_PREFIX = "svansai-continuation-";
 const ACCEPTED_EXTENSION_PATTERN =
-  /\.(py|ts|tsx|js|jsx|java|c|cpp|cs|go|rb|rs|swift|kt|md|txt|json|html|css|csv|tsv|xlsx|pdf)$/i;
+  /\.(py|ts|tsx|js|jsx|mjs|cjs|java|c|h|cpp|cc|cxx|hpp|hh|hxx|cs|go|rb|rs|swift|kt|kts|php|vue|svelte|astro|md|markdown|txt|text|log|sql|xml|svg|yml|yaml|toml|ini|conf|config|properties|lock|html|htm|css|scss|sass|less|csv|tsv|json|xlsx|xls|pdf|sh|bash|zsh|ps1|psm1|psd1|bat|cmd|gradle|dockerfile)$/i;
 const ACCEPTED_DOTFILE_PATTERN =
-  /(^|[\\/])\.(gitignore|dockerignore|env\.example|env|npmrc|nvmrc|prettierrc|eslintrc|editorconfig)$/i;
+  /(^|[\\/])\.(gitignore|dockerignore|env\.example|env|npmrc|nvmrc|prettierrc|eslintrc|editorconfig|babelrc|swcrc)$/i;
+const ACCEPTED_SPECIAL_FILENAME_PATTERN =
+  /(^|[\\/])(dockerfile|makefile|gemfile|rakefile|procfile|license|readme|changelog|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
 
 const PASSWORD_PROMPT = "enter owner password:";
 const PASSWORD_SUCCESS = "owner mode enabled";
@@ -126,6 +128,61 @@ const ACCEPTED_TYPES = [
   "text/x-c",
   "text/x-cpp",
 ];
+
+function inferAttachmentType(name: string, type = "") {
+  const normalizedType = type.trim().toLowerCase();
+  const lowerName = name.toLowerCase();
+  const extension = lowerName.match(/\.([a-z0-9]+)$/)?.[1] ?? "";
+
+  if (
+    normalizedType === "image/svg+xml" ||
+    normalizedType === "application/xml" ||
+    normalizedType === "text/xml" ||
+    normalizedType === "application/x-yaml" ||
+    normalizedType === "text/yaml" ||
+    normalizedType === "application/yaml" ||
+    normalizedType === "application/x-sh" ||
+    normalizedType === "application/x-shellscript"
+  ) {
+    return "text/plain";
+  }
+
+  if (normalizedType && normalizedType !== "application/octet-stream") {
+    return normalizedType;
+  }
+
+  if (/\.(md|markdown)$/i.test(lowerName)) return "text/markdown";
+  if (extension === "csv") return "text/csv";
+  if (extension === "tsv") return "text/tab-separated-values";
+  if (extension === "json") return "application/json";
+  if (/\.(html|htm)$/i.test(lowerName)) return "text/html";
+  if (extension === "css") return "text/css";
+  if (/\.(js|jsx|mjs|cjs)$/i.test(lowerName)) return "text/javascript";
+  if (/\.(ts|tsx)$/i.test(lowerName)) return "text/typescript";
+  if (extension === "py") return "text/x-python";
+  if (extension === "java") return "text/x-java-source";
+  if (/\.(c|h)$/i.test(lowerName)) return "text/x-c";
+  if (/\.(cpp|cc|cxx|hpp|hh|hxx)$/i.test(lowerName)) return "text/x-cpp";
+  if (extension === "pdf") return "application/pdf";
+  if (extension === "png") return "image/png";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "gif") return "image/gif";
+  if (extension === "webp") return "image/webp";
+  if (extension === "xlsx") {
+    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  }
+  if (extension === "xls") return "application/vnd.ms-excel";
+
+  if (
+    ACCEPTED_EXTENSION_PATTERN.test(name) ||
+    ACCEPTED_DOTFILE_PATTERN.test(name) ||
+    ACCEPTED_SPECIAL_FILENAME_PATTERN.test(name)
+  ) {
+    return "text/plain";
+  }
+
+  return normalizedType;
+}
 
 const RESPONSE_MODES: Array<{
   id: ResponseMode;
@@ -278,7 +335,7 @@ function readBrowserFile(file: File): Promise<AttachedFile> {
       const dataUrl = String(reader.result ?? "");
       resolve({
         name: displayName,
-        type: file.type || "text/plain",
+        type: inferAttachmentType(displayName, file.type) || "text/plain",
         base64: dataUrl.split(",")[1] || "",
         dataUrl,
         size: file.size,
@@ -1043,20 +1100,37 @@ export default function AIHelper({
     e.target.value = "";
     if (!rawSelected.length) return;
 
+    const skippedFiles: string[] = [];
     const validSelected = rawSelected.filter((file) => {
       const acceptedExtension = ACCEPTED_EXTENSION_PATTERN.test(file.name);
       const acceptedDotfile = ACCEPTED_DOTFILE_PATTERN.test(file.name);
-      return (
-        (ACCEPTED_TYPES.includes(file.type) ||
-          acceptedExtension ||
-          acceptedDotfile) &&
-        file.size <= MAX_FILE_MB * 1024 * 1024
+      const acceptedSpecialName = ACCEPTED_SPECIAL_FILENAME_PATTERN.test(
+        file.name,
       );
+      const inferredType = inferAttachmentType(file.name, file.type);
+      const supported =
+        ACCEPTED_TYPES.includes(inferredType) ||
+          acceptedExtension ||
+          acceptedDotfile ||
+          acceptedSpecialName;
+      const withinSize = file.size <= MAX_FILE_MB * 1024 * 1024;
+
+      if (!supported) {
+        skippedFiles.push(`${file.name} — unsupported file type`);
+        return false;
+      }
+
+      if (!withinSize) {
+        skippedFiles.push(`${file.name} — over ${MAX_FILE_MB}MB`);
+        return false;
+      }
+
+      return true;
     });
 
     if (!validSelected.length) {
       setFileError(
-        `No supported files were found. Supported folder files include code, text, markdown, PDFs, images, CSV/TSV, JSON, HTML/CSS, and Excel files up to ${MAX_FILE_MB}MB each.`,
+        `No supported files were found. ${skippedFiles.slice(0, 3).join(" ")} Supported files include code, text, markdown, PDFs, images, CSV/TSV, JSON, XML/YAML/SQL/log files, HTML/CSS, and Excel files up to ${MAX_FILE_MB}MB each.`,
       );
       return;
     }
@@ -1078,7 +1152,7 @@ export default function AIHelper({
 
     if (rawSelected.length !== validSelected.length) {
       setFileError(
-        `Added ${selected.length} supported file${selected.length === 1 ? "" : "s"}. Skipped ${rawSelected.length - validSelected.length} unsupported or oversized item${rawSelected.length - validSelected.length === 1 ? "" : "s"}.`,
+        `Added ${selected.length} supported file${selected.length === 1 ? "" : "s"}. Skipped ${rawSelected.length - validSelected.length}: ${skippedFiles.slice(0, 3).join(" ")}`,
       );
     }
 
@@ -2570,7 +2644,7 @@ export default function AIHelper({
               multiple
               accept={
                 ACCEPTED_TYPES.join(",") +
-                ",.py,.ts,.tsx,.js,.jsx,.java,.c,.cpp,.cs,.go,.rb,.rs,.swift,.kt,.md,.txt,.json,.html,.css,.csv,.tsv,.xlsx,.pdf"
+                ",.py,.ts,.tsx,.js,.jsx,.mjs,.cjs,.java,.c,.h,.cpp,.cc,.cxx,.hpp,.cs,.go,.rb,.rs,.swift,.kt,.kts,.php,.vue,.svelte,.astro,.md,.markdown,.txt,.text,.log,.sql,.xml,.svg,.yml,.yaml,.toml,.ini,.conf,.config,.properties,.lock,.json,.html,.htm,.css,.scss,.sass,.less,.csv,.tsv,.xlsx,.xls,.pdf,.sh,.bash,.zsh,.ps1,.psm1,.psd1,.bat,.cmd,.gradle,.dockerfile"
               }
               onChange={handleFileSelect}
               style={{ display: "none" }}
