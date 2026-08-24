@@ -1822,36 +1822,6 @@ function getCalendarIntegrationAnswer(message: string): string | null {
   return null;
 }
 
-function getConversationQualityAnswer(
-  message: string,
-  lastAssistantMessage: string,
-): string | null {
-  const normalized = normalizeText(message);
-  const looksLikeCourseOrWritingContent =
-    isWritingReviewRequest(message) ||
-    /\b(discussion post|reply from|good afternoon class|good evening class|professor|classmates|control structures?|sequence|selection|iteration|repetition structures?|if\/else|program flow)\b/i.test(
-      message,
-    );
-
-  if (looksLikeCourseOrWritingContent) return null;
-
-  const asksForRealFix =
-    normalized.includes("real fix") ||
-    normalized.includes("not up to par") ||
-    /\b(your|svans-ai|svansai|ai|response|answer|conversation)\s+(?:is|feels|sounds|keeps|seems|gets|got|becomes|was|were)?\s*(?:too\s+)?\b(repetitive|fake|repeats?)\b/.test(
-      normalized,
-    ) ||
-    /\b(repetitive|fake|repeats?)\b.{0,80}\b(your|svans-ai|svansai|ai|response|answer|conversation)\b/.test(
-      normalized,
-    ) ||
-    normalized.includes("feels fake") ||
-    normalized.includes("fake sometimes");
-
-  if (!asksForRealFix) return null;
-
-  return "The real fix is engineering, not a nicer prompt. SVANS-AI needs a conversation-state layer that tracks the current goal, user style, unresolved need, and what was already said; a follow-up resolver for short replies like “why” or “exactly”; a repetition critic that scores drafts before they reach the user; a memory gate that only saves useful patterns; and route-specific prompts for teaching, writing, debugging, building, research, and file analysis. That combination stops the assistant from sounding fake because every answer is checked against context, intent, and quality before it is sent.";
-}
-
 function getStudyMaterialAcknowledgement(message: string): string | null {
   const normalized = normalizeText(message);
   const asksToRemember =
@@ -2830,14 +2800,6 @@ Do not claim you have no browsing ability. Say that live search did not return e
   const projectModuleAnswer = getProjectModuleAnswer(latestUserMessage);
   if (projectModuleAnswer) {
     return projectModuleAnswer;
-  }
-
-  const conversationQualityAnswer = getConversationQualityAnswer(
-    latestUserMessage,
-    lastAssistantMessage,
-  );
-  if (conversationQualityAnswer) {
-    return conversationQualityAnswer;
   }
 
   const calendarIntegrationAnswer =
