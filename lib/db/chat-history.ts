@@ -1,5 +1,9 @@
 import { supabase } from "@/lib/supabase";
 import type { ChatMessage } from "@/components/AIHelper";
+import {
+  encodeStoredMessage,
+  decodeStoredMessage,
+} from "@/lib/artifacts/message-storage";
 
 export type ConversationRecord = {
   id: string;
@@ -102,10 +106,7 @@ export async function getConversationMessages(
 
     if (error) {
       console.error("GET_MESSAGES_ERROR:", error);
-      return rows.map((row) => ({
-        role: row.role as "user" | "assistant",
-        content: row.content as string,
-      }));
+      return rows.map(decodeStoredMessage);
     }
 
     rows.push(...(data ?? []));
@@ -113,10 +114,7 @@ export async function getConversationMessages(
     if (!data || data.length < MESSAGE_PAGE_SIZE) break;
   }
 
-  return rows.map((row) => ({
-    role: row.role as "user" | "assistant",
-    content: row.content as string,
-  }));
+  return rows.map(decodeStoredMessage);
 }
 
 export async function appendMessages(
@@ -134,7 +132,7 @@ export async function appendMessages(
     const rows = batch.map((m) => ({
       conversation_id: conversationId,
       role: m.role,
-      content: m.content,
+      content: encodeStoredMessage(m),
     }));
 
     const { error } = await supabase.from("conversation_messages").insert(rows);

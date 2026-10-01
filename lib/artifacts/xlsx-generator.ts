@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { parseTabularContent } from "./tabular-content";
 
 function parseRows(content: string): string[][] {
   const lines = content
@@ -48,11 +49,24 @@ export async function generateXlsx(
 
   worksheet.addRow([]);
 
-  const rows = parseRows(content);
+  const rows = parseTabularContent(content);
 
   for (const row of rows) {
-    worksheet.addRow(row);
+    worksheet.addRow(
+      row.map((cell) =>
+        /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(cell) &&
+        cell.replace(/\D/g, "").length <= 15
+          ? Number(cell)
+          : cell,
+      ),
+    );
   }
+  worksheet.getRow(3).font = { bold: true };
+  worksheet.views = [{ state: "frozen", ySplit: 3 }];
+  worksheet.autoFilter = {
+    from: { row: 3, column: 1 },
+    to: { row: 3, column: rows[0].length },
+  };
 
   worksheet.eachRow((row) => {
     row.alignment = {

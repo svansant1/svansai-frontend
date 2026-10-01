@@ -1,10 +1,4 @@
-import {
-  Document,
-  HeadingLevel,
-  Packer,
-  Paragraph,
-  TextRun,
-} from "docx";
+import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 
 function splitContent(content: string): string[] {
   return content
@@ -35,6 +29,20 @@ export async function generateDocx(
       .filter(Boolean);
 
     for (const line of lines) {
+      const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+      if (heading) {
+        children.push(
+          new Paragraph({
+            text: heading[2],
+            heading:
+              heading[1].length === 1
+                ? HeadingLevel.HEADING_1
+                : HeadingLevel.HEADING_2,
+            spacing: { before: 200, after: 120 },
+          }),
+        );
+        continue;
+      }
       const bullet = /^[-*•]\s+(.+)$/.exec(line);
 
       if (bullet) {

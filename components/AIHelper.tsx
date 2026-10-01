@@ -9,6 +9,9 @@ import {
 } from "@/lib/db/engagement";
 import { supabase } from "@/lib/supabase";
 import SvansVoiceConversation from "./SvansVoiceConversation";
+import GeneratedFileDownload, {
+  artifactToChatFile,
+} from "./GeneratedFileDownload";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -1406,27 +1409,46 @@ export default function AIHelper({
 
       const data = await response.json();
 
-      const replySource =
-        data?.text ?? data?.response ?? data?.answer ?? data?.message ?? "";
+const replySource =
+  data?.text ?? data?.response ?? data?.answer ?? data?.message ?? "";
 
-      const rawReply =
-        typeof replySource === "string" && replySource.trim()
-          ? replySource.trim()
-          : "I processed that but didn't generate a response. Try sending it again.";
-      const assistantImage = extractAssistantImage(rawReply);
-      const reply = assistantImage.content || "Done.";
+const rawReply =
+  typeof replySource === "string" && replySource.trim()
+    ? replySource.trim()
+    : "I processed that but didn't generate a response. Try sending it again.";
 
-      checkPasswordMode(reply);
+const assistantImage = extractAssistantImage(rawReply);
+let reply = assistantImage.content || "Done.";
 
-      const finalMessages = [
-        ...nextMessages,
-        {
-          role: "assistant" as const,
-          content: reply,
-          orchestration: data?.orchestration,
-          ...(assistantImage.image ?? {}),
-        },
-      ];
+let generatedFile:
+  | {
+      filePreview: string;
+      fileName: string;
+      fileType: string;
+    }
+  | null = null;
+
+if (data?.artifact) {
+  try {
+    generatedFile = artifactToChatFile(data.artifact);
+  } catch (artifactError) {
+    console.error("ARTIFACT_RESPONSE_ERROR:", artifactError);
+    reply = "The file response was incomplete, so I could not prepare a download. Please try generating it again.";
+  }
+}
+
+checkPasswordMode(reply);
+const {artifact: _binaryArtifact, ...responseMetadata} = data?.orchestration || {};
+
+const finalMessages = [
+  ...nextMessages,
+  {
+    role: "assistant" as const,
+    content: reply,
+    orchestration: responseMetadata,
+    ...(generatedFile ?? assistantImage.image ?? {}),
+  },
+];
 
       setMessages(finalMessages);
       notifyThinking(false, "Ready to help.");
@@ -1839,8 +1861,21 @@ export default function AIHelper({
                     )}
                   </div>
                 )}
+                {msg.role === "assistant" &&
+  msg.filePreview &&
+  msg.fileName &&
+  msg.fileType &&
+  !isImageType(msg.fileType) && (
+    <GeneratedFileDownload
+      filePreview={msg.filePreview}
+      fileName={msg.fileName}
+      fileType={msg.fileType}
+    />
+  )}
 
-                {msg.fileName && !isImageType(msg.fileType || "") && (
+                {msg.fileName &&
+  !isImageType(msg.fileType || "") &&
+  !(msg.role === "assistant" && msg.filePreview) && (
                   <div
                     style={{
                       display: "flex",

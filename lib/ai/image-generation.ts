@@ -6,6 +6,9 @@ export type GeneratedImageResult = {
 };
 
 const DEFAULT_IMAGE_MODEL = "gpt-image-1";
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_RESPONSE_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024;
+const REQUEST_TIMEOUT_MS = 120_000;
 
 function normalizePrompt(message: string) {
   return message
@@ -35,20 +38,122 @@ function imageFileNameFromPrompt(prompt: string, mimeType: string) {
 }
 
 export function isImageGenerationRequest(message: string): boolean {
-  const normalized = message.toLowerCase().trim();
-
-  if (/^\s*(can|could|would|will|do|does|is|are)\b/i.test(message)) {
-    return false;
-  }
-
-  return (
-    /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/i.test(
-      message,
-    ) ||
-    /\b(show me|give me)\b.{0,40}\b(photo|image|picture|illustration)\b/i.test(
+  const normalized = message.toLowerCase().replace(/[’‘]/g, "'").trim();
+  if (
+    !normalized ||
+    /\b(?:do not|don't|never|stop|avoid)\s+(?:please\s+)?(?:generate|create|make|draw|design|render|produce)\b/.test(
       normalized,
     )
+  )
+    return false;
+  if (
+    /\b(?:ability|capable|capabilities|able to)\b/.test(
+      normalized.slice(0, 100),
+    )
+  )
+    return false;
+  const request = normalized.replace(
+    /^(?:(?:can|could|would|will) you\s+|please\s+|i (?:want|need|would like) you to\s+)*/i,
+    "",
   );
+  const action =
+    /^(generate|create|make|draw|design|render|produce|show me|give me)\s+([\s\S]+)$/.exec(
+      request,
+    );
+  if (!action) return false;
+  const target = action[2];
+  const imageWord =
+    /\b(?:photos?|images?|pictures?|artwork|illustrations?|graphics?|logos?|wallpapers?|posters?)\b/;
+  const noun = imageWord.exec(target.slice(0, 160));
+  if (!noun)
+    return (
+      action[1] === "draw" &&
+      /^(?:me\s+)?(?:an?\s+)?\w+/.test(target) &&
+      !/\b(?:conclusion|comparison|attention)\b/.test(target)
+    );
+  // A polite question needs a subject or concrete style, not just "can you generate images?".
+  if (/^(?:can|could|would|will) you\b/.test(normalized)) {
+    const detail = target
+      .slice(noun.index + noun[0].length)
+      .replace(/[?.!]/g, "")
+      .trim();
+    const beforeNoun = target
+      .slice(0, noun.index)
+      .replace(/\b(?:me|an?|some|please)\b/g, "")
+      .trim();
+    if (!detail && !beforeNoun) return false;
+    if (
+      /^(?:for me|please|at all|or not|too|as well)$/.test(detail) &&
+      !beforeNoun
+    )
+      return false;
+  }
+  return true;
+}
+
+async function readBoundedResponse(response: Response): Promise<unknown> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (declaredLength > MAX_RESPONSE_BYTES || !response.body)
+    throw new Error("Invalid image response size");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    // Read a bounded response so malformed provider data cannot consume unlimited memory.
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_RESPONSE_BYTES)
+        throw new Error("Image response too large");
+      chunks.push(value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+function validatedImage(
+  base64Value: unknown,
+  expectedMime: GeneratedImageResult["mimeType"],
+): string | null {
+  if (
+    typeof base64Value !== "string" ||
+    base64Value.length > MAX_RESPONSE_BYTES
+  )
+    return null;
+  const base64 = base64Value.replace(/\s/g, "");
+  if (
+    !base64 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      base64,
+    )
+  )
+    return null;
+  const bytes = Buffer.from(base64, "base64");
+  if (bytes.length > MAX_IMAGE_BYTES || bytes.toString("base64") !== base64)
+    return null;
+  const valid =
+    expectedMime === "image/png"
+      ? bytes.length >= 24 &&
+        bytes
+          .subarray(0, 8)
+          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+        bytes.toString("ascii", 12, 16) === "IHDR"
+      : expectedMime === "image/jpeg"
+        ? bytes.length >= 4 &&
+          bytes[0] === 255 &&
+          bytes[1] === 216 &&
+          bytes[2] === 255 &&
+          bytes[bytes.length - 2] === 255 &&
+          bytes[bytes.length - 1] === 217
+        : bytes.length >= 16 &&
+          bytes.toString("ascii", 0, 4) === "RIFF" &&
+          bytes.toString("ascii", 8, 12) === "WEBP" &&
+          bytes.readUInt32LE(4) + 8 === bytes.length;
+  return valid ? base64 : null;
 }
 
 export function buildImagePrompt(message: string): string {
@@ -84,11 +189,14 @@ export async function generateImageWithOpenAI(
         ? "image/webp"
         : "image/png";
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(
       "https://api.openai.com/v1/images/generations",
       {
         method: "POST",
+        signal: controller.signal,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -105,20 +213,17 @@ export async function generateImageWithOpenAI(
     );
 
     if (!response.ok) {
-      console.error(
-        "OPENAI_IMAGE_GENERATION_HTTP_ERROR:",
-        response.status,
-        await response.text(),
-      );
+      // Provider bodies can contain prompts or credentials; log only a safe status code.
+      console.error("OPENAI_IMAGE_GENERATION_HTTP_ERROR:", response.status);
+      await response.body?.cancel();
       return null;
     }
 
-    const data = await response.json();
+    const data = (await readBoundedResponse(response)) as {
+      data?: { b64_json?: unknown; revised_prompt?: unknown }[];
+    };
     const image = data?.data?.[0];
-    const base64 =
-      typeof image?.b64_json === "string"
-        ? image.b64_json.replace(/\s/g, "")
-        : "";
+    const base64 = validatedImage(image?.b64_json, mimeType);
 
     if (!base64) return null;
 
@@ -129,11 +234,20 @@ export async function generateImageWithOpenAI(
       revisedPrompt:
         typeof image?.revised_prompt === "string"
           ? image.revised_prompt
+              .slice(0, 4000)
+              .replace(/\[\[SVANS_/g, "[SVANS_")
           : undefined,
     };
-  } catch (error) {
-    console.error("OPENAI_IMAGE_GENERATION_ERROR:", error);
+  } catch {
+    console.error(
+      "OPENAI_IMAGE_GENERATION_ERROR:",
+      controller.signal.aborted
+        ? "timeout"
+        : "invalid-response-or-network-error",
+    );
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

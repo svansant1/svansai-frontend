@@ -1,6 +1,16 @@
 import { generateChatResponse } from "@/lib/ai/chat-engine";
+import { isImageGenerationRequest, generateImageWithOpenAI, formatGeneratedImageResponse } from "@/lib/ai/image-generation";
 import type { AttachedFile } from "@/lib/ai/file-types";
 import type { ChatMessage, ResponseMode } from "@/lib/ai/types";
+import {
+  detectArtifactRequest,
+} from "@/lib/artifacts/request-parser";
+import {
+  generateChatArtifact,
+} from "@/lib/artifacts/chat-artifacts";
+import type {
+  GeneratedArtifact,
+} from "@/lib/artifacts/types";
 import type { WritingProfile } from "@/lib/personalization/writing-profile";
 import type { UserMemory } from "@/lib/personalization/structured-memory";
 import { selectModules, type ModuleDecision } from "@/lib/platform/modules";
@@ -22,6 +32,7 @@ export type PlatformModule =
   | "debugger"
   | "sandbox"
   | "vos";
+
 export type TaskRoute =
   | "conversation"
   | "learn"
@@ -30,6 +41,7 @@ export type TaskRoute =
   | "build"
   | "debug"
   | "protect";
+
 export type PlatformCapability =
   | "conversation"
   | "teaching"
@@ -55,6 +67,7 @@ export type PlatformCapability =
 
 export type OrchestrationResult = {
   text: string;
+  artifact?: GeneratedArtifact;
   requestId: string;
   route: TaskRoute;
   coordinator: "svans-ai";
@@ -95,6 +108,7 @@ function chooseRoute(
   hasFile: boolean,
 ): TaskRoute {
   const normalized = message.toLowerCase();
+
   const isExplicitWritingRequest =
     /\b(rewrite|refine|proofread|grammar|write|draft|make|create|email|reply|discussion post)\b/.test(
       normalized,
@@ -108,55 +122,61 @@ function chooseRoute(
   if (
     mode === "debug" ||
     /\b(error|bug|broken|stack trace|not working|debug)\b/.test(normalized)
-  )
+  ) {
     return "debug";
+  }
+
   if (
     /\b(phishing|malware|unsafe|threat|bypass|unauthorized|security risk|scam|fraud|fake site|legit|legitimate|trustworthy)\b/.test(
       normalized,
     )
-  )
+  ) {
     return "protect";
+  }
+
   if (
     mode === "build" ||
     /\b(build|implement|create an app|change the code|deploy)\b/.test(
       normalized,
     )
-  )
+  ) {
     return "build";
+  }
+
   if (
     /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/.test(
       normalized,
     )
-  )
+  ) {
     return "write";
+  }
+
   if (
     /\b(rewrite|refine|proofread|grammar|write|email|reply|discussion post)\b/.test(
       normalized,
     )
-  )
+  ) {
     return "write";
+  }
+
   if (
     hasFile ||
     /\b(analyze|inspect|compare|screenshot|image|pdf)\b/.test(normalized)
-  )
+  ) {
     return "analyze";
+  }
+
   if (
     mode === "guide" ||
     mode === "tutor" ||
     /\b(teach|learn|study|quiz|homework|explain|group of answer choices|answer choices|exam|test question)\b/.test(
       normalized,
     )
-  )
+  ) {
     return "learn";
-  return "conversation";
-}
+  }
 
-function modulesForRoute(route: TaskRoute): PlatformModule[] {
-  if (route === "protect") return ["svans-ai", "shield"];
-  if (route === "debug") return ["svans-ai", "debugger"];
-  if (route === "build") return ["svans-ai", "sandbox"];
-  if (route === "analyze") return ["svans-ai", "vos"];
-  return ["svans-ai"];
+  return "conversation";
 }
 
 function capabilitiesForRequest(
@@ -164,23 +184,31 @@ function capabilitiesForRequest(
   files: AttachedFile[],
 ): PlatformCapability[] {
   const normalized = message.toLowerCase();
+
   const looksLikeQuizBlock =
     /\b(group of answer choices|answer choices|flag question|question\s+\d+|quiz|exam|test question)\b/i.test(
       message,
     );
+
   const explicitlyRequestsWeb =
     /\b(search|browse|look up|lookup|source|sources|cite|citation|current|latest|today|recent|verify online|web research)\b/i.test(
       normalized,
     );
+
   const capabilities = new Set<PlatformCapability>(["conversation"]);
-  if (/\b(teach|learn|study|quiz|homework|explain|guide)\b/.test(normalized))
+
+  if (/\b(teach|learn|study|quiz|homework|explain|guide)\b/.test(normalized)) {
     capabilities.add("teaching");
+  }
+
   if (
     /\b(write|rewrite|refine|proofread|email|reply|essay|discussion)\b/.test(
       normalized,
     )
-  )
+  ) {
     capabilities.add("writing");
+  }
+
   if (
     (!looksLikeQuizBlock &&
       /\b(latest|current|today|news|research|sources|look up|lookup|search|browse|internet|online|website|site|webpage|web page|url|domain|scam|fraud|legit|legitimate|trustworthy|reputation|reviews|complaints|bbb)\b/.test(
@@ -190,21 +218,29 @@ function capabilitiesForRequest(
     /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z]{2,})(?:\/[^\s]*)?\b/i.test(
       message,
     )
-  )
+  ) {
     capabilities.add("web_research");
-  if (files.some((file) => file.type.startsWith("image/")))
+  }
+
+  if (files.some((file) => file.type.startsWith("image/"))) {
     capabilities.add("image_analysis");
+  }
+
   if (
     /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/.test(
       normalized,
     )
-  )
+  ) {
     capabilities.add("image_generation");
+  }
+
   if (
     files.some((file) => file.type.startsWith("image/")) &&
     /\b(edit|change|modify|cross|remove|add|replace)\b/.test(normalized)
-  )
+  ) {
     capabilities.add("image_editing");
+  }
+
   if (
     files.some(
       (file) =>
@@ -212,8 +248,10 @@ function capabilitiesForRequest(
         file.type.startsWith("text/") ||
         file.type === "application/json",
     )
-  )
+  ) {
     capabilities.add("document_analysis");
+  }
+
   if (
     files.some(
       (file) =>
@@ -225,64 +263,120 @@ function capabilitiesForRequest(
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
         /\.(csv|tsv|xlsx)$/i.test(file.name),
     )
-  )
+  ) {
     capabilities.add("data_analysis");
+  }
+
   if (
     /\b(code|function|class|api|typescript|javascript|python|compile|program)\b/.test(
       normalized,
     )
-  )
+  ) {
     capabilities.add("code_assistance");
+  }
+
   if (
     /\b(change the code|edit code|modify file|patch|commit)\b/.test(normalized)
-  )
+  ) {
     capabilities.add("code_editing");
-  if (/\b(data|csv|table|statistics|analyze numbers|chart)\b/.test(normalized))
+  }
+
+  if (/\b(data|csv|table|statistics|analyze numbers|chart)\b/.test(normalized)) {
     capabilities.add("data_analysis");
-  if (/\b(spreadsheet|excel|xlsx|csv|table)\b/.test(normalized))
+  }
+
+  if (/\b(spreadsheet|excel|xlsx|csv|table)\b/.test(normalized)) {
     capabilities.add("spreadsheet_generation");
-  if (/\b(document|docx|pdf|report|worksheet)\b/.test(normalized))
-    capabilities.add("document_generation");
-  if (/\b(create|draft|generate|design|build)\b/.test(normalized))
-    capabilities.add("content_creation");
+  }
+
   if (
-    /\b(generate|create|make|draw|design|render|produce)\b.{0,80}\b(photo|image|picture|artwork|illustration|graphic|logo|wallpaper|poster)\b/.test(
+    /\b(document|docx|pdf|report|worksheet|word|powerpoint|pptx|presentation)\b/.test(
       normalized,
     )
-  )
+  ) {
+    capabilities.add("document_generation");
+  }
+
+  if (/\b(create|draft|generate|design|build|prepare|write)\b/.test(normalized)) {
     capabilities.add("content_creation");
+  }
+
   if (
     /\b(c drive|local folder|workspace|folder access|folder-based|vos|vos bridge|filesystem|file system)\b/.test(
       normalized,
     )
-  )
+  ) {
     capabilities.add("local_workspace_access");
-  if (/\b(database|supabase|sql|table|schema)\b/.test(normalized))
+  }
+
+  if (/\b(database|supabase|sql|table|schema)\b/.test(normalized)) {
     capabilities.add("database_access");
+  }
+
   if (
     /\b(email|gmail|outlook|calendar|meeting|schedule invite|appointment)\b/.test(
       normalized,
     )
-  )
+  ) {
     capabilities.add("email_calendar");
-  if (/\b(api|endpoint|webhook|external call)\b/.test(normalized))
+  }
+
+  if (/\b(api|endpoint|webhook|external call)\b/.test(normalized)) {
     capabilities.add("api_calls");
+  }
+
   if (
     /\b(automation|background job|schedule|monitor|reminder)\b/.test(normalized)
-  )
+  ) {
     capabilities.add("automation");
+  }
+
   if (
     /\b(improve|self-improve|self improvement|failure|fallback|generic response|regression)\b/.test(
       normalized,
     )
-  )
+  ) {
     capabilities.add("self_improvement");
+  }
+
   if (
     !looksLikeQuizBlock &&
     /\b(permission|access|owner approval|audit|full access)\b/.test(normalized)
-  )
+  ) {
     capabilities.add("permission_control");
+  }
+
   return [...capabilities];
+}
+
+function buildArtifactMessages(
+  messages: ChatMessage[],
+  userMemories: UserMemory[],
+): ChatMessage[] {
+  if (!userMemories.length) {
+    return messages;
+  }
+
+  const relevantMemory = userMemories
+    .slice(0, 20)
+    .map((memory) => memory.summary)
+    .filter(Boolean)
+    .join("\n");
+
+  if (!relevantMemory) {
+    return messages;
+  }
+
+  return [
+    {
+      role: "user",
+      content:
+        "REFERENCE MEMORY FOR THIS FILE REQUEST:\n" +
+        relevantMemory +
+        "\n\nUse this only as reference context. The latest user message remains the active instruction.",
+    },
+    ...messages,
+  ];
 }
 
 export async function orchestrateChat(params: {
@@ -299,21 +393,27 @@ export async function orchestrateChat(params: {
   const startedAt = Date.now();
   const requestId = params.requestId ?? createRequestId();
   const runtimeTelemetry: RuntimeTelemetry = createRuntimeTelemetry(requestId);
+
   const latestMessage = latestUserMessage(params.messages);
   const files = params.attachedFiles ?? [];
+  const userMemories = params.userMemories ?? [];
+
   const route = chooseRoute(
     latestMessage,
     params.responseMode,
-    Boolean(params.attachedFiles?.length),
+    Boolean(files.length),
   );
+
   const capabilities = capabilitiesForRequest(latestMessage, files);
+
   const mind = buildSvansMindPlan({
     messages: params.messages,
     latestMessage,
     attachedFiles: files,
     responseMode: params.responseMode,
-    userMemories: params.userMemories ?? [],
+    userMemories,
   });
+
   const moduleDecisions = selectModules({
     latestMessage,
     messages: params.messages,
@@ -322,19 +422,48 @@ export async function orchestrateChat(params: {
     route,
     capabilities,
   });
+
   const recommendedModules = moduleDecisions.map((item) => item.module);
-  const text = await generateChatResponse(
-    params.messages,
-    params.attachedFiles,
-    params.sessionId,
-    params.responseMode,
-    params.isVerifiedOwner,
-    params.writingProfile,
-    params.userMemories,
-    runtimeTelemetry,
-    formatSvansMindPlan(mind),
-  );
+
+  let text: string;
+  let artifact: GeneratedArtifact | undefined;
+
+  const artifactRequest = detectArtifactRequest(latestMessage);
+
+  if (artifactRequest) {
+    const artifactResult = await generateChatArtifact({
+      request: artifactRequest,
+      messages: buildArtifactMessages(params.messages, userMemories),
+      files,
+      telemetry: runtimeTelemetry,
+    });
+
+    text = artifactResult.text;
+
+    if ("artifact" in artifactResult) {
+      artifact = artifactResult.artifact;
+    }
+  } else if (isImageGenerationRequest(latestMessage)) {
+    const image = await generateImageWithOpenAI(latestMessage);
+    text = image ? formatGeneratedImageResponse(image) : "The image provider did not return a picture. No image was created. Check the configured OpenAI image-generation access and try again.";
+    runtimeTelemetry.providerSelected = "openai";
+    runtimeTelemetry.providerPlan = ["openai"];
+  } else {
+    text = await generateChatResponse(
+      params.messages,
+      params.attachedFiles,
+      params.sessionId,
+      params.responseMode,
+      params.isVerifiedOwner,
+      params.writingProfile,
+      userMemories,
+      runtimeTelemetry,
+      formatSvansMindPlan(mind),
+    );
+  }
+
   const latencyMs = Date.now() - startedAt;
+
   const analytics = {
     latencyMs,
     providerSelected: runtimeTelemetry.providerSelected,
@@ -343,7 +472,7 @@ export async function orchestrateChat(params: {
     qualityScore: runtimeTelemetry.qualityScore,
     qualityReasons: runtimeTelemetry.qualityReasons,
     filesUsed: files.length,
-    memoryUsed: params.userMemories?.length ?? 0,
+    memoryUsed: userMemories.length,
     researchUsed:
       capabilities.includes("web_research") ||
       runtimeTelemetry.liveSearchAttempted,
@@ -380,6 +509,7 @@ export async function orchestrateChat(params: {
 
   return {
     text,
+    ...(artifact ? { artifact } : {}),
     requestId,
     route,
     coordinator: "svans-ai",

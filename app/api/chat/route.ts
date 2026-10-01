@@ -199,8 +199,14 @@ export async function POST(req: Request) {
       requestId,
     });
 
+    const { artifact, ...orchestration } = result;
+
     return NextResponse.json(
-      { text: result.text, orchestration: result },
+      {
+        text: result.text,
+        ...(artifact ? { artifact } : {}),
+        orchestration,
+      },
       {
         headers: {
           "Cache-Control": "no-store",

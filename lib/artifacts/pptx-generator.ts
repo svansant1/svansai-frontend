@@ -38,7 +38,7 @@ export async function generatePptx(
   pptx.subject = title;
   pptx.title = title;
   pptx.company = "Vansant Platform";
-  
+
   const titleSlide = pptx.addSlide();
 
   titleSlide.addText(title, {
@@ -64,7 +64,33 @@ export async function generatePptx(
 
   const sections = buildSections(content);
 
-  for (const section of sections.slice(0, 25)) {
+  const pages: SlideSection[] = [];
+  // Split long bullets and overflow into additional slides instead of dropping content.
+  for (const section of sections) {
+    const titleFits = section.title.length <= 100;
+    const source = titleFits
+      ? section.bullets
+      : [
+          section.title,
+          ...section.bullets.filter((bullet) => bullet !== section.title),
+        ];
+    const chunks = source.flatMap(
+      (bullet) => bullet.match(/[\s\S]{1,180}(?:\s|$)|[\s\S]{1,180}/g) || [],
+    );
+    for (let offset = 0; offset < chunks.length; offset += 5) {
+      pages.push({
+        title:
+          (titleFits ? section.title.replace(/^#+\s*/, "") : "Details") +
+          (offset ? " (continued)" : ""),
+        bullets: chunks.slice(offset, offset + 5),
+      });
+    }
+  }
+  if (pages.length > 100)
+    throw new Error(
+      "The presentation needs more than 100 slides; split it into smaller decks.",
+    );
+  for (const section of pages) {
     const slide = pptx.addSlide();
 
     slide.addText(section.title, {
@@ -77,17 +103,15 @@ export async function generatePptx(
       margin: 0,
     });
 
-    const bulletText = section.bullets
-      .filter(Boolean)
-      .map((bullet) => ({
-        text: bullet,
-        options: {
-          bullet: {
-            indent: 18,
-          },
-          breakLine: true,
+    const bulletText = section.bullets.filter(Boolean).map((bullet) => ({
+      text: bullet,
+      options: {
+        bullet: {
+          indent: 18,
         },
-      }));
+        breakLine: true,
+      },
+    }));
 
     if (bulletText.length > 0) {
       slide.addText(bulletText, {

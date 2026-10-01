@@ -3,6 +3,8 @@ type OpenAIInput = {
   systemInstruction: string;
   temperature: number;
   model?: string;
+  maxOutputTokens?: number;
+  rejectTruncated?: boolean;
   attachedFiles?: Array<{
     name: string;
     type: string;
@@ -76,6 +78,7 @@ export async function generateWithOpenAI(
       },
       body: JSON.stringify({
         model: input.model || "gpt-4o-mini",
+        ...(input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
         temperature: input.temperature,
         messages: [
           { role: "system", content: input.systemInstruction },
@@ -90,6 +93,7 @@ export async function generateWithOpenAI(
     }
 
     const data = await res.json();
+    if (input.rejectTruncated && data?.choices?.[0]?.finish_reason === "length") throw new Error("Document content exceeded the provider output limit.");
     const text = data?.choices?.[0]?.message?.content?.trim() || "";
     return text || null;
   } catch (error) {

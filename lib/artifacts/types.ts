@@ -1,17 +1,7 @@
-export type ArtifactFormat = 
-  | "docx"
-  | "xlsx"
-  | "pptx"
-  | "csv"
-  | "txt"
-  | "md";
+export type ArtifactFormat = "docx" | "xlsx" | "pptx" | "csv" | "txt" | "md";
 
-export type ArtifactKind = 
-  | "document"
-  | "spreadsheet"
-  | "presentation"
-  | "text";
-  
+export type ArtifactKind = "document" | "spreadsheet" | "presentation" | "text";
+
 export type ArtifactRequest = {
   format: ArtifactFormat;
   kind: ArtifactKind;

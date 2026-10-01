@@ -78,6 +78,12 @@ import {
   generateImageWithOpenAI,
   isImageGenerationRequest,
 } from "@/lib/ai/image-generation";
+import {
+  callProvider,
+  markProviderFailure,
+  markProviderHealthy,
+  providerCooldownRemaining,
+} from "@/lib/ai/providers/executor";
 
 type ExtendedChatContext = ChatContext & {
   responseStyle: ResponseStyle;
@@ -2401,64 +2407,6 @@ ${lastAssistantMessage || "None"}
 Task:
 Respond naturally to the statement. Acknowledge the substance of what they said, infer the most helpful next thought, and keep the conversation moving without demanding that they rephrase it as a question.
 `.trim();
-}
-
-const providerCooldowns = new Map<ProviderName, number>();
-
-function providerCooldownRemaining(provider: ProviderName): number {
-  return Math.max(0, (providerCooldowns.get(provider) ?? 0) - Date.now());
-}
-
-function markProviderFailure(provider: ProviderName, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
-  const longCooldown =
-    /\b(credit|quota|billing|rate limit|429|402)\b/i.test(message);
-  providerCooldowns.set(
-    provider,
-    Date.now() + (longCooldown ? 5 * 60_000 : 30_000),
-  );
-}
-
-function markProviderHealthy(provider: ProviderName): void {
-  providerCooldowns.delete(provider);
-}
-
-async function callProvider(
-  provider: ProviderName,
-  args: {
-    prompt: string;
-    systemInstruction: string;
-    temperature: number;
-    attachedFiles?: AttachedFile[];
-  },
-): Promise<string | null> {
-  const call = async () => {
-    switch (provider) {
-      case "openai":
-        return await generateWithOpenAI(args);
-      case "anthropic":
-        return await generateWithAnthropic(args);
-      case "gemini":
-        return await generateWithGemini(args);
-      default:
-        return null;
-    }
-  };
-
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      call(),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error(`${provider} request timed out after 25 seconds`)),
-          25_000,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
 }
 
 function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {

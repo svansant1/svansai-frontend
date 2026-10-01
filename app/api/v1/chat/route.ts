@@ -291,6 +291,7 @@ export async function POST(req: Request) {
       requestId,
     });
 
+    const {artifact, ...orchestration} = result;
     return json(
       req,
       {
@@ -304,7 +305,8 @@ export async function POST(req: Request) {
         },
         route: result.route,
         coordinator: result.coordinator,
-        orchestration: result,
+        orchestration,
+        ...(artifact ? {artifact} : {}),
       },
       { headers: { "x-svansai-request-id": requestId } },
     );

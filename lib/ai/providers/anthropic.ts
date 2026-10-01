@@ -3,6 +3,8 @@ type AnthropicInput = {
   systemInstruction: string;
   temperature: number;
   model?: string;
+  maxOutputTokens?: number;
+  rejectTruncated?: boolean;
   attachedFiles?: Array<{ name: string; type: string; base64: string }>;
 };
 
@@ -22,7 +24,7 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
       },
       body: JSON.stringify({
         model: input.model || "claude-3-5-sonnet-20241022",
-        max_tokens: 1200,
+        max_tokens: input.maxOutputTokens || 1200,
         temperature: input.temperature,
         system: input.systemInstruction,
         messages: [{
@@ -46,6 +48,7 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
     }
 
     const data = await res.json();
+    if (input.rejectTruncated && data?.stop_reason === "max_tokens") throw new Error("Document content exceeded the provider output limit.");
     const text = Array.isArray(data?.content)
       ? data.content.map((c: { text?: string }) => c.text || "").join("").trim()
       : "";

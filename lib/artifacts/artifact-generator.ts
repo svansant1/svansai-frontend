@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { generateDocx } from "@/lib/artifacts/docx-generator";
 import { generatePptx } from "@/lib/artifacts/pptx-generator";
 import { generateXlsx } from "@/lib/artifacts/xlsx-generator";
+import { safeCsv } from "./tabular-content";
 
 import type {
   ArtifactFormat,
@@ -12,12 +13,9 @@ import type {
 } from "@/lib/artifacts/types";
 
 const MIME_TYPES: Record<ArtifactFormat, string> = {
-  docx:
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  xlsx:
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  pptx:
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   csv: "text/csv",
   txt: "text/plain",
   md: "text/markdown",
@@ -45,10 +43,7 @@ function safeFilenamePart(value: string): string {
 /**
  * Creates a safe filename for the generated artifact.
  */
-function defaultName(
-  title: string,
-  format: ArtifactFormat,
-): string {
+function defaultName(title: string, format: ArtifactFormat): string {
   return `${safeFilenamePart(title)}.${format}`;
 }
 
@@ -87,6 +82,8 @@ export async function generateArtifact(params: {
 }): Promise<ArtifactGenerationResult> {
   const title = params.title.trim() || "SVANS-AI";
   const content = params.content.trim();
+  if (title.length > 200 || content.length > 100_000)
+    throw new Error("Document content exceeds its size limit.");
 
   if (!content) {
     throw new Error("Artifact content cannot be empty.");
@@ -108,24 +105,22 @@ export async function generateArtifact(params: {
       break;
 
     case "csv":
+      buffer = Buffer.from(safeCsv(content), "utf8");
+      break;
     case "txt":
     case "md":
       buffer = Buffer.from(content, "utf8");
       break;
 
     default:
-      throw new Error(
-        `Unsupported artifact format: ${String(params.format)}`,
-      );
+      throw new Error(`Unsupported artifact format: ${String(params.format)}`);
   }
+
+  if (buffer.length > 8 * 1024 * 1024)
+    throw new Error("The generated file exceeds 8 MB.");
 
   return {
     text: `I created ${defaultName(title, params.format)}.`,
-    artifact: toArtifact(
-      buffer,
-      title,
-      params.format,
-      params.kind,
-    ),
+    artifact: toArtifact(buffer, title, params.format, params.kind),
   };
 }
