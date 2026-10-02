@@ -1,5 +1,5 @@
 import { generateChatResponse } from "@/lib/ai/chat-engine";
-import { isImageGenerationRequest, generateImageWithOpenAI, formatGeneratedImageResponse } from "@/lib/ai/image-generation";
+import { isImageGenerationRequest, isImageEditingRequest, generateImageWithOpenAI, formatGeneratedImageResponse } from "@/lib/ai/image-generation";
 import type { AttachedFile } from "@/lib/ai/file-types";
 import type { ChatMessage, ResponseMode } from "@/lib/ai/types";
 import {
@@ -443,9 +443,12 @@ export async function orchestrateChat(params: {
     if ("artifact" in artifactResult) {
       artifact = artifactResult.artifact;
     }
-  } else if (isImageGenerationRequest(latestMessage)) {
-    const image = await generateImageWithOpenAI(latestMessage);
-    text = image ? formatGeneratedImageResponse(image) : "The image provider did not return a picture. No image was created. Check the configured OpenAI image-generation access and try again.";
+  } else if (isImageGenerationRequest(latestMessage) || isImageEditingRequest(latestMessage)) {
+    const sourceImages = files.filter((file) => file.type.startsWith("image/"));
+    const image = await generateImageWithOpenAI(latestMessage, sourceImages);
+    text = image ? formatGeneratedImageResponse(image) : isImageEditingRequest(latestMessage) && !sourceImages.length
+      ? "Attach the image you want edited in this message. I haven't generated a replacement image without your original."
+      : "The image request did not complete. No image was created. Edits support up to four PNG/JPEG/WebP attachments, each at most 10 MB. Check the configured OpenAI image-generation access and try again.";
     runtimeTelemetry.providerSelected = "openai";
     runtimeTelemetry.providerPlan = ["openai"];
   } else {

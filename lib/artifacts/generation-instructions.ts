@@ -1,0 +1,18 @@
+import { DOCX_SPEC_INSTRUCTIONS, PPTX_SPEC_INSTRUCTIONS } from "./document-spec";
+
+export const WORKBOOK_SPEC_INSTRUCTIONS = `Return ONLY a JSON workbook specification, no fences, prose, CSV, or tutorial.
+Schema (omit unused optional keys): {"version":1,"title":"Report","sheets":[{"name":"Summary","cells":[{"address":"A1","value":"Title","style":"title"},{"address":"B3","value":null,"style":"input"},{"address":"C3","formula":"B3*2","style":"output","numberFormat":"0.00"}],"merges":["A1:D1"],"columnWidths":[24,18,18,18],"freezeRows":2,"autoFilter":"A2:D10","validations":[{"range":"B3:B20","type":"list","values":["A","B","C"]},{"range":"D3:D20","type":"whole","minimum":0,"maximum":100}],"formulaFills":[{"range":"C4:C20","formula":"B4*2"}],"conditionalFormats":[{"range":"C3:C20","operator":"lessThan","value":0,"color":"FEE2E2"}]}]}.
+Cells have EITHER a primitive value (string/number/boolean/null) OR a formula string, never both. Use real formula properties, not = text values. Style is title/header/input/output/note. Do not use unlisted schema keys. Optional validation types: list, whole, decimal. Conditional operators: greaterThan, lessThan, equal.
+Formulas use English Excel functions, comma separators, A1 references and existing sheet names. Quote sheet names with spaces. Use SUM, IF, IFERROR, AND, OR, COUNT, COUNTA, COUNTIF, COUNTIFS, SUMIF, SUMIFS, MIN, MAX, ROUND, ROUNDUP, ROUNDDOWN, ABS, AVERAGE, VLOOKUP, INDEX, MATCH, ISNUMBER, LEN, TRIM, UPPER, LOWER, CONCATENATE, VALUE, DATE, YEAR, MONTH, DAY, PMT only when needed. No macros, external links, network calls, defined names, dynamic arrays, INDIRECT, OFFSET, whole-column/whole-row refs, or cycles. A formulaFill translates relative A1 references from the range's TOP LEFT; use $ for absolute anchors. No formula may overlap another supplied cell or fill. Clearly label unavailable results (for example N/A), rather than letting missing data appear as a valid zero.
+Limits: 8 sheets, 5000 rows and 100 columns per sheet, 50000 total expanded cells, 5000 formulas, 100000 JSON characters. Prefer compact formulaFills. Preserve all supplied source figures; do not invent business data. Editable inputs must be blank unless supplied or explicitly requested examples. Use input references for derived values, and place a linked summary first. Keep inputs visibly distinct, apply number formats and validation, and avoid merged cells across table data.
+For interactive requests include meaningful formulas and blank validated inputs; never substitute a static table. For card ranks handle numbers and J/Q/K/A text, blanks and invalid entries. Decks remaining counts valid entered cards divided by 52; guard division when exhausted. Do not confuse positive/negative count with shoe depletion status. Include the specified round count and multiple separate card slots per round.
+For unsupported features (native charts, macros, pivot tables, embedded images), return {"unsupported":"Brief limitation and supported alternative"} rather than pretending they exist.`;
+
+export const GENERATION_INSTRUCTIONS = {
+  docx: DOCX_SPEC_INSTRUCTIONS,
+  pptx: PPTX_SPEC_INSTRUCTIONS,
+  xlsx: WORKBOOK_SPEC_INSTRUCTIONS,
+  csv: 'Return ONLY RFC4180 CSV with one header and consistent columns. Preserve real data. CSV cannot store styles, worksheets or interactive formulas; if required return {"unsupported":"Request XLSX for formatted or interactive workbooks."}.',
+  txt: "Return only the requested plain text, not a tutorial about creating a file.",
+  md: "Return complete requested Markdown with headings, lists and tables as useful, not a tutorial about saving it.",
+} as const;

@@ -7,6 +7,7 @@ type GeminiInput = {
   model?: string;
   maxOutputTokens?: number;
   rejectTruncated?: boolean;
+  timeoutMs?: number;
   attachedFiles?: Array<{ name: string; type: string; base64: string }>;
 };
 
@@ -30,6 +31,7 @@ export async function generateWithGemini(input: GeminiInput): Promise<string | n
       config: {
         systemInstruction: input.systemInstruction,
         temperature: input.temperature,
+        httpOptions: { timeout: input.timeoutMs || 25_000 },
         ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
         topP: 0.9,
       },

@@ -5,6 +5,7 @@ type OpenAIInput = {
   model?: string;
   maxOutputTokens?: number;
   rejectTruncated?: boolean;
+  timeoutMs?: number;
   attachedFiles?: Array<{
     name: string;
     type: string;
@@ -71,7 +72,7 @@ export async function generateWithOpenAI(
 
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(input.timeoutMs || 25_000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,

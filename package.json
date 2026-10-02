@@ -16,7 +16,7 @@
     "lint": "next lint",
     "test:chat": "node scripts/chat-regression.mjs",
     "test:attachments": "node scripts/attachment-regression.mjs",
-    "test:artifacts": "tsx --test scripts/artifact-regression.test.ts scripts/artifact-source.test.ts",
+    "test:artifacts": "tsx --test scripts/artifact-regression.test.ts scripts/artifact-source.test.ts scripts/artifact-advanced.test.ts",
     "test:artifact-http": "node scripts/artifact-http-smoke.mjs",
     "test:guards": "node scripts/quality-guards-regression.mjs",
     "test:profile-memory": "node scripts/profile-memory-regression.mjs",

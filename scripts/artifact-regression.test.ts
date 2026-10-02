@@ -159,7 +159,7 @@ test("chat generation exports supplied content without calling a model and failu
   assert.ok(!("artifact" in failure));
   const drafted = await generateChatArtifact(
     { request: detectArtifactRequest("Create an Excel budget")!, messages: [] },
-    { draft: async () => "Item,Cost\nSupplies,10" },
+    { draft: async () => JSON.stringify({ version: 1, title: "Budget", sheets: [{ name: "Budget", cells: [{ address: "A1", value: "Item" }, { address: "B1", value: "Cost" }, { address: "A2", value: "Supplies" }, { address: "B2", value: 10 }] }] }) },
   );
   assert.ok("artifact" in drafted);
 });

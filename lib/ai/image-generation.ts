@@ -10,6 +10,24 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024;
 const REQUEST_TIMEOUT_MS = 120_000;
 
+export function imageOutputOptions(message: string) {
+  const transparent = /\btransparent(?:\s+background)?\b|\bremove\s+(?:the\s+)?background\b/i.test(message);
+  const requestedFormat = /\b(?:as|format|file|in)\s+(?:an?\s+)?(png|jpe?g|webp)\b/i.exec(message)?.[1].toLowerCase();
+  const configuredFormat = process.env.SVANSAI_IMAGE_FORMAT || "png";
+  let outputFormat = (requestedFormat || configuredFormat).replace("jpg", "jpeg");
+  if (!["png", "jpeg", "webp"].includes(outputFormat) || (transparent && outputFormat === "jpeg")) outputFormat = "png";
+  const size = /\b(?:landscape|horizontal|wide)\b/i.test(message) ? "1536x1024"
+    : /\b(?:portrait|vertical|tall)\b/i.test(message) ? "1024x1536"
+    : /\bsquare\b/i.test(message) ? "1024x1024" : process.env.SVANSAI_IMAGE_SIZE || "1024x1024";
+  const quality = /\bhigh[- ]quality\b/i.test(message) ? "high" : process.env.SVANSAI_IMAGE_QUALITY || "auto";
+  return { size: ["1024x1024", "1536x1024", "1024x1536", "auto"].includes(size) ? size : "auto", quality: ["low", "medium", "high", "auto"].includes(quality) ? quality : "auto", output_format: outputFormat, background: transparent ? "transparent" : "auto" };
+}
+
+export function isImageEditingRequest(message: string): boolean {
+  const text = message.replace(/^(?:(?:can|could|would|will) you\s+|please\s+)*/i, "").trim();
+  return /^(?:edit|modify|change|transform|restyle|recolor)\s+(?:this|the|my|these|an?|attached|uploaded)\b[\s\S]*\b(?:image|photo|picture|logo|background)s?\b/i.test(text) || /^remove\s+(?:the\s+)?background\b/i.test(text);
+}
+
 function normalizePrompt(message: string) {
   return message
     .replace(
@@ -168,6 +186,7 @@ Create a high-quality image that follows the user's request. If the user asks fo
 
 export async function generateImageWithOpenAI(
   message: string,
+  sourceImages: Array<{ name: string; type: string; base64: string }> = [],
 ): Promise<GeneratedImageResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -177,11 +196,8 @@ export async function generateImageWithOpenAI(
     process.env.SVANSAI_IMAGE_MODEL ||
     process.env.OPENAI_IMAGE_MODEL ||
     DEFAULT_IMAGE_MODEL;
-  const outputFormat =
-    process.env.SVANSAI_IMAGE_FORMAT === "jpeg" ||
-    process.env.SVANSAI_IMAGE_FORMAT === "webp"
-      ? process.env.SVANSAI_IMAGE_FORMAT
-      : "png";
+  const options = imageOutputOptions(message);
+  const outputFormat = options.output_format;
   const mimeType =
     outputFormat === "jpeg"
       ? "image/jpeg"
@@ -192,23 +208,24 @@ export async function generateImageWithOpenAI(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
+    if (sourceImages.length > 4 || sourceImages.some((file) => !["image/png", "image/jpeg", "image/webp"].includes(file.type) || Buffer.from(file.base64, "base64").length > MAX_IMAGE_BYTES)) return null;
+    if (isImageEditingRequest(message) && !sourceImages.length) return null;
+    const fields = { model, prompt, ...options, n: 1 };
+    const form = new FormData();
+    if (sourceImages.length) {
+      for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
+      for (const file of sourceImages) form.append("image[]", new Blob([new Uint8Array(Buffer.from(file.base64, "base64"))], { type: file.type }), file.name.split(/[\\/]/).pop() || "source.png");
+    }
     const response = await fetch(
-      "https://api.openai.com/v1/images/generations",
+      `https://api.openai.com/v1/images/${sourceImages.length ? "edits" : "generations"}`,
       {
         method: "POST",
         signal: controller.signal,
         headers: {
-          "Content-Type": "application/json",
+          ...(!sourceImages.length ? { "Content-Type": "application/json" } : {}),
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model,
-          prompt,
-          size: process.env.SVANSAI_IMAGE_SIZE || "1024x1024",
-          quality: process.env.SVANSAI_IMAGE_QUALITY || "auto",
-          output_format: outputFormat,
-          n: 1,
-        }),
+        body: sourceImages.length ? form : JSON.stringify(fields),
       },
     );
 

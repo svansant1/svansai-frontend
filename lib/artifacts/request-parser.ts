@@ -30,8 +30,7 @@ const formats: Array<{
 ];
 
 /** Only explicit file-making commands route to generation; questions and refusals stay chat. */
-export function detectArtifactRequest(message: string): ArtifactRequest | null {
-  const instruction = message.split(/\n\s*(?:\n|(?:content|text|data)\s*:)/i)[0].trim();
+function detectClause(instruction: string): ArtifactRequest | null {
   if (!instruction || /^(how|why|what|when|where)\b/i.test(instruction))
     return null;
   if (
@@ -41,7 +40,7 @@ export function detectArtifactRequest(message: string): ArtifactRequest | null {
   )
     return null;
   if (
-    !/\b(create|make|generate|build|produce|turn|convert|export|put|save|give|prepare|write)\b/i.test(
+    !/\b(create|make|generate|build|produce|turn|convert|export|put|save|give|prepare|write|send|provide)\b/i.test(
       instruction,
     )
   )
@@ -56,11 +55,11 @@ export function detectArtifactRequest(message: string): ArtifactRequest | null {
   // A conversion names the input as well as the output: prefer an explicit
   // destination ("Word to PowerPoint"), otherwise the first format after the verb.
   const command = instruction.replace(
-    /^[\s\S]*?\b(?:create|make|generate|build|produce|turn|convert|export|put|save|give|prepare|write)\b\s*/i,
+    /^[\s\S]*?\b(?:create|make|generate|build|produce|turn|convert|export|put|save|give|prepare|write|send|provide)\b\s*/i,
     "",
   );
   const destination = command.match(
-    /\b(?:to|into|as|in)\s+(?:(?:a|an|the|new|downloadable|editable|microsoft)\s+){0,3}(word(?:\s+(?:document|file))?|docx|excel|spreadsheet|workbook|xlsx|powerpoint|power point|presentation|slide deck|pptx|csv|markdown|md file|text file|txt file)\b/i,
+    /\b(?:to|into|as|in)\s+(?:(?:a|an|the|new|downloadable|editable|microsoft)\s+){0,3}[`.]?(word(?:\s+(?:document|file))?|docx|excel|spreadsheet|workbook|xlsx|powerpoint|power point|presentation|slide deck|pptx|csv|markdown|md file|text file|txt file)\b/i,
   );
   const target = destination
     ? destination[1].replace(/^word$/i, "word document")
@@ -70,5 +69,28 @@ export function detectArtifactRequest(message: string): ArtifactRequest | null {
     .filter(({ index }) => index >= 0)
     .sort((a, b) => a.index - b.index)[0]?.item;
   if (!match) return null;
-  return { format: match.format, kind: match.kind, prompt: message.trim() };
+  return { format: match.format, kind: match.kind, prompt: instruction };
+}
+
+/** Scope negative constraints to their own clause, not the entire file request. */
+export function detectArtifactRequest(message: string): ArtifactRequest | null {
+  const instruction = message.replace(/[’‘]/g, "'").split(/\n\s*(?:\n|(?:content|text|data)\s*:)/i)[0].trim();
+  if (/^(how|why|what|when|where)\b/i.test(instruction)) return null;
+  const clauses = instruction.split(/(?<=[.!?;])\s+|\n+|,\s*(?:but|instead)\s+/);
+  let result: ArtifactRequest | null = null;
+  for (const clause of clauses) {
+    const action = /\b(create|make|generate|build|produce|turn|convert|export|put|save|give|prepare|write|send|provide)\b/i.exec(clause);
+    if (!action) continue;
+    const prefix = clause.slice(0, action.index);
+    if (/\b(don't|do not|never|cannot|can't|avoid|stop|not)\b/i.test(prefix)) {
+      // A later cancellation overrides the request; design constraints do not.
+      if (result && !/\b(static|reference|sample|example)\b/i.test(clause) &&
+          (/\b(?:any|the|a)\s+(?:files?|attachments?|downloads?|workbooks?|documents?|presentations?)\b/i.test(clause) ||
+            formats.find((item) => item.format === result?.format)?.pattern.test(clause))) result = null;
+      continue;
+    }
+    const candidate = detectClause(clause);
+    if (candidate) result = candidate;
+  }
+  return result ? { ...result, prompt: message.trim() } : null;
 }

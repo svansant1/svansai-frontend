@@ -5,6 +5,7 @@ type AnthropicInput = {
   model?: string;
   maxOutputTokens?: number;
   rejectTruncated?: boolean;
+  timeoutMs?: number;
   attachedFiles?: Array<{ name: string; type: string; base64: string }>;
 };
 
@@ -16,7 +17,7 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
     const images = (input.attachedFiles ?? []).filter((file) => file.type.startsWith("image/") && file.base64);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(input.timeoutMs || 25_000),
       headers: {
         "Content-Type": "application/json",
         "x-api-key": apiKey,

@@ -72,6 +72,9 @@ try {
       "ppt/presentation.xml",
     ],
     ["xlsx", "Excel workbook", "Name,Count\nRouters,2", "xl/workbook.xml"],
+    ["xlsx", "interactive Excel workbook. Do not create a static reference table.", JSON.stringify({version:1,title:"Formula smoke",sheets:[{name:"Inputs",cells:[{address:"A1",value:3,style:"input"}],validations:[{range:"A1",type:"whole",minimum:0,maximum:10}]},{name:"Summary",cells:[{address:"A1",formula:"Inputs!A1*2",style:"output"}]}]}), "xl/worksheets/sheet2.xml"],
+    ["docx", "Word document", JSON.stringify({version:1,kind:"docx",pageNumbers:true,blocks:[{type:"table",columns:["Item","Value"],rows:[["Native table","Yes"]]}]}), "word/footer1.xml"],
+    ["pptx", "PowerPoint", JSON.stringify({version:1,kind:"pptx",slides:[{title:"Native slide",bullets:["Editable content"],notes:"Speaker note"}]}), "ppt/notesSlides/notesSlide1.xml"],
   ]) {
     const response = await fetch(base + endpoint, {
       method: "POST",

@@ -4,13 +4,17 @@ This update belongs to the original svansai-frontend website, not SVANS Agent V3
 
 ## Supported output
 
-- Word .docx with paragraphs, headings and bullets.
-- PowerPoint .pptx slides, paginated instead of silently dropping sections.
-- Excel .xlsx with a frozen header, typed numeric values and preserved quoted/empty cells.
+- Word .docx with native tables, headings, paragraphs, bullet and numbered lists, page breaks, running headers/footers, page numbers and restrained font/color themes.
+- PowerPoint .pptx with explicit slide ordering, editable text and tables, speaker notes, color/font themes and overflow continuation slides.
+- Excel .xlsx with multiple sheets, real formula cells and relative formula fills, dropdowns and numeric validation, input/output styling, number formats, conditional formatting, merged titles, frozen rows and filters.
 - CSV, Markdown and plain text downloads.
-- Existing OpenAI picture generation, now accepting polite requests such as "Can you create a picture of a robot?"
+- OpenAI picture generation and editing of newly attached PNG/JPEG/WebP images; portrait/landscape/square requests, transparency, PNG/JPEG/WebP output and high-quality requests.
 
-The API returns actual file bytes, a MIME type and filename. The chat prepares a Blob download. Office files are real ZIP-based Office packages, not text with a renamed extension. This is one generated file per request; complex charts, macros, multiple worksheets and image-filled decks are not implemented by these simple exporters.
+The API returns actual file bytes, a MIME type and filename. The chat prepares a Blob download. Office files are native Office packages, not text with a renamed extension. This is one generated file/image per request. Macros, native charts/pivots, arbitrary embedded assets, image-filled decks, PDF output and pixel-perfect document conversion are not implemented. Unknown schema fields or unsupported requested features must fail explicitly, not produce a misleading substitute.
+
+Model-generated Office files use validated JSON specifications. Plain supplied content and simple prior-answer exports retain the older Markdown/CSV paths. CSV cells beginning with = remain literal strings; only explicit validated workbook formula properties become executable Excel formulas. Network/DDE functions, external links, named expressions, dynamic references and cycles are blocked. Syntax/security validation is not a universal proof of formula correctness: review generated calculations. Excel is instructed to recalculate on open; the website does not calculate cached results server-side.
+
+Workbook limits: 8 sheets, 5,000 rows and 100 columns per sheet, 50,000 expanded cells, 5,000 formulas, 100,000 source JSON characters. Decks are limited to 100 slides including continuations. A table row that cannot fit safely is rejected. Image edits accept up to four PNG/JPEG/WebP source images, each at most 10 MB, attached to the current request. JPEG requests with transparency use PNG because JPEG cannot preserve alpha. Previously generated chat images are not automatically reattached for edits.
 
 ## Try it
 
@@ -19,6 +23,10 @@ The API returns actual file bytes, a MIME type and filename. The chat prepares a
 - Create an Excel budget template.
 - Put your previous answer into a Word document.
 - Generate a picture of a blue robot in a workshop.
+- Create an interactive Excel workbook with editable inputs, formulas, dropdowns and a summary sheet. Do not create a static table.
+- Create a Word report with a native findings table, numbered recommendations and page numbers.
+- Create a PowerPoint with editable tables and speaker notes.
+- Edit this attached image to have a transparent background as PNG.
 
 For a deterministic export without a model call, send:
 
@@ -28,7 +36,7 @@ For a deterministic export without a model call, send:
     Router,2
     Switch,1
 
-The instruction must explicitly ask to create/export a supported file. A question such as "How do I create a PowerPoint?" remains normal chat.
+The instruction must explicitly ask to create/export a supported file. A question such as "How do I create a PowerPoint?" remains normal chat. Negative design constraints ("Do not create a static reference table") no longer cancel an affirmative file request. Genuine cancellations are still respected.
 
 ## Providers and bounds
 
@@ -42,7 +50,9 @@ Saved assistant downloads are encoded within the existing private conversation_m
 
 ## Verification and deployment
 
-October 1, 2026: all 14 artifact/source regression tests passed; TypeScript and production build passed. The production HTTP smoke test verified /api/chat and authenticated /api/v1/chat return native DOCX/PPTX/XLSX bytes using supplied content with external fetches blocked, and that the API rejects missing credentials. Image generation was verified with a mocked PNG response. Live paid providers, authenticated Supabase save/restore, browser download clicks and Office desktop rendering were not exercised.
+October 2, 2026: 21 artifact/source/advanced regression tests pass, including the supplied Hi-Lo request routed through a mocked structured draft. The acceptance workbook contains six rounds with separate blank card-entry cells and real formulas. An independent bundled spreadsheet engine verified recalculation for blank inputs, numeric/face ranks, a changed card, cumulative rounds, invalid entries, exhausted shoe and reset. This tests the export engine and fixture, not a live provider's response to that prompt. TypeScript and production build passed. HTTP smoke checks cover both chat endpoints with native files and API authentication. Image generation/editing were tested with mocked responses; live paid providers, authenticated Supabase save/restore, browser download clicks and native Office visual rendering were not exercised.
+
+The image-option implementation follows [official OpenAI image prompting documentation](https://developers.openai.com/api/docs/guides/image-prompting). Existing provider/model configuration is retained. Artifact drafting permits up to 8,192 output tokens with a 120-second provider timeout; ensure the hosting request timeout allows that duration. No vendor fallback occurs after a failed file-generation call.
 
 Dependency maintenance removed the previously reported critical Next.js alert and updated compatible Axios and related transitive dependencies. The production dependency audit still reports two high-severity package entries: image-size and its parent pptxgenjs. This exporter currently produces text-only slides and does not submit uploaded images to that parser. The advisory is not considered resolved; a compatible upstream fix or separately verified dependency replacement is still needed. No forced major-version dependency changes were applied.
 
