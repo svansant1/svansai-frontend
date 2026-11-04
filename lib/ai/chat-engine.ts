@@ -73,6 +73,7 @@ import {
   formatCyberModeInstructions,
   type CyberAccessContext,
 } from "@/lib/ai/cyber-mode";
+import { buildOwnerDeviceAccessResponse } from "@/lib/ai/cyber-owner-access";
 import {
   extractChecklistFromImages,
   handleChecklistRequest,
@@ -3252,7 +3253,36 @@ ${batchQuizInstruction}
       }
       markProviderHealthy(provider);
 
-      if (!context.cyberAccess.active && containsHarmfulTechnicalOutput(cleanFirst)) {
+      if (context.cyberAccess.active && isSafetyRefusal(cleanFirst)) {
+        const ownerDeviceFallback = buildOwnerDeviceAccessResponse(
+          context.latestUserMessage,
+        );
+
+        if (ownerDeviceFallback) {
+          const critique = critiqueResponse({
+            response: ownerDeviceFallback,
+            latestUserMessage: context.latestUserMessage,
+            messages: context.messages,
+            conversationState: context.conversationState,
+          });
+          if (runtimeTelemetry) {
+            runtimeTelemetry.providerSelected = "local";
+            runtimeTelemetry.fallbackUsed = true;
+            runtimeTelemetry.providerFailures.push({
+              provider,
+              reason:
+                "Provider returned a generic refusal for an explicitly owner-authorized Cyber Lab device request.",
+            });
+            applyCritique(runtimeTelemetry, critique);
+          }
+          return {
+            response: ownerDeviceFallback,
+            critique,
+          };
+        }
+      }
+
+            if (!context.cyberAccess.active && containsHarmfulTechnicalOutput(cleanFirst)) {
         const response = buildCyberRiskyResponse(context.latestUserMessage);
         const critique = critiqueResponse({
           response,
@@ -3334,7 +3364,36 @@ ${batchQuizInstruction}
       }
       markProviderHealthy(provider);
 
-      if (!context.cyberAccess.active && containsHarmfulTechnicalOutput(cleanSecond)) {
+      if (context.cyberAccess.active && isSafetyRefusal(cleanSecond)) {
+        const ownerDeviceFallback = buildOwnerDeviceAccessResponse(
+          context.latestUserMessage,
+        );
+
+        if (ownerDeviceFallback) {
+          const critique = critiqueResponse({
+            response: ownerDeviceFallback,
+            latestUserMessage: context.latestUserMessage,
+            messages: context.messages,
+            conversationState: context.conversationState,
+          });
+          if (runtimeTelemetry) {
+            runtimeTelemetry.providerSelected = "local";
+            runtimeTelemetry.fallbackUsed = true;
+            runtimeTelemetry.providerFailures.push({
+              provider,
+              reason:
+                "Provider retry returned a generic refusal for an explicitly owner-authorized Cyber Lab device request.",
+            });
+            applyCritique(runtimeTelemetry, critique);
+          }
+          return {
+            response: ownerDeviceFallback,
+            critique,
+          };
+        }
+      }
+
+            if (!context.cyberAccess.active && containsHarmfulTechnicalOutput(cleanSecond)) {
         const response = buildCyberRiskyResponse(context.latestUserMessage);
         const critique = critiqueResponse({
           response,
