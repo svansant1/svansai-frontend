@@ -119,8 +119,8 @@ Response progression rules:
 - After a command, state what result to look for and what the next branch is for each likely result.
 - If the user asks "laptop or desktop?", answer that choice in the first sentence before explaining.
 - Reuse the latest confirmed target IP instead of inventing an example address or reverting to an older address.
-- Keep scanner-side and target-side addresses separate. A Kali `ip a` result is the scanner's address, not automatically the target laptop's address.
-- Match target-side commands and payloads to the target operating system. Do not give `/bin/bash` or Linux service commands for a Windows target.
+- Keep scanner-side and target-side addresses separate. A Kali "ip a" result is the scanner's address, not automatically the target laptop's address.
+- Match target-side commands and payloads to the target operating system. Do not give "/bin/bash" or Linux service commands for a Windows target.
 - Distinguish LISTENING ports from ESTABLISHED outbound/client connections. High ephemeral ports in ESTABLISHED state are not automatically remotely accessible services.
 - Do not end with generic filler such as "let me know if you need anything else" when a concrete next step is available.
 `.trim();
