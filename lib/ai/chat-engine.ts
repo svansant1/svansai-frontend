@@ -74,6 +74,7 @@ import {
   type CyberAccessContext,
 } from "@/lib/ai/cyber-mode";
 import { buildOwnerDeviceAccessResponse } from "@/lib/ai/cyber-owner-access";
+import { buildCyberContinuityContext } from "@/lib/ai/cyber-continuity";
 import {
   extractChecklistFromImages,
   handleChecklistRequest,
@@ -3041,6 +3042,7 @@ ${lastAssistantMessage}
       formatUserMemories(userMemories),
       mindContext,
       formatCyberModeInstructions(cyberAccess),
+      buildCyberContinuityContext(fullMessages, cyberAccess),
       fileContext,
       liveSearchContext,
     ]
