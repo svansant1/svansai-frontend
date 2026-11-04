@@ -1,6 +1,10 @@
 export type CyberModeScope = "owner_authorized";
 export type CyberModeDepth = "expert";
 
+export type CyberModeEnvironment = {
+  SVANSAI_ADMIN_CYBER_MODE_ENABLED?: string;
+};
+
 export type CyberAccessContext = {
   requested: boolean;
   active: boolean;
@@ -20,7 +24,7 @@ export const INACTIVE_CYBER_ACCESS: CyberAccessContext = Object.freeze({
 });
 
 export function isAdminCyberModeEnabled(
-  env: NodeJS.ProcessEnv = process.env,
+  env: CyberModeEnvironment = process.env,
 ): boolean {
   return env.SVANSAI_ADMIN_CYBER_MODE_ENABLED?.trim() === "1";
 }
@@ -28,7 +32,7 @@ export function isAdminCyberModeEnabled(
 export function resolveCyberAccess(params: {
   requested: boolean;
   ownerVerified: boolean;
-  env?: NodeJS.ProcessEnv;
+  env?: CyberModeEnvironment;
 }): CyberAccessContext {
   const featureEnabled = isAdminCyberModeEnabled(params.env ?? process.env);
 
