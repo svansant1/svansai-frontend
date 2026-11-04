@@ -28,6 +28,7 @@ type ChatOrchestration = {
   coordinator?: string;
   recommendedModules?: string[];
   responseMode?: string;
+  cyberMode?: boolean;
   capabilities?: string[];
   commandCenter?: string[];
   mind?: {
@@ -75,6 +76,11 @@ type MemoryCategory =
   | "personal_preference"
   | "project_context";
 type ProfileMemory = { id: string; category: MemoryCategory; summary: string };
+type OwnerAccessState = {
+  checked: boolean;
+  owner: boolean;
+  cyberModeAvailable: boolean;
+};
 
 type UserState = {
   id: string;
@@ -769,6 +775,12 @@ export default function AIHelper({
   const [totalViews, setTotalViews] = useState(0);
   const [isPasswordMode, setIsPasswordMode] = useState(false);
   const [responseMode, setResponseMode] = useState<ResponseMode>("auto");
+  const [ownerAccess, setOwnerAccess] = useState<OwnerAccessState>({
+    checked: false,
+    owner: false,
+    cyberModeAvailable: false,
+  });
+  const [cyberMode, setCyberMode] = useState(false);
   const [showAdvancedModes, setShowAdvancedModes] = useState(false);
   const [showVoiceProfile, setShowVoiceProfile] = useState(false);
   const [voiceContext, setVoiceContext] = useState<WritingContext>("general");
@@ -863,6 +875,56 @@ export default function AIHelper({
 
     return id;
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOwnerAccess() {
+      if (!user) {
+        setOwnerAccess({ checked: true, owner: false, cyberModeAvailable: false });
+        setCyberMode(false);
+        return;
+      }
+
+      try {
+        const { data } = await supabase.auth.getSession();
+        const accessToken = data.session?.access_token;
+        if (!accessToken) {
+          if (!cancelled) {
+            setOwnerAccess({ checked: true, owner: false, cyberModeAvailable: false });
+            setCyberMode(false);
+          }
+          return;
+        }
+
+        const response = await fetch("/api/system/owner-access", {
+          method: "GET",
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const value = response.ok ? await response.json() : null;
+        if (cancelled) return;
+
+        const next: OwnerAccessState = {
+          checked: true,
+          owner: value?.owner === true,
+          cyberModeAvailable: value?.cyberModeAvailable === true,
+        };
+        setOwnerAccess(next);
+        if (!next.cyberModeAvailable) setCyberMode(false);
+      } catch {
+        if (!cancelled) {
+          setOwnerAccess({ checked: true, owner: false, cyberModeAvailable: false });
+          setCyberMode(false);
+        }
+      }
+    }
+
+    void loadOwnerAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     const update = () => setIsMobile(window.innerWidth <= 768);
@@ -1371,6 +1433,7 @@ export default function AIHelper({
         messages: requestMessages,
         sessionId,
         responseMode,
+        cyberMode: ownerAccess.cyberModeAvailable && cyberMode,
       };
 
       if (filesToSend.length) {
@@ -2605,6 +2668,65 @@ const finalMessages = [
                   Advanced modes
                 </button>
               )}
+            </div>
+          )}
+
+          {!isPasswordMode && ownerAccess.cyberModeAvailable && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: isMobile ? "stretch" : "center",
+                flexDirection: isMobile ? "column" : "row",
+                gap: "8px",
+                marginBottom: "10px",
+                padding: "10px 12px",
+                borderRadius: "14px",
+                border: cyberMode
+                  ? "1px solid rgba(248,113,113,0.55)"
+                  : "1px solid rgba(255,255,255,0.10)",
+                background: cyberMode
+                  ? "rgba(127,29,29,0.18)"
+                  : "rgba(255,255,255,0.035)",
+              }}
+            >
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  const next = !cyberMode;
+                  setCyberMode(next);
+                  if (next) setResponseMode("direct");
+                }}
+                style={{
+                  borderRadius: "12px",
+                  border: cyberMode
+                    ? "1px solid rgba(248,113,113,0.70)"
+                    : "1px solid rgba(255,255,255,0.16)",
+                  background: cyberMode
+                    ? "rgba(239,68,68,0.20)"
+                    : "rgba(255,255,255,0.06)",
+                  color: cyberMode ? "#fecaca" : "rgba(255,255,255,0.78)",
+                  padding: "8px 12px",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontWeight: 900,
+                  fontSize: "0.82rem",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Cyber Lab {cyberMode ? "ON" : "OFF"}
+              </button>
+              <span
+                style={{
+                  color: cyberMode
+                    ? "rgba(254,202,202,0.88)"
+                    : "rgba(255,255,255,0.52)",
+                  fontSize: "0.76rem",
+                  lineHeight: 1.35,
+                }}
+              >
+                Owner-only expert cybersecurity mode for your devices, labs, CTFs,
+                staging systems, and other authorized targets.
+              </span>
             </div>
           )}
 
