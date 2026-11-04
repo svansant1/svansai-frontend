@@ -14,6 +14,7 @@ import { loadUserMemories } from "@/lib/personalization/structured-memory";
 import { orchestrateChat } from "@/lib/platform/orchestrator";
 import { createRequestId } from "@/lib/platform/telemetry";
 import { normalizeChatRequest } from "@/lib/ai/request-context";
+import { cyberModeDenialReason, resolveCyberAccess } from "@/lib/ai/cyber-mode";
 
 const MAX_REQUEST_BYTES = 120 * 1024 * 1024;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -181,6 +182,17 @@ export async function POST(req: Request) {
       verifyOwnerRequest(req),
       verifyUserRequest(req),
     ]);
+    const cyberAccess = resolveCyberAccess({
+      requested: body?.cyberMode === true,
+      ownerVerified: ownerAuth.authorized,
+    });
+
+    if (body?.cyberMode === true && !cyberAccess.active) {
+      return NextResponse.json(
+        { error: cyberModeDenialReason(cyberAccess) },
+        { status: 403, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     const [writingProfile, userMemories] = userAuth.authenticated
       ? await Promise.all([
           loadWritingProfile(userAuth.userId),
@@ -193,6 +205,7 @@ export async function POST(req: Request) {
       sessionId,
       responseMode,
       isVerifiedOwner: ownerAuth.authorized,
+      cyberAccess,
       writingProfile,
       userMemories,
       userId: userAuth.authenticated ? userAuth.userId : null,
