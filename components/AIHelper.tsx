@@ -2700,10 +2700,7 @@ const finalMessages = [
                         ? "linear-gradient(135deg, rgba(56,189,248,0.24), rgba(168,85,247,0.14))"
                         : "rgba(255,255,255,0.045)",
                       color: active ? "#e0f2fe" : "rgba(255,255,255,0.72)",
-                      cursor:
-                    loading || !ownerAccess.ownerSessionUnlocked
-                      ? "not-allowed"
-                      : "pointer",
+                      cursor: loading ? "not-allowed" : "pointer",
                       fontSize: isMobile ? "0.78rem" : "0.84rem",
                       fontWeight: 850,
                       letterSpacing: "0.02em",
@@ -2777,7 +2774,10 @@ const finalMessages = [
                     : "rgba(255,255,255,0.06)",
                   color: cyberMode ? "#fecaca" : "rgba(255,255,255,0.78)",
                   padding: "8px 12px",
-                  cursor: loading ? "not-allowed" : "pointer",
+                  cursor:
+                    loading || !ownerAccess.ownerSessionUnlocked
+                      ? "not-allowed"
+                      : "pointer",
                   fontWeight: 900,
                   fontSize: "0.82rem",
                   whiteSpace: "nowrap",
