@@ -15,6 +15,7 @@ import { orchestrateChat } from "@/lib/platform/orchestrator";
 import { createRequestId } from "@/lib/platform/telemetry";
 import { normalizeChatRequest } from "@/lib/ai/request-context";
 import { cyberModeDenialReason, resolveCyberAccess } from "@/lib/ai/cyber-mode";
+import { isOwnerSession } from "@/lib/ai/instruction-handler";
 
 const MAX_REQUEST_BYTES = 120 * 1024 * 1024;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -182,9 +183,13 @@ export async function POST(req: Request) {
       verifyOwnerRequest(req),
       verifyUserRequest(req),
     ]);
+    const ownerSessionUnlocked =
+      Boolean(sessionId) && isOwnerSession(sessionId as string);
+
     const cyberAccess = resolveCyberAccess({
       requested: body?.cyberMode === true,
       ownerVerified: ownerAuth.authorized,
+      ownerSessionUnlocked,
     });
 
     if (body?.cyberMode === true && !cyberAccess.active) {
