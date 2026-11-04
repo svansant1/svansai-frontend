@@ -265,7 +265,7 @@ function isWritingOrDiscussionHelp(message: string): boolean {
   );
 }
 
-function needsLiveSearch(message: string): boolean {
+export function needsLiveSearch(message: string): boolean {
   const lower = message.toLowerCase();
   const hasUrl =
     /\bhttps?:\/\/\S+/i.test(message) ||
@@ -274,6 +274,14 @@ function needsLiveSearch(message: string): boolean {
     /\b(search|browse|look up|lookup|internet|web|website|site|url|domain|online)\b/i.test(
       message,
     );
+  const looksLikeTerminalOrScanOutput =
+    /(?:^|\n)\s*[┌└├│].*[$#>]\s|\bNmap scan report\b|\bStarting Nmap\b|\bPORT\s+STATE\s+SERVICE\b|\bnetstat\s+-ano\b|\bLocal Address\s+Foreign Address\s+State\b/i.test(
+      message,
+    );
+
+  if (looksLikeTerminalOrScanOutput && !explicitlyRequestsWeb) {
+    return false;
+  }
   const isLocalRepositoryWorkflow =
     /\b(project|repo|repository|folder|files?|typescript|javascript|node|npm|express|prisma|postgres|postgresql|jwt|api|endpoint|route|vos|svans-ai|sandbox|debugger|shield|code editing|src\/|docker|loginUser|verifyPassword|issueToken)\b/i.test(
       message,
@@ -3653,6 +3661,8 @@ function isHardStall(text: string): boolean {
     "could you clarify what you need help with regarding",
     "it seems like you're compiling a glossary",
     "it seems like you are compiling a glossary",
+    "completed so far nothing is marked completed yet",
+    "nothing is marked completed yet",
   ];
 
   return hardStalls.some((pattern) => normalized.includes(pattern));
@@ -3668,6 +3678,11 @@ function finalFallback(context: ExtendedChatContext): string {
 
   if (isCorrectionRequest) {
     return "Oh, I'm sorry. Let me double-check that.\n\nI need the original question or answer choices to verify the correction confidently. I won’t blindly change the answer without enough context.";
+  }
+
+  if (context.cyberAccess.active) {
+    const ownerDeviceFallback = buildOwnerDeviceAccessResponse(message);
+    if (ownerDeviceFallback) return ownerDeviceFallback;
   }
 
   if (attachedFiles.length) {
