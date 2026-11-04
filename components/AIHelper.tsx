@@ -79,6 +79,8 @@ type ProfileMemory = { id: string; category: MemoryCategory; summary: string };
 type OwnerAccessState = {
   checked: boolean;
   owner: boolean;
+  ownerSessionUnlocked: boolean;
+  featureEnabled: boolean;
   cyberModeAvailable: boolean;
 };
 
@@ -113,6 +115,7 @@ const ACCEPTED_SPECIAL_FILENAME_PATTERN =
 const PASSWORD_PROMPT = "enter owner password:";
 const PASSWORD_SUCCESS = "owner mode enabled";
 const PASSWORD_FAIL = "incorrect password";
+const PASSWORD_LOCKED = "owner mode disabled";
 
 const ACCEPTED_TYPES = [
   "image/jpeg",
@@ -778,6 +781,8 @@ export default function AIHelper({
   const [ownerAccess, setOwnerAccess] = useState<OwnerAccessState>({
     checked: false,
     owner: false,
+    ownerSessionUnlocked: false,
+    featureEnabled: false,
     cyberModeAvailable: false,
   });
   const [cyberMode, setCyberMode] = useState(false);
@@ -881,7 +886,13 @@ export default function AIHelper({
 
     async function loadOwnerAccess() {
       if (!user) {
-        setOwnerAccess({ checked: true, owner: false, cyberModeAvailable: false });
+        setOwnerAccess({
+          checked: true,
+          owner: false,
+          ownerSessionUnlocked: false,
+          featureEnabled: false,
+          cyberModeAvailable: false,
+        });
         setCyberMode(false);
         return;
       }
@@ -891,30 +902,47 @@ export default function AIHelper({
         const accessToken = data.session?.access_token;
         if (!accessToken) {
           if (!cancelled) {
-            setOwnerAccess({ checked: true, owner: false, cyberModeAvailable: false });
+            setOwnerAccess({
+          checked: true,
+          owner: false,
+          ownerSessionUnlocked: false,
+          featureEnabled: false,
+          cyberModeAvailable: false,
+        });
             setCyberMode(false);
           }
           return;
         }
 
-        const response = await fetch("/api/system/owner-access", {
+        const response = await fetch(
+          `/api/system/owner-access?sessionId=${encodeURIComponent(sessionId)}`,
+          {
           method: "GET",
           cache: "no-store",
           headers: { Authorization: `Bearer ${accessToken}` },
-        });
+          },
+        );
         const value = response.ok ? await response.json() : null;
         if (cancelled) return;
 
         const next: OwnerAccessState = {
           checked: true,
           owner: value?.owner === true,
+          ownerSessionUnlocked: value?.ownerSessionUnlocked === true,
+          featureEnabled: value?.featureEnabled === true,
           cyberModeAvailable: value?.cyberModeAvailable === true,
         };
         setOwnerAccess(next);
         if (!next.cyberModeAvailable) setCyberMode(false);
       } catch {
         if (!cancelled) {
-          setOwnerAccess({ checked: true, owner: false, cyberModeAvailable: false });
+          setOwnerAccess({
+          checked: true,
+          owner: false,
+          ownerSessionUnlocked: false,
+          featureEnabled: false,
+          cyberModeAvailable: false,
+        });
           setCyberMode(false);
         }
       }
@@ -924,7 +952,7 @@ export default function AIHelper({
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [sessionId, user?.id]);
 
   useEffect(() => {
     const update = () => setIsMobile(window.innerWidth <= 768);
@@ -1155,8 +1183,33 @@ export default function AIHelper({
       setIsPasswordMode(true);
     }
 
-    if (lower.includes(PASSWORD_SUCCESS) || lower.includes(PASSWORD_FAIL)) {
+    if (lower.includes(PASSWORD_SUCCESS)) {
       setIsPasswordMode(false);
+      setOwnerAccess((current) => ({
+        ...current,
+        ownerSessionUnlocked: true,
+        cyberModeAvailable: current.owner && current.featureEnabled,
+      }));
+    }
+
+    if (lower.includes(PASSWORD_FAIL)) {
+      setIsPasswordMode(false);
+      setCyberMode(false);
+      setOwnerAccess((current) => ({
+        ...current,
+        ownerSessionUnlocked: false,
+        cyberModeAvailable: false,
+      }));
+    }
+
+    if (lower.includes(PASSWORD_LOCKED)) {
+      setIsPasswordMode(false);
+      setCyberMode(false);
+      setOwnerAccess((current) => ({
+        ...current,
+        ownerSessionUnlocked: false,
+        cyberModeAvailable: false,
+      }));
     }
   };
 
@@ -1525,6 +1578,18 @@ const finalMessages = [
         !/^HTTP \d+$/i.test(error.message)
           ? error.message
           : "Something interrupted my response. Please send it again and I'll pick right back up.";
+
+      if (
+        error instanceof Error &&
+        /admin cyber mode is locked|sv unlock/i.test(error.message)
+      ) {
+        setCyberMode(false);
+        setOwnerAccess((current) => ({
+          ...current,
+          ownerSessionUnlocked: false,
+          cyberModeAvailable: false,
+        }));
+      }
 
       setIsPasswordMode(false);
       setMessages([
@@ -2635,7 +2700,10 @@ const finalMessages = [
                         ? "linear-gradient(135deg, rgba(56,189,248,0.24), rgba(168,85,247,0.14))"
                         : "rgba(255,255,255,0.045)",
                       color: active ? "#e0f2fe" : "rgba(255,255,255,0.72)",
-                      cursor: loading ? "not-allowed" : "pointer",
+                      cursor:
+                    loading || !ownerAccess.ownerSessionUnlocked
+                      ? "not-allowed"
+                      : "pointer",
                       fontSize: isMobile ? "0.78rem" : "0.84rem",
                       fontWeight: 850,
                       letterSpacing: "0.02em",
@@ -2671,7 +2739,7 @@ const finalMessages = [
             </div>
           )}
 
-          {!isPasswordMode && ownerAccess.cyberModeAvailable && (
+          {!isPasswordMode && ownerAccess.owner && ownerAccess.featureEnabled && (
             <div
               style={{
                 display: "flex",
@@ -2687,12 +2755,14 @@ const finalMessages = [
                 background: cyberMode
                   ? "rgba(127,29,29,0.18)"
                   : "rgba(255,255,255,0.035)",
+                opacity: ownerAccess.ownerSessionUnlocked ? 1 : 0.72,
               }}
             >
               <button
                 type="button"
-                disabled={loading}
+                disabled={loading || !ownerAccess.ownerSessionUnlocked}
                 onClick={() => {
+                  if (!ownerAccess.ownerSessionUnlocked) return;
                   const next = !cyberMode;
                   setCyberMode(next);
                   if (next) setResponseMode("direct");
@@ -2713,7 +2783,13 @@ const finalMessages = [
                   whiteSpace: "nowrap",
                 }}
               >
-                Cyber Lab {cyberMode ? "ON" : "OFF"}
+                Cyber Lab {
+                  !ownerAccess.ownerSessionUnlocked
+                    ? "LOCKED"
+                    : cyberMode
+                      ? "ON"
+                      : "OFF"
+                }
               </button>
               <span
                 style={{
@@ -2724,8 +2800,9 @@ const finalMessages = [
                   lineHeight: 1.35,
                 }}
               >
-                Owner-only expert cybersecurity mode for your devices, labs, CTFs,
-                staging systems, and other authorized targets.
+                {ownerAccess.ownerSessionUnlocked
+                  ? "Owner-only expert cybersecurity mode for your devices, labs, CTFs, staging systems, and other authorized targets."
+                  : "Run sv unlock and enter the owner password before Cyber Lab can be enabled."}
               </span>
             </div>
           )}
