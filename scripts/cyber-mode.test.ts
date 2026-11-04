@@ -7,20 +7,16 @@ import {
 } from "../lib/ai/cyber-mode";
 
 test("admin cyber mode is disabled unless explicitly enabled", () => {
-  assert.equal(isAdminCyberModeEnabled({}), false);
-  assert.equal(
-    isAdminCyberModeEnabled({
-      SVANSAI_ADMIN_CYBER_MODE_ENABLED: "1",
-    }),
-    true,
-  );
+  assert.equal(isAdminCyberModeEnabled(undefined), false);
+  assert.equal(isAdminCyberModeEnabled("1"), true);
+  assert.equal(isAdminCyberModeEnabled("0"), false);
 });
 
 test("a non-owner cannot activate admin cyber mode", () => {
   const result = resolveCyberAccess({
     requested: true,
     ownerVerified: false,
-    env: { SVANSAI_ADMIN_CYBER_MODE_ENABLED: "1" },
+    featureEnabled: true,
   });
 
   assert.equal(result.active, false);
@@ -31,7 +27,7 @@ test("the verified owner can activate admin cyber mode when enabled", () => {
   const result = resolveCyberAccess({
     requested: true,
     ownerVerified: true,
-    env: { SVANSAI_ADMIN_CYBER_MODE_ENABLED: "1" },
+    featureEnabled: true,
   });
 
   assert.equal(result.active, true);
@@ -43,7 +39,7 @@ test("owner status alone does not activate the mode", () => {
   const result = resolveCyberAccess({
     requested: false,
     ownerVerified: true,
-    env: { SVANSAI_ADMIN_CYBER_MODE_ENABLED: "1" },
+    featureEnabled: true,
   });
 
   assert.equal(result.active, false);
