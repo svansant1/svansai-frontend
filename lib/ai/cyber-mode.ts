@@ -5,6 +5,7 @@ export type CyberAccessContext = {
   requested: boolean;
   active: boolean;
   ownerVerified: boolean;
+  ownerSessionUnlocked: boolean;
   featureEnabled: boolean;
   scope: CyberModeScope;
   depth: CyberModeDepth;
@@ -14,6 +15,7 @@ export const INACTIVE_CYBER_ACCESS: CyberAccessContext = Object.freeze({
   requested: false,
   active: false,
   ownerVerified: false,
+  ownerSessionUnlocked: false,
   featureEnabled: false,
   scope: "owner_authorized",
   depth: "expert",
@@ -28,6 +30,7 @@ export function isAdminCyberModeEnabled(
 export function resolveCyberAccess(params: {
   requested: boolean;
   ownerVerified: boolean;
+  ownerSessionUnlocked: boolean;
   featureEnabled?: boolean;
 }): CyberAccessContext {
   const featureEnabled =
@@ -35,8 +38,13 @@ export function resolveCyberAccess(params: {
 
   return {
     requested: params.requested,
-    active: params.requested && params.ownerVerified && featureEnabled,
+    active:
+      params.requested &&
+      params.ownerVerified &&
+      params.ownerSessionUnlocked &&
+      featureEnabled,
     ownerVerified: params.ownerVerified,
+    ownerSessionUnlocked: params.ownerSessionUnlocked,
     featureEnabled,
     scope: "owner_authorized",
     depth: "expert",
@@ -46,6 +54,10 @@ export function resolveCyberAccess(params: {
 export function cyberModeDenialReason(context: CyberAccessContext): string {
   if (!context.ownerVerified) {
     return "Admin Cyber Mode requires the signed-in verified owner account.";
+  }
+
+  if (!context.ownerSessionUnlocked) {
+    return "Admin Cyber Mode is locked. Run sv unlock and enter the owner password first.";
   }
 
   if (!context.featureEnabled) {
