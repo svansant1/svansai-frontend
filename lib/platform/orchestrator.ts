@@ -2,6 +2,7 @@ import { generateChatResponse } from "@/lib/ai/chat-engine";
 import { isImageGenerationRequest, isImageEditingRequest, generateImageWithOpenAI, formatGeneratedImageResponse } from "@/lib/ai/image-generation";
 import type { AttachedFile } from "@/lib/ai/file-types";
 import type { ChatMessage, ResponseMode } from "@/lib/ai/types";
+import type { CyberAccessContext } from "@/lib/ai/cyber-mode";
 import {
   detectArtifactRequest,
 } from "@/lib/artifacts/request-parser";
@@ -74,6 +75,7 @@ export type OrchestrationResult = {
   recommendedModules: PlatformModule[];
   moduleDecisions: ModuleDecision[];
   responseMode: ResponseMode;
+  cyberMode: boolean;
   capabilities: PlatformCapability[];
   mind: SvansMindPlan;
   commandCenter: string[];
@@ -385,6 +387,7 @@ export async function orchestrateChat(params: {
   sessionId?: string | null;
   responseMode: ResponseMode;
   isVerifiedOwner: boolean;
+  cyberAccess?: CyberAccessContext;
   writingProfile?: WritingProfile | null;
   userMemories?: UserMemory[];
   userId?: string | null;
@@ -462,6 +465,7 @@ export async function orchestrateChat(params: {
       userMemories,
       runtimeTelemetry,
       formatSvansMindPlan(mind),
+      params.cyberAccess,
     );
   }
 
@@ -519,6 +523,7 @@ export async function orchestrateChat(params: {
     recommendedModules,
     moduleDecisions,
     responseMode: params.responseMode,
+    cyberMode: Boolean(params.cyberAccess?.active),
     capabilities,
     mind,
     commandCenter: mind.commandCenter,
