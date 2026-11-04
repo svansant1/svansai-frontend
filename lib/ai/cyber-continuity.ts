@@ -57,6 +57,15 @@ export function buildCyberContinuityContext(
   const desktopOnly =
     /\b(only my desktop|only the desktop|from my desktop|using only my desktop|everything from my desktop|dont want to touch the laptop|don t want to touch the laptop|without touching the laptop)\b/.test(joined);
   const kali = /\bkali\b/.test(joined);
+  const targetLikelyWindows =
+    /\b(netstat\s+-ano|ipconfig|powershell|remote desktop|rdp|windows defender|cmd\.exe|task manager)\b/.test(
+      joined,
+    );
+  const targetLikelyLinux =
+    !targetLikelyWindows &&
+    /\b(systemctl|hostname\s+-I|openssh-server|apt\s+install|\/bin\/bash|linux)\b/.test(
+      joined,
+    );
   const avoidRemote =
     /\b(dont want to remote|don t want to remote|without remote access|not remote|dont want rdp|don t want rdp)\b/.test(joined);
   const portDriven =
@@ -82,6 +91,8 @@ export function buildCyberContinuityContext(
     targetIp ? `Current target IP: ${targetIp}.` : "",
     desktopOnly ? "Work from the desktop side only unless the user explicitly changes that constraint." : "",
     kali ? "The user wants Kali Linux as the working environment." : "",
+    targetLikelyWindows ? "The target device appears to be Windows; do not give Linux target-side commands unless new evidence changes that." : "",
+    targetLikelyLinux ? "The target device appears to be Linux." : "",
     avoidRemote ? "The user does not want RDP/ordinary remote-control setup as the primary path." : "",
     portDriven ? "The user wants to learn by enumerating an exposed network service/port and progressing from evidence." : "",
   ].filter(Boolean);
@@ -107,6 +118,9 @@ Response progression rules:
 - Give one primary next action first. Include the exact machine/environment where the command should run.
 - After a command, state what result to look for and what the next branch is for each likely result.
 - If the user asks "laptop or desktop?", answer that choice in the first sentence before explaining.
+- Reuse the latest confirmed target IP instead of inventing an example address or reverting to an older address.
+- Keep scanner-side and target-side addresses separate. A Kali `ip a` result is the scanner's address, not automatically the target laptop's address.
+- Match target-side commands and payloads to the target operating system. Do not give `/bin/bash` or Linux service commands for a Windows target.
 - Distinguish LISTENING ports from ESTABLISHED outbound/client connections. High ephemeral ports in ESTABLISHED state are not automatically remotely accessible services.
 - Do not end with generic filler such as "let me know if you need anything else" when a concrete next step is available.
 `.trim();
