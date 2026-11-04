@@ -30,6 +30,8 @@ services:
         sync: false
       - key: OWNER_USER_ID
         sync: false
+      - key: SVANSAI_ADMIN_CYBER_MODE_ENABLED
+        sync: false
       - key: SVANSAI_API_KEY
         sync: false
       - key: SVANSAI_CORS_ORIGINS
