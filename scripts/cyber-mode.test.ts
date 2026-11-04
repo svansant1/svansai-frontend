@@ -16,6 +16,7 @@ test("a non-owner cannot activate admin cyber mode", () => {
   const result = resolveCyberAccess({
     requested: true,
     ownerVerified: false,
+    ownerSessionUnlocked: true,
     featureEnabled: true,
   });
 
@@ -23,10 +24,23 @@ test("a non-owner cannot activate admin cyber mode", () => {
   assert.match(cyberModeDenialReason(result), /verified owner/i);
 });
 
-test("the verified owner can activate admin cyber mode when enabled", () => {
+test("a verified owner still cannot activate cyber mode before sv unlock", () => {
   const result = resolveCyberAccess({
     requested: true,
     ownerVerified: true,
+    ownerSessionUnlocked: false,
+    featureEnabled: true,
+  });
+
+  assert.equal(result.active, false);
+  assert.match(cyberModeDenialReason(result), /sv unlock/i);
+});
+
+test("the verified unlocked owner can activate admin cyber mode", () => {
+  const result = resolveCyberAccess({
+    requested: true,
+    ownerVerified: true,
+    ownerSessionUnlocked: true,
     featureEnabled: true,
   });
 
@@ -35,10 +49,11 @@ test("the verified owner can activate admin cyber mode when enabled", () => {
   assert.equal(result.depth, "expert");
 });
 
-test("owner status alone does not activate the mode", () => {
+test("owner status and unlock do not activate the mode unless requested", () => {
   const result = resolveCyberAccess({
     requested: false,
     ownerVerified: true,
+    ownerSessionUnlocked: true,
     featureEnabled: true,
   });
 
