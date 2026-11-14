@@ -1,7 +1,17 @@
 # Cyber integration source ledger
 
+## November 14, 2026 verification update
+
+The owner authorized local testing, build, Git publication and deployment.
+The merged source passes 101 offline tests, TypeScript, production build, and
+20 local HTTP file exports plus access-denial checks. See
+[verification report](verification-2026-11-14.md) for exact scope and commands.
+Database migrations, authenticated persistence, worker/container containment and
+interactive desktop acceptance remain unverified. Production activation flags
+stay OFF for those features. The earlier no-test statements below are historical.
+
 Plan: docs/superpowers/plans/2026-11-06-cyber-lab-integration.md
-Updated: November 12, 2026.
+Source ledger through November 12, 2026; verification updated November 14.
 
 Implementation started. No tests, typechecks, lint, builds, live database changes,
 provider calls, workers, commits, pushes, or deployments are authorized in this pass.

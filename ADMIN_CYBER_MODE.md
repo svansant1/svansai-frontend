@@ -1,6 +1,7 @@
 # SVANS Cyber Lab — source integration
 
-Updated November 12, 2026. **Not tested, built, migrated, activated, or deployed.**
+Updated November 14, 2026. **Local tests and web build pass; database migration
+and worker activation remain deferred.** See docs/verification-2026-11-14.md.
 This integrates authorized Cyber training into the existing shared execution
 architecture. It is not an unrestricted mode, a provider-refusal bypass, or a
 grant of access to every device.

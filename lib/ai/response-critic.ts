@@ -72,6 +72,10 @@ export function critiqueResponse(params: {
   const response = params.response.trim();
   const normalized = normalize(response);
 
+  const adminCyberMode = /admin cyber mode/i.test(
+    params.conversationState.modeBehavior,
+  );
+
   if (response.length < 20) reasons.push("response is too short to be useful");
 
   const previousAssistant = lastAssistant(params.messages);
@@ -112,6 +116,53 @@ export function critiqueResponse(params: {
   ) {
     reasons.push(
       "response gives reassurance instead of the requested engineering fix",
+    );
+  }
+
+  if (
+    adminCyberMode &&
+    /\b(i(?:'|’)m sorry|i can(?:not|'t|’t) assist|i can(?:not|'t|’t) help with that|unable to assist)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push(
+      "Cyber Lab response returned a generic refusal instead of handling the authorized training request",
+    );
+  }
+
+  if (
+    adminCyberMode &&
+    /\b(desktop or laptop|laptop or desktop|which (?:machine|computer|device)|where do i run|do i use .* on my (?:laptop|desktop))\b/i.test(
+      params.latestUserMessage,
+    )
+  ) {
+    const opening = response.slice(0, 220);
+    if (
+      !/\b(?:run|use|do this|that command|netstat|nmap|ssh|powershell|terminal).{0,80}\b(?:laptop|desktop)\b/i.test(
+        opening,
+      ) &&
+      !/^\s*(?:laptop|desktop)\b/i.test(opening)
+    ) {
+      reasons.push(
+        "Cyber Lab response did not answer which machine should run the command",
+      );
+    }
+  }
+
+  if (
+    adminCyberMode &&
+    /\b(step by step|what next|go from there|specific tools?|specific task|from beginning to end|continue from here)\b/i.test(
+      params.latestUserMessage,
+    ) &&
+    /\b(let me know|feel free|if you need further assistance|if you have any questions)\b/i.test(
+      response,
+    ) &&
+    !/\b(nmap|netstat|ssh|powershell|cmd|bash|python|msfconsole|command|run|execute|scan|check)\b/i.test(
+      response,
+    )
+  ) {
+    reasons.push(
+      "Cyber Lab response ended with generic assistance instead of a concrete next action",
     );
   }
 

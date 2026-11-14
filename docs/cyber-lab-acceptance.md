@@ -1,8 +1,11 @@
-# Deferred Cyber integration acceptance
+# Cyber integration acceptance
 
-November 12, 2026. **Every item below is NOT RUN.** Source inspection is not
-proof of compilation, successful migration, containment or regression safety.
-The user requested coding first and no tests/builds/deployment during this pass.
+Updated November 14, 2026. Local validation now passes: 101 offline tests,
+TypeScript, production build, and 20 HTTP exports plus access-denial checks.
+See [verification report](verification-2026-11-14.md). The end-to-end database,
+browser/desktop and worker acceptance scenarios below remain pending unless
+explicitly covered by that report. Unit tests are not proof of database locking,
+successful migrations, provider behavior, or actual container containment.
 
 ## Acceptance order
 
@@ -88,7 +91,11 @@ The user requested coding first and no tests/builds/deployment during this pass.
   Worker-observed evidence is saved atomically only under current authorization.
 - Data/Code Lab network=none and desktop scoped approvals are unchanged.
 
-## Authored fixture entry points (not executed)
+## Fixture entry points
+
+All .test.ts and .test.cjs files under scripts were run together (101 passed).
+The HTTP smoke also ran against the production build with external fetches blocked.
+Paid-provider/live-database chat, attachment and profile scripts were not run.
 
 - npm run test:cyber
 - npm run test:expansion
