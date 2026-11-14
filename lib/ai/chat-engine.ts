@@ -1,4 +1,7 @@
 import type { ChatContext, QuestionType, ResponseMode } from "@/lib/ai/types";
+import type { TrustedRequestContext } from "@/lib/platform/request-context";
+import { generateCyberResponse } from "./cyber-response";
+import { classifyResearchIntent, isTerminalEvidence } from "./research-intent";
 import {
   sanitizeMessages,
   getLatestUserMessage,
@@ -42,6 +45,7 @@ import {
 } from "@/lib/ai/mythos-engine";
 import { type ProviderName } from "@/lib/ai/providers/router";
 import { generateWithOpenAI } from "@/lib/ai/providers/openai";
+import { canFailover, classifyProviderError } from "@/lib/ai/providers/outcomes";
 import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
 import { generateWithGemini } from "@/lib/ai/providers/gemini";
 import type { AttachedFile } from "@/lib/ai/file-types";
@@ -258,6 +262,7 @@ function isWritingOrDiscussionHelp(message: string): boolean {
 }
 
 function needsLiveSearch(message: string): boolean {
+  if (isTerminalEvidence(message) && !classifyResearchIntent({ instruction: message }).requested) return false;
   const lower = message.toLowerCase();
   const hasUrl =
     /\bhttps?:\/\/\S+/i.test(message) ||
@@ -2460,17 +2465,15 @@ function buildProviderPlan(context: ExtendedChatContext): ProviderName[] {
   return ["openai", "anthropic", "gemini"];
 }
 
-export async function generateChatResponse(
-  rawMessages: unknown[],
-  attachedFiles: AttachedFile[] = [],
-  sessionId?: string | null,
-  responseMode: ResponseMode = "auto",
-  isVerifiedOwner = false,
-  writingProfile?: WritingProfile | null,
-  userMemories: UserMemory[] = [],
-  runtimeTelemetry?: RuntimeTelemetry,
-  mindContext = "",
-): Promise<string> {
+export type ChatGenerationOptions = {
+  attachedFiles?: AttachedFile[]; sessionId?: string | null; responseMode?: ResponseMode; isVerifiedOwner?: boolean;
+  writingProfile?: WritingProfile | null; userMemories?: UserMemory[]; runtimeTelemetry?: RuntimeTelemetry;
+  mindContext?: string; signal?: AbortSignal; trustedContext?: TrustedRequestContext;
+};
+export async function generateChatResponse(rawMessages: unknown[], options: ChatGenerationOptions = {}): Promise<string> {
+  const { attachedFiles = [], sessionId, responseMode = "auto", isVerifiedOwner = false, writingProfile,
+    userMemories = [], runtimeTelemetry, mindContext = "", signal, trustedContext } = options;
+  signal?.throwIfAborted();
   const fullMessages = sanitizeMessages(rawMessages, 250);
   const messages = fullMessages.slice(-20);
   const sid = sessionId || "anonymous";
@@ -2480,6 +2483,7 @@ export async function generateChatResponse(
   }
 
   const latestUserMessage = getLatestUserMessage(fullMessages);
+  if (trustedContext?.cyber.active) return generateCyberResponse(fullMessages, attachedFiles, { ...trustedContext, signal }, runtimeTelemetry);
 
   if (!latestUserMessage && attachedFiles.length === 0) {
     return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
@@ -2612,13 +2616,13 @@ Do not claim you have no browsing ability. Say that live search did not return e
     }
     const command = parseSVCommand(latestUserMessage, sid);
     if (command) {
-      const commandResponse = await handleSVCommand(command, sid);
+      const commandResponse = await handleSVCommand(command, sid, trustedContext?.ownerGrant);
       if (commandResponse) return commandResponse;
     }
   }
 
   if (messages.length === 1) {
-    const upgradeNotice = await checkAndSurfaceUpgrades(sid);
+    const upgradeNotice = await checkAndSurfaceUpgrades(sid, trustedContext?.ownerGrant);
     if (upgradeNotice) return upgradeNotice;
   }
 
@@ -3021,6 +3025,7 @@ ${lastAssistantMessage}
   const { response, critique } = await generateBestResponse(
     context,
     runtimeTelemetry,
+    signal,
   );
   if (runtimeTelemetry) applyCritique(runtimeTelemetry, critique);
 
@@ -3062,6 +3067,7 @@ ${lastAssistantMessage}
 async function generateBestResponse(
   context: ExtendedChatContext,
   runtimeTelemetry?: RuntimeTelemetry,
+  signal?: AbortSignal,
 ): Promise<{ response: string; critique: ResponseCritique }> {
   const batchQuizInstruction = buildBatchQuizInstruction(
     context.latestUserMessage,
@@ -3181,6 +3187,7 @@ ${batchQuizInstruction}
         systemInstruction,
         temperature,
         attachedFiles: context.attachedFiles,
+        signal,
       });
 
       const cleanFirst = normalizeProviderText(cleanResponse(first || ""));
@@ -3263,6 +3270,7 @@ ${batchQuizInstruction}
         systemInstruction,
         temperature,
         attachedFiles: context.attachedFiles,
+        signal,
       });
 
       const cleanSecond = normalizeProviderText(cleanResponse(second || ""));
@@ -3318,14 +3326,18 @@ ${batchQuizInstruction}
         );
       }
     } catch (error) {
-      console.error("[SVANS-AI] Provider loop error:", provider, error);
+      const outcome = classifyProviderError(error);
+      console.error("[SVANS-AI] Provider loop error:", provider, outcome);
       markProviderFailure(provider, error);
       if (runtimeTelemetry) {
         runtimeTelemetry.providerFailures.push({
           provider,
-          reason:
-            error instanceof Error ? error.message : "unknown provider error",
+          reason: outcome,
         });
+      }
+      if (!canFailover(outcome)) {
+        const response = outcome === "CANCELLED" ? "The request was cancelled." : "The active provider or policy declined this request. I did not switch providers to bypass that decision.";
+        return { response, critique: critiqueResponse({ response, latestUserMessage: context.latestUserMessage, messages: context.messages, conversationState: context.conversationState }) };
       }
     }
   }

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { cyberRuntimeConfigured } from "@/lib/cyber/catalog";
 
 type ReadinessStatus = "ok" | "warning" | "missing";
 
@@ -130,7 +131,18 @@ export async function buildReadinessReport(): Promise<ReadinessReport> {
     ...OPTIONAL_ENV.map((name) => envCheck(name, false)),
     await checkSupabaseTable("writing_profiles"),
     await checkSupabaseTable("user_memories"),
+    { name: "Cyber Lab source", status: "ok", detail: "Source integration installed. This is not a runtime verification result." },
+    { name: "Cyber owner access", status: process.env.SVANSAI_ADMIN_CYBER_MODE_ENABLED === "1" ? "ok" : "warning",
+      detail: process.env.SVANSAI_ADMIN_CYBER_MODE_ENABLED === "1" ? "Feature configured; each request still needs verified owner, live grant and explicit conversation mode." : "Disabled by configuration." },
+    { name: "Cyber isolated runtime", status: "warning",
+      detail: cyberRuntimeConfigured() ? "Image digests and flags configured. Dedicated worker, containment and fixture behavior still require acceptance verification." : "Execution unavailable: enable flags and reviewed immutable images only after acceptance setup." },
+    { name: "Cyber real-device adapter", status: "warning", detail: "Not implemented. Chat suggests owner-run steps; catalog execution uses synthetic fixtures only." },
   ];
+  if (process.env.SVANSAI_ADMIN_CYBER_MODE_ENABLED === "1") {
+    checks.push({ name: "Owner password configuration", status: process.env.SV_OWNER_PASSWORD_HASH || process.env.SV_OWNER_PASSWORD ? "ok" : "missing",
+      detail: "Dedicated control channel; 30-minute server-enforced inactivity deadline, no fixed active-duration cutoff. No active grant is inferred by readiness." });
+    for (const table of ["sv_owner_control", "sv_owner_attempts", "sv_owner_grants", "sv_projects", "sv_context_heads", "sv_context_events", "sv_cyber_modes"]) checks.push(await checkSupabaseTable(table));
+  }
 
   return {
     ok: checks.every((check) => check.status !== "missing"),

@@ -1,6 +1,18 @@
 import ExcelJS from "exceljs";
 import { parseTabularContent } from "./tabular-content";
-import { parseWorkbookSpec, type WorkbookSpec } from "./workbook-spec";
+import { parseWorkbookSpec, type WorkbookSpec, type WorkbookCellSpec } from "./workbook-spec";
+import { addNativeWorkbookCharts } from "./xlsx-charts";
+
+function nativeValue(entry: WorkbookCellSpec): ExcelJS.CellValue {
+  if (entry.formula) return { formula: entry.formula };
+  if (entry.valueType === "date") return new Date(String(entry.value) + "T00:00:00Z");
+  if (entry.valueType === "datetime") return new Date(String(entry.value));
+  if (entry.valueType === "time") {
+    const [hours, minutes, seconds] = String(entry.value).split(":").map(Number);
+    return (hours * 3600 + minutes * 60 + seconds) / 86400;
+  }
+  return entry.value ?? null;
+}
 
 /** Only validated data specifications can create formulas; CSV remains literal data. */
 export async function generateWorkbookXlsx(input: WorkbookSpec, fallbackTitle = "SVANS-AI"): Promise<Buffer> {
@@ -9,6 +21,10 @@ export async function generateWorkbookXlsx(input: WorkbookSpec, fallbackTitle = 
   book.creator = "SVANS-AI";
   book.title = spec.title || fallbackTitle;
   book.calcProperties.fullCalcOnLoad = true;
+  for (const named of spec.namedRanges || []) {
+    const reference = named.range.split(":").map((cell) => cell.replace(/^([A-Z]+)(\d+)$/, "$$$1$$$2")).join(":");
+    book.definedNames.add("'" + named.sheet.replace(/'/g, "''") + "'!" + reference, named.name);
+  }
   for (const item of spec.sheets) {
     const sheet = book.addWorksheet(item.name);
     sheet.properties.defaultRowHeight = 22;
@@ -17,10 +33,11 @@ export async function generateWorkbookXlsx(input: WorkbookSpec, fallbackTitle = 
     item.columnWidths?.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
     for (const entry of item.cells) {
       const cell = sheet.getCell(entry.address);
-      cell.value = entry.formula ? { formula: entry.formula } : entry.value ?? null;
+      cell.value = nativeValue(entry);
       cell.font = { name: "Calibri", size: 11, color: { argb: "FF172B4D" } };
       cell.alignment = { vertical: "middle", wrapText: true };
       if (entry.numberFormat) cell.numFmt = entry.numberFormat;
+      else if (entry.valueType) cell.numFmt = entry.valueType === "time" ? "hh:mm:ss" : entry.valueType === "datetime" ? "yyyy-mm-dd hh:mm:ss" : "yyyy-mm-dd";
       if (entry.style === "title" || entry.style === "header") {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF17365D" } };
         cell.font = { name: "Calibri", size: entry.style === "title" ? 18 : 11, bold: true, color: { argb: "FFFFFFFF" } };
@@ -34,6 +51,22 @@ export async function generateWorkbookXlsx(input: WorkbookSpec, fallbackTitle = 
       } else if (entry.style === "note") {
         cell.font = { name: "Calibri", size: 10, italic: true, color: { argb: "FF526477" } };
       }
+    }
+    for (const table of item.tables || []) {
+      const [first, last] = table.range.split(":");
+      const start = sheet.getCell(first), end = sheet.getCell(last);
+      const columns: { name: string; filterButton: boolean }[] = [];
+      const rows: ExcelJS.CellValue[][] = [];
+      for (let column = Number(start.col); column <= Number(end.col); column++) {
+        columns.push({ name: String(sheet.getCell(Number(start.row), column).value), filterButton: true });
+      }
+      for (let row = Number(start.row) + 1; row <= Number(end.row); row++) {
+        const values: ExcelJS.CellValue[] = [];
+        for (let column = Number(start.col); column <= Number(end.col); column++) values.push(sheet.getCell(row, column).value);
+        rows.push(values);
+      }
+      sheet.addTable({ name: table.name, ref: first, headerRow: true, totalsRow: false,
+        style: { theme: "TableStyleMedium2", showRowStripes: true }, columns, rows });
     }
     for (const merge of item.merges || []) sheet.mergeCells(merge);
     if (item.autoFilter) sheet.autoFilter = item.autoFilter;
@@ -58,7 +91,7 @@ export async function generateWorkbookXlsx(input: WorkbookSpec, fallbackTitle = 
     }
     sheet.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
   }
-  return Buffer.from(await book.xlsx.writeBuffer());
+  return addNativeWorkbookCharts(Buffer.from(await book.xlsx.writeBuffer()), spec);
 }
 
 function parseRows(content: string): string[][] {

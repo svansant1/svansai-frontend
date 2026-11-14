@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import CyberLabPanel from "./CyberLabPanel";
+import { useOwnerAccess } from "./useOwnerAccess";
+import { stripSecretMessages } from "@/lib/ai/secret-messages";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   submitMessageFeedback,
@@ -9,16 +12,21 @@ import {
 } from "@/lib/db/engagement";
 import { supabase } from "@/lib/supabase";
 import SvansVoiceConversation from "./SvansVoiceConversation";
+import StoredFileDownload from "./StoredFileDownload";
+import { parseArtifactReference } from "@/lib/artifacts/references";
+import type { StoredArtifactReference } from "@/lib/jobs/types";
 import GeneratedFileDownload, {
   artifactToChatFile,
 } from "./GeneratedFileDownload";
 
 export type ChatMessage = {
+  id?: string;
   role: "user" | "assistant";
   content: string;
   filePreview?: string;
   fileName?: string;
   fileType?: string;
+  artifactReference?: StoredArtifactReference;
   isPassword?: boolean;
   orchestration?: ChatOrchestration;
 };
@@ -27,6 +35,7 @@ type ChatOrchestration = {
   route?: string;
   coordinator?: string;
   recommendedModules?: string[];
+  executedCapabilities?: string[];
   responseMode?: string;
   capabilities?: string[];
   commandCenter?: string[];
@@ -104,9 +113,6 @@ const ACCEPTED_DOTFILE_PATTERN =
 const ACCEPTED_SPECIAL_FILENAME_PATTERN =
   /(^|[\\/])(dockerfile|makefile|gemfile|rakefile|procfile|license|readme|changelog|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
 
-const PASSWORD_PROMPT = "enter owner password:";
-const PASSWORD_SUCCESS = "owner mode enabled";
-const PASSWORD_FAIL = "incorrect password";
 
 const ACCEPTED_TYPES = [
   "image/jpeg",
@@ -753,7 +759,20 @@ export default function AIHelper({
   onMessagesChange,
   conversationId,
 }: AIHelperProps) {
+  const ownerControls = useOwnerAccess(user?.id);
+  const [showOwnerUnlock, setShowOwnerUnlock] = useState(false);
+  const [cyberMode, setCyberMode] = useState(false);
+  const [cyberProject, setCyberProject] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  useEffect(() => { if (!ownerControls.status.unlocked) setCyberMode(false); }, [ownerControls.status.unlocked]);
+  useEffect(() => {
+    setCyberMode(false);
+    setCyberProject(user?.id && conversationId ? localStorage.getItem("sv-cyber-project:" + user.id + ":" + conversationId) || "" : "");
+  }, [user?.id, conversationId]);
+  const selectCyberProject = (id: string) => {
+    setCyberProject(id);
+    if (user?.id && conversationId) localStorage.setItem("sv-cyber-project:" + user.id + ":" + conversationId, id);
+  };
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginDismissed, setLoginDismissed] = useState(false);
@@ -877,7 +896,7 @@ export default function AIHelper({
     if (conversationId && initialMessages !== undefined) {
       setMessages(
         initialMessages.length
-          ? initialMessages
+          ? stripSecretMessages(initialMessages)
           : [
               {
                 role: "assistant",
@@ -1087,15 +1106,8 @@ export default function AIHelper({
   };
 
   const checkPasswordMode = (svResponse: string) => {
-    const lower = svResponse.toLowerCase();
-
-    if (lower.includes(PASSWORD_PROMPT)) {
-      setIsPasswordMode(true);
-    }
-
-    if (lower.includes(PASSWORD_SUCCESS) || lower.includes(PASSWORD_FAIL)) {
-      setIsPasswordMode(false);
-    }
+    // Assistant prose is never an authentication signal.
+    setIsPasswordMode(false);
   };
 
   const notifyThinking = (thinking: boolean, msg?: string) => {
@@ -1296,6 +1308,14 @@ export default function AIHelper({
 
   const handleSend = async (spokenInput?: string) => {
     const effectiveInput = spokenInput?.trim() || input.trim();
+    if (effectiveInput.toLowerCase() === "sv lock") {
+      setInput(""); setCyberMode(false); setShowOwnerUnlock(false);
+      await ownerControls.lock().catch(() => {}); return;
+    }
+    if (effectiveInput.toLowerCase() === "sv unlock") {
+      setInput(""); setShowOwnerUnlock(true); return;
+    }
+    if (isPasswordMode) { setInput(""); setIsPasswordMode(false); setShowOwnerUnlock(true); return; }
     if ((!effectiveInput && attachedFiles.length === 0) || loading) return;
 
     if (effectiveInput.length > MAX_MESSAGE_CHARS) {
@@ -1314,6 +1334,7 @@ export default function AIHelper({
     }
 
     const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
       role: "user",
       content:
         effectiveInput ||
@@ -1328,7 +1349,7 @@ export default function AIHelper({
       isPassword: isPasswordMode,
     };
 
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = [...stripSecretMessages(messages), userMessage];
 
     setMessages(nextMessages);
     onMessagesChangeRef.current?.(nextMessages);
@@ -1345,7 +1366,8 @@ export default function AIHelper({
     notifyThinking(true, inferThinkingStatus(userMessage.content, filesToSend));
 
     try {
-      const requestMessages = nextMessages.map((m) => ({
+      const requestMessages: Pick<ChatMessage, "id" | "role" | "content">[] = nextMessages.map((m) => ({
+        id: m.id,
         role: m.role,
         content: m.content,
       }));
@@ -1371,6 +1393,8 @@ export default function AIHelper({
         messages: requestMessages,
         sessionId,
         responseMode,
+        cyberMode: cyberMode && ownerControls.status.unlocked,
+        ...(cyberMode ? { projectId: cyberProject, conversationId } : {}),
       };
 
       if (filesToSend.length) {
@@ -1393,6 +1417,7 @@ export default function AIHelper({
       });
 
       if (!response.ok) {
+        if (response.status === 403 && cyberMode) { setCyberMode(false); ownerControls.refresh(); }
         let errorMessage = `HTTP ${response.status}`;
         try {
           const errorData = await response.json();
@@ -1428,7 +1453,11 @@ let generatedFile:
     }
   | null = null;
 
-if (data?.artifact) {
+let artifactReference: StoredArtifactReference | undefined;
+if (data?.artifactReference) {
+  try { artifactReference = parseArtifactReference(data.artifactReference); }
+  catch { reply = "The saved-file reference was invalid, so I could not prepare a download."; }
+} else if (data?.artifact) {
   try {
     generatedFile = artifactToChatFile(data.artifact);
   } catch (artifactError) {
@@ -1446,6 +1475,7 @@ const finalMessages = [
     role: "assistant" as const,
     content: reply,
     orchestration: responseMetadata,
+    ...(artifactReference ? { artifactReference } : {}),
     ...(generatedFile ?? assistantImage.image ?? {}),
   },
 ];
@@ -1579,6 +1609,9 @@ const finalMessages = [
         minWidth: 0,
       }}
     >
+      <CyberLabPanel controls={ownerControls} userId={user?.id} conversationId={conversationId} projectId={cyberProject}
+        onProject={selectCyberProject} active={cyberMode} onActive={setCyberMode} showUnlock={showOwnerUnlock}
+        onCloseUnlock={() => setShowOwnerUnlock(false)} refreshKey={messages.length} />
       <div
         style={{
           width: "100%",
@@ -1708,12 +1741,12 @@ const finalMessages = [
                         textTransform: "uppercase",
                       }}
                     >
-                      Modules used
+                      {msg.orchestration.executedCapabilities ? "Capabilities run" : "Suggested modules"}
                     </span>
-                    {[
+                    {(msg.orchestration.executedCapabilities ?? [
                       ...(msg.orchestration.recommendedModules ?? []),
                       ...(msg.orchestration.capabilities ?? []),
-                    ]
+                    ])
                       .slice(0, 8)
                       .map((item) => (
                         <button
@@ -1739,6 +1772,7 @@ const finalMessages = [
                   </div>
                 )}
 
+                {msg.role === "assistant" && msg.artifactReference && <StoredFileDownload reference={msg.artifactReference} />}
                 {msg.role === "assistant" &&
                   msg.orchestration?.commandCenter?.length > 0 && (
                     <div

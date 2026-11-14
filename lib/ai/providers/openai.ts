@@ -1,3 +1,5 @@
+import { ProviderError, providerHttpError, classifyProviderError } from "./outcomes";
+
 type OpenAIInput = {
   prompt: string;
   systemInstruction: string;
@@ -6,6 +8,7 @@ type OpenAIInput = {
   maxOutputTokens?: number;
   rejectTruncated?: boolean;
   timeoutMs?: number;
+  signal?: AbortSignal;
   attachedFiles?: Array<{
     name: string;
     type: string;
@@ -28,13 +31,14 @@ export async function generateWithOpenAI(
 
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        signal: AbortSignal.timeout(25_000),
+        signal: input.signal ?? AbortSignal.timeout(input.timeoutMs || 25_000),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: input.model || "gpt-4o-mini",
+          ...(input.maxOutputTokens ? { max_tokens: input.maxOutputTokens } : {}),
           temperature: input.temperature,
           messages: [
             {
@@ -61,18 +65,19 @@ export async function generateWithOpenAI(
       });
 
       if (!res.ok) {
-        const details = (await res.text()).slice(0, 500);
-        throw new Error(`OpenAI image request failed (${res.status}): ${details}`);
+        throw await providerHttpError(res, "OpenAI");
       }
 
       const data = await res.json();
+      if (data?.choices?.[0]?.message?.refusal || data?.choices?.[0]?.finish_reason === "content_filter") throw new ProviderError("PROVIDER_POLICY_REFUSAL", "The provider declined this request.");
+      if (input.rejectTruncated && data?.choices?.[0]?.finish_reason === "length") throw new ProviderError("INVALID_OR_TRUNCATED_RESPONSE", "Provider output limit reached.");
       const text = data?.choices?.[0]?.message?.content?.trim() || "";
       return text || null;
     }
 
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      signal: AbortSignal.timeout(input.timeoutMs || 25_000),
+      signal: input.signal ?? AbortSignal.timeout(input.timeoutMs || 25_000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -89,16 +94,16 @@ export async function generateWithOpenAI(
     });
 
     if (!res.ok) {
-      const details = (await res.text()).slice(0, 500);
-      throw new Error(`OpenAI request failed (${res.status}): ${details}`);
+      throw await providerHttpError(res, "OpenAI");
     }
 
     const data = await res.json();
-    if (input.rejectTruncated && data?.choices?.[0]?.finish_reason === "length") throw new Error("Document content exceeded the provider output limit.");
+    if (data?.choices?.[0]?.message?.refusal || data?.choices?.[0]?.finish_reason === "content_filter") throw new ProviderError("PROVIDER_POLICY_REFUSAL", "The provider declined this request.");
+    if (input.rejectTruncated && data?.choices?.[0]?.finish_reason === "length") throw new ProviderError("INVALID_OR_TRUNCATED_RESPONSE", "Provider output limit reached.");
     const text = data?.choices?.[0]?.message?.content?.trim() || "";
     return text || null;
   } catch (error) {
-    console.error("OPENAI_PROVIDER_ERROR:", error);
+    console.error("OPENAI_PROVIDER_ERROR:", classifyProviderError(error));
     throw error;
   }
 }

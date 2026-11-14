@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@/lib/ai/types";
+import { stripSecretMessages } from "./secret-messages";
 
 const MAX_HISTORY = 20;
 const MAX_CHARS_PER_MESSAGE = 30_000;
@@ -9,7 +10,7 @@ export function sanitizeMessages(
 ): ChatMessage[] {
   if (!Array.isArray(messages)) return [];
 
-  return messages
+  return stripSecretMessages(messages.filter((m): m is { role?: unknown; content?: unknown; isPassword?: boolean } => Boolean(m && typeof m === "object")))
     .filter(
       (m): m is { role?: unknown; content?: unknown } =>
         !!m && typeof m === "object"

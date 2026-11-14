@@ -187,7 +187,9 @@ Create a high-quality image that follows the user's request. If the user asks fo
 export async function generateImageWithOpenAI(
   message: string,
   sourceImages: Array<{ name: string; type: string; base64: string }> = [],
+  signal?: AbortSignal,
 ): Promise<GeneratedImageResult | null> {
+  signal?.throwIfAborted();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
@@ -206,6 +208,8 @@ export async function generateImageWithOpenAI(
         : "image/png";
 
   const controller = new AbortController();
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     if (sourceImages.length > 4 || sourceImages.some((file) => !["image/png", "image/jpeg", "image/webp"].includes(file.type) || Buffer.from(file.base64, "base64").length > MAX_IMAGE_BYTES)) return null;
@@ -265,6 +269,7 @@ export async function generateImageWithOpenAI(
     return null;
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
   }
 }
 

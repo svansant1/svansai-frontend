@@ -252,10 +252,7 @@ export default function DesktopCommandCenter() {
               disabled={busy || !status?.workspace.root}
               onClick={() =>
                 void runAction("Checking git status", async () => {
-                  const result = await window.svansDesktop!.runCommand({
-                    command: "git",
-                    args: ["status", "--short"],
-                  });
+                  const result = await window.svansDesktop!.gitStatus();
                   setLastCommand(result);
                   return result;
                 })

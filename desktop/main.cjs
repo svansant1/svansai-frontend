@@ -6,6 +6,10 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { DESKTOP_CAPABILITIES } = require("./capabilities.cjs");
+const { resolveWorkspacePath, isSensitivePath, isTrustedSender, safeExternalUrl, readOnlyGitArgs, resolveGitExecutable, gitEnvironment } = require("./security.cjs");
+const trustedWebContents = new Set();
+const activeCommands = new Set();
+let workspaceGeneration = 0;
 
 const IS_DEV = process.env.SVANSAI_DESKTOP_DEV === "1" || !app.isPackaged;
 const APP_PORT = Number(process.env.SVANSAI_DESKTOP_PORT || 3187);
@@ -53,16 +57,6 @@ const SEARCH_EXTENSIONS = new Set([
   ".xml",
   ".yaml",
   ".yml",
-]);
-const ALLOWED_COMMANDS = new Set([
-  "node",
-  "npm",
-  "npx",
-  "git",
-  "python",
-  "python3",
-  "powershell",
-  "pwsh",
 ]);
 
 const workspaceState = {
@@ -135,18 +129,7 @@ function requireWorkspace(action, { write = false } = {}) {
 }
 
 function safeResolveInside(root, target = "") {
-  const resolvedRoot = path.resolve(root);
-  const resolvedTarget = path.resolve(resolvedRoot, target);
-  const relative = path.relative(resolvedRoot, resolvedTarget);
-
-  if (
-    relative === "" ||
-    (!relative.startsWith("..") && !path.isAbsolute(relative))
-  ) {
-    return resolvedTarget;
-  }
-
-  throw new Error("Path escapes the approved workspace.");
+  return resolveWorkspacePath(root, target, { allowMissing: true });
 }
 
 async function scanTree(root, options = {}) {
@@ -162,7 +145,7 @@ async function scanTree(root, options = {}) {
     let children = [];
 
     try {
-      children = await fs.readdir(current.absolute, { withFileTypes: true });
+      children = await fs.readdir(resolveWorkspacePath(root, current.relative), { withFileTypes: true });
     } catch (error) {
       entries.push({
         path: current.relative || ".",
@@ -177,7 +160,9 @@ async function scanTree(root, options = {}) {
       if (DEFAULT_IGNORES.has(child.name)) continue;
 
       const relative = path.join(current.relative, child.name);
-      const absolute = path.join(current.absolute, child.name);
+      if (isSensitivePath(relative) || child.isSymbolicLink()) continue;
+      let absolute;
+      try { absolute = resolveWorkspacePath(root, relative); } catch { continue; }
 
       if (child.isDirectory()) {
         entries.push({ path: relative, type: "directory" });
@@ -282,20 +267,14 @@ function runCommand(payload = {}, action = "command.run") {
   const decision = requireWorkspace(action);
   if (!decision.allowed) return Promise.resolve(decision);
 
-  const command = String(payload.command || "").trim();
-  const args = Array.isArray(payload.args) ? payload.args.map(String) : [];
-  const cwd = safeResolveInside(workspaceState.root, payload.cwd || ".");
-
-  if (!ALLOWED_COMMANDS.has(command)) {
-    return Promise.resolve(
-      createDecision(
-        action,
-        false,
-        `Command "${command}" is not in the desktop allowlist.`,
-        { command, args },
-      ),
-    );
-  }
+  const args = readOnlyGitArgs(action, payload);
+  if (!args) return Promise.resolve(createDecision(action, false, "General commands require an isolated Code Lab runtime. Folder access alone does not authorize host command execution."));
+  let command, cwd;
+  try {
+    cwd = resolveWorkspacePath(workspaceState.root, ".");
+    command = resolveGitExecutable(workspaceState.root);
+  } catch (error) { return Promise.resolve(createDecision(action, false, error.message)); }
+  if (activeCommands.size >= 2) return Promise.resolve(createDecision(action, false, "Wait for an active Git inspection to finish."));
 
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -303,29 +282,56 @@ function runCommand(payload = {}, action = "command.run") {
       cwd,
       shell: false,
       windowsHide: true,
-      env: { ...process.env, CI: process.env.CI || "1" },
+      env: gitEnvironment(),
+      detached: process.platform !== "win32",
     });
+    activeCommands.add(child);
     let stdout = "";
     let stderr = "";
     const limit = 80_000;
+    let stopped = false;
+    let settled = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (child.pid && process.platform === "win32") {
+        const killer = spawn(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
+        killer.on("error", () => child.kill());
+      } else if (child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill(); } }
+    };
+    const timeout = setTimeout(stop, 20_000);
+    const revokeCheck = setInterval(() => { if (isExpired() || workspaceState.root !== cwd || workspaceState.mode === "none") stop(); }, 250);
+    const finish = async (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      clearInterval(revokeCheck);
+      activeCommands.delete(child);
+      try { await appendAudit({ type: action, decision: { ...decision, allowed: result.allowed }, exitCode: result.exitCode, stopped }); }
+      catch { return resolve({ ...result, allowed: false, reason: "Inspection finished but its audit record could not be saved." }); }
+      resolve(result);
+    };
 
     child.stdout.on("data", (chunk) => {
-      stdout = (stdout + chunk.toString()).slice(-limit);
+      stdout += chunk.toString();
+      if (stdout.length > limit) { stdout = stdout.slice(0, limit); stop(); }
     });
     child.stderr.on("data", (chunk) => {
-      stderr = (stderr + chunk.toString()).slice(-limit);
+      stderr += chunk.toString();
+      if (stderr.length > limit) { stderr = stderr.slice(0, limit); stop(); }
     });
     child.once("error", async (error) => {
       const blocked = createDecision(action, false, error.message, {
         command,
         args,
       });
-      await appendAudit({ type: `${action}.error`, decision: blocked });
-      resolve(blocked);
+      await finish(blocked);
     });
     child.once("close", async (code) => {
       const result = {
         ...decision,
+        allowed: !stopped,
+        reason: stopped ? "Git inspection stopped: timeout, revoked access, or output limit. Results are incomplete." : decision.reason,
         command,
         args,
         cwd,
@@ -334,16 +340,7 @@ function runCommand(payload = {}, action = "command.run") {
         stdout,
         stderr,
       };
-      await appendAudit({
-        type: action,
-        decision,
-        command,
-        args,
-        cwd,
-        exitCode: code,
-        durationMs: result.durationMs,
-      });
-      resolve(result);
+      await finish(result);
     });
   });
 }
@@ -420,16 +417,38 @@ async function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
-
+  const contentsId = win.webContents.id;
+  trustedWebContents.add(contentsId);
+  win.webContents.once("destroyed", () => trustedWebContents.delete(contentsId));
+  win.webContents.on("will-navigate", (event, url) => {
+    try { if (new URL(url).origin !== new URL(APP_URL).origin) event.preventDefault(); }
+    catch { event.preventDefault(); }
+  });
+  win.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  win.webContents.session.setPermissionRequestHandler(async (contents, permission, callback, details) => {
+    try {
+      if (!contents || contents.isDestroyed() || !trustedWebContents.has(contents.id) || !details.isMainFrame || new URL(contents.getURL()).origin !== new URL(APP_URL).origin || !["media", "display-capture"].includes(permission)) return callback(false);
+      const requestedUrl = contents.getURL();
+      const result = await dialog.showMessageBox(win, { type: "question", buttons: ["Deny", "Allow once"], defaultId: 0, cancelId: 0, message: "Allow this live input?", detail: `SVANS-AI requested ${permission}. Only allow it when you started a voice, camera or screen session.` });
+      callback(result.response === 1 && !contents.isDestroyed() && contents.getURL() === requestedUrl && trustedWebContents.has(contents.id));
+    } catch { callback(false); }
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (safeExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 
   await win.loadURL(APP_URL);
+}
+
+function handle(channel, listener) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!isTrustedSender(event, APP_URL, trustedWebContents)) throw new Error("Untrusted desktop IPC sender.");
+    return listener(event, ...args);
+  });
 }
 
 app.whenReady().then(async () => {
@@ -454,7 +473,7 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-ipcMain.handle("svans:desktop:status", async () => {
+handle("svans:desktop:status", async () => {
   return {
     desktop: true,
     platform: process.platform,
@@ -471,7 +490,7 @@ ipcMain.handle("svans:desktop:status", async () => {
   };
 });
 
-ipcMain.handle("svans:capabilities:list", async () => {
+handle("svans:capabilities:list", async () => {
   return {
     generatedAt: nowIso(),
     capabilities: DESKTOP_CAPABILITIES,
@@ -482,7 +501,7 @@ ipcMain.handle("svans:capabilities:list", async () => {
   };
 });
 
-ipcMain.handle("svans:audit:read", async (_event, options = {}) => {
+handle("svans:audit:read", async (_event, options = {}) => {
   const events = await readAuditTail(options.limit || 100);
   return {
     ...createDecision("audit.read", true, "Audit log read."),
@@ -491,14 +510,15 @@ ipcMain.handle("svans:audit:read", async (_event, options = {}) => {
   };
 });
 
-ipcMain.handle("svans:workspace:select", async (_event, options = {}) => {
+handle("svans:workspace:select", async (_event, options = {}) => {
   const mode = options.mode === "trusted" ? "trusted" : "read";
+  const requestedTtl = Number(options.ttlMinutes);
   const ttlMinutes = Math.min(
-    Math.max(Number(options.ttlMinutes || 120), 5),
+    Math.max(Number.isFinite(requestedTtl) ? requestedTtl : 120, 5),
     720,
   );
   const result = await dialog.showOpenDialog({
-    title: "Select an SVANS-AI workspace folder",
+    title: mode === "trusted" ? "Select a workspace: reading plus individually approved writes" : "Select a read-only SVANS-AI workspace",
     properties: ["openDirectory"],
   });
 
@@ -512,7 +532,8 @@ ipcMain.handle("svans:workspace:select", async (_event, options = {}) => {
     return decision;
   }
 
-  workspaceState.root = result.filePaths[0];
+  workspaceGeneration += 1;
+  workspaceState.root = fsSync.realpathSync(result.filePaths[0]);
   workspaceState.mode = mode;
   workspaceState.expiresAt = Date.now() + ttlMinutes * 60 * 1000;
 
@@ -526,7 +547,8 @@ ipcMain.handle("svans:workspace:select", async (_event, options = {}) => {
   return decision;
 });
 
-ipcMain.handle("svans:workspace:clear", async () => {
+handle("svans:workspace:clear", async () => {
+  workspaceGeneration += 1;
   const previous = { ...workspaceState };
   workspaceState.root = null;
   workspaceState.mode = "none";
@@ -541,7 +563,7 @@ ipcMain.handle("svans:workspace:clear", async () => {
   return decision;
 });
 
-ipcMain.handle("svans:workspace:tree", async (_event, options = {}) => {
+handle("svans:workspace:tree", async (_event, options = {}) => {
   const decision = requireWorkspace("workspace.tree");
   if (!decision.allowed) return decision;
 
@@ -555,7 +577,7 @@ ipcMain.handle("svans:workspace:tree", async (_event, options = {}) => {
   return { ...decision, tree };
 });
 
-ipcMain.handle("svans:workspace:summary", async () => {
+handle("svans:workspace:summary", async () => {
   const decision = requireWorkspace("workspace.summary");
   if (!decision.allowed) return decision;
 
@@ -594,7 +616,7 @@ ipcMain.handle("svans:workspace:summary", async () => {
   return { ...decision, summary };
 });
 
-ipcMain.handle("svans:workspace:search", async (_event, payload = {}) => {
+handle("svans:workspace:search", async (_event, payload = {}) => {
   const decision = requireWorkspace("workspace.search");
   if (!decision.allowed) return decision;
 
@@ -613,7 +635,7 @@ ipcMain.handle("svans:workspace:search", async (_event, payload = {}) => {
   return { ...decision, search };
 });
 
-ipcMain.handle("svans:file:read", async (_event, relativePath) => {
+handle("svans:file:read", async (_event, relativePath) => {
   const decision = requireWorkspace("file.read");
   if (!decision.allowed) return decision;
 
@@ -643,15 +665,17 @@ ipcMain.handle("svans:file:read", async (_event, relativePath) => {
   }
 });
 
-ipcMain.handle("svans:file:preview-write", async (_event, payload = {}) => {
+handle("svans:file:preview-write", async (_event, payload = {}) => {
   const decision = requireWorkspace("file.previewWrite");
   if (!decision.allowed) return decision;
 
   try {
     const relativePath = String(payload.relativePath || "");
     const nextContent = String(payload.content ?? "");
+    if (Buffer.byteLength(nextContent, "utf8") > MAX_FILE_BYTES) throw new Error("Proposed file exceeds the write size limit.");
     const absolute = safeResolveInside(workspaceState.root, relativePath);
     const exists = fsSync.existsSync(absolute);
+    if (exists && (await fs.stat(absolute)).size > MAX_FILE_BYTES) throw new Error("Existing file exceeds the preview size limit.");
     const currentContent = exists ? await fs.readFile(absolute, "utf8") : "";
     const preview = {
       relativePath,
@@ -671,15 +695,33 @@ ipcMain.handle("svans:file:preview-write", async (_event, payload = {}) => {
   }
 });
 
-ipcMain.handle("svans:file:write", async (_event, payload = {}) => {
+handle("svans:file:write", async (_event, payload = {}) => {
   const decision = requireWorkspace("file.write", { write: true });
   if (!decision.allowed) return decision;
 
   try {
     const relativePath = String(payload.relativePath || "");
     const content = String(payload.content ?? "");
+    if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) throw new Error("Proposed file exceeds the write size limit.");
+    const root = workspaceState.root;
+    const generation = workspaceGeneration;
     const absolute = safeResolveInside(workspaceState.root, relativePath);
+    const existed = fsSync.existsSync(absolute);
+    if (existed && (await fs.stat(absolute)).size > MAX_FILE_BYTES) throw new Error("Existing file exceeds the write size limit.");
+    const previous = existed ? await fs.readFile(absolute) : null;
+    const hash = crypto.createHash("sha256").update(content).digest("hex");
+    const approval = await dialog.showMessageBox(BrowserWindow.fromWebContents(_event.sender), {
+      type: "warning", buttons: ["Cancel", "Approve this exact write"], defaultId: 0, cancelId: 0,
+      message: `${existed ? "Replace" : "Create"} ${relativePath}?`,
+      detail: `Workspace: ${root}\nNew bytes: ${Buffer.byteLength(content, "utf8")}\nContent SHA-256: ${hash}\n${existed ? "A backup of the existing file will be saved." : "This creates a new file."}\n\nPreview (first 600 characters):\n${content.slice(0, 600)}`,
+    });
+    if (approval.response !== 1) return createDecision("file.write", false, "The write was cancelled.");
+    if (generation !== workspaceGeneration || workspaceState.root !== root || !requireWorkspace("file.write", { write: true }).allowed) throw new Error("Workspace permission changed; request a fresh approval.");
+    resolveWorkspacePath(root, relativePath, { allowMissing: true });
+    const existsNow = fsSync.existsSync(absolute);
+    if (existsNow !== existed || (previous && !(await fs.readFile(absolute)).equals(previous))) throw new Error("The file changed while approval was open; review a fresh patch.");
     await fs.mkdir(path.dirname(absolute), { recursive: true });
+    resolveWorkspacePath(root, relativePath, { allowMissing: true });
 
     if (fsSync.existsSync(absolute)) {
       const backupPath = `${absolute}.svans-bak-${Date.now()}`;
@@ -692,6 +734,7 @@ ipcMain.handle("svans:file:write", async (_event, payload = {}) => {
       decision,
       relativePath,
       bytes: Buffer.byteLength(content, "utf8"),
+      approvedContentSha256: hash,
     });
     return {
       ...decision,
@@ -705,22 +748,22 @@ ipcMain.handle("svans:file:write", async (_event, payload = {}) => {
   }
 });
 
-ipcMain.handle("svans:command:run", async (_event, payload = {}) =>
+handle("svans:command:run", async (_event, payload = {}) =>
   runCommand(payload, "command.run"),
 );
 
-ipcMain.handle("svans:git:status", async () =>
+handle("svans:git:status", async () =>
   runCommand({ command: "git", args: ["status", "--short"] }, "git.status"),
 );
 
-ipcMain.handle("svans:git:branch", async () =>
+handle("svans:git:branch", async () =>
   runCommand(
     { command: "git", args: ["branch", "--show-current"] },
     "git.branch",
   ),
 );
 
-ipcMain.handle("svans:git:diff", async (_event, options = {}) =>
+handle("svans:git:diff", async (_event, options = {}) =>
   runCommand(
     {
       command: "git",
@@ -730,7 +773,7 @@ ipcMain.handle("svans:git:diff", async (_event, options = {}) =>
   ),
 );
 
-ipcMain.handle("svans:git:log", async (_event, options = {}) =>
+handle("svans:git:log", async (_event, options = {}) =>
   runCommand(
     {
       command: "git",

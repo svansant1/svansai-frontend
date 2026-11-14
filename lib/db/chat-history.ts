@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { stripSecretMessages } from "@/lib/ai/secret-messages";
 import type { ChatMessage } from "@/components/AIHelper";
 import {
   encodeStoredMessage,
@@ -106,7 +107,7 @@ export async function getConversationMessages(
 
     if (error) {
       console.error("GET_MESSAGES_ERROR:", error);
-      return rows.map(decodeStoredMessage);
+      return stripSecretMessages(rows.map(decodeStoredMessage));
     }
 
     rows.push(...(data ?? []));
@@ -114,13 +115,14 @@ export async function getConversationMessages(
     if (!data || data.length < MESSAGE_PAGE_SIZE) break;
   }
 
-  return rows.map(decodeStoredMessage);
+  return stripSecretMessages(rows.map(decodeStoredMessage));
 }
 
 export async function appendMessages(
   conversationId: string,
   messages: ChatMessage[],
 ): Promise<void> {
+  messages = stripSecretMessages(messages);
   if (!messages.length) return;
 
   for (
@@ -150,6 +152,7 @@ export async function replaceConversationMessages(
   conversationId: string,
   messages: ChatMessage[],
 ): Promise<void> {
+  messages = stripSecretMessages(messages);
   const existing = await getConversationMessages(conversationId);
 
   if (!existing.length) {

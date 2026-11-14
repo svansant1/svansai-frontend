@@ -1,3 +1,5 @@
+import { ProviderError, providerHttpError, classifyProviderError } from "./outcomes";
+
 type AnthropicInput = {
   prompt: string;
   systemInstruction: string;
@@ -6,6 +8,7 @@ type AnthropicInput = {
   maxOutputTokens?: number;
   rejectTruncated?: boolean;
   timeoutMs?: number;
+  signal?: AbortSignal;
   attachedFiles?: Array<{ name: string; type: string; base64: string }>;
 };
 
@@ -17,7 +20,7 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
     const images = (input.attachedFiles ?? []).filter((file) => file.type.startsWith("image/") && file.base64);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      signal: AbortSignal.timeout(input.timeoutMs || 25_000),
+      signal: input.signal ?? AbortSignal.timeout(input.timeoutMs || 25_000),
       headers: {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
@@ -44,19 +47,19 @@ export async function generateWithAnthropic(input: AnthropicInput): Promise<stri
     });
 
     if (!res.ok) {
-      const details = (await res.text()).slice(0, 500);
-      throw new Error(`Anthropic request failed (${res.status}): ${details}`);
+      throw await providerHttpError(res, "Anthropic");
     }
 
     const data = await res.json();
-    if (input.rejectTruncated && data?.stop_reason === "max_tokens") throw new Error("Document content exceeded the provider output limit.");
+    if (data?.stop_reason === "refusal" || data?.content?.some((block: { type?: string }) => block.type === "refusal")) throw new ProviderError("PROVIDER_POLICY_REFUSAL", "The provider declined this request.");
+    if (input.rejectTruncated && data?.stop_reason === "max_tokens") throw new ProviderError("INVALID_OR_TRUNCATED_RESPONSE", "Provider output limit reached.");
     const text = Array.isArray(data?.content)
       ? data.content.map((c: { text?: string }) => c.text || "").join("").trim()
       : "";
 
     return text || null;
   } catch (error) {
-    console.error("ANTHROPIC_PROVIDER_ERROR:", error);
+    console.error("ANTHROPIC_PROVIDER_ERROR:", classifyProviderError(error));
     throw error;
   }
 }

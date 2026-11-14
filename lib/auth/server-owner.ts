@@ -33,9 +33,9 @@ export async function verifyOwnerRequest(req: Request): Promise<OwnerAuthResult>
   const { data, error } = await supabase.auth.getUser(token);
 
   if (error || !data.user) return { authorized: false, reason: "invalid_token" };
-  const emailMatches = ownerEmail && data.user.email?.toLowerCase() === ownerEmail;
+  const emailMatches = Boolean(ownerEmail && data.user.email_confirmed_at && data.user.email?.toLowerCase() === ownerEmail);
   const idMatches = ownerId && data.user.id === ownerId;
-  if (!idMatches && !emailMatches) return { authorized: false, reason: "not_owner" };
+  if (ownerId ? !idMatches : !emailMatches) return { authorized: false, reason: "not_owner" };
 
   return { authorized: true, userId: data.user.id };
 }

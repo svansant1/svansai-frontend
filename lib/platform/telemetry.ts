@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ProviderName } from "@/lib/ai/providers/router";
+import type { ProviderAttempt } from "@/lib/ai/providers/execution-plan";
 import type { ResponseCritique } from "@/lib/ai/response-critic";
 import type {
   PlatformCapability,
@@ -14,6 +15,7 @@ export type RuntimeTelemetry = {
   providerSelected?: ProviderName | "local";
   retryCount: number;
   providerFailures: Array<{ provider: ProviderName; reason: string }>;
+  providerAttempts: ProviderAttempt[];
   qualityScore?: number;
   qualityReasons: string[];
   fallbackUsed: boolean;
@@ -56,6 +58,7 @@ export function createRuntimeTelemetry(
     providerPlan: [],
     retryCount: 0,
     providerFailures: [],
+    providerAttempts: [],
     qualityReasons: [],
     fallbackUsed: false,
     liveSearchAttempted: false,

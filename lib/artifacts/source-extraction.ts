@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import type { AttachedFile } from "@/lib/ai/file-types";
+import { inspectOfficePackage } from "./office-package";
 
 const MAX_SOURCE_CHARACTERS = 100_000;
 const MAX_WORKBOOK_CELLS = 50_000;
@@ -32,8 +33,10 @@ function workbookCellText(value: ExcelJS.CellValue): string {
 }
 
 async function extractWorkbook(bytes: Buffer): Promise<SourceResult> {
+  inspectOfficePackage(bytes);
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(bytes as unknown as ExcelJS.Buffer);
+  // Text extraction must not attempt to interpret editable chart/image drawing objects.
+  await workbook.xlsx.load(bytes as unknown as ExcelJS.Buffer, { ignoreNodes: ["drawing", "picture"] });
   let cellCount = 0;
   let characterCount = 0;
   let hasValues = false;
@@ -84,6 +87,7 @@ export async function extractArtifactSource(file: AttachedFile): Promise<SourceR
       return await extractWorkbook(bytes);
     }
     if (/\.docx$/i.test(file.name) || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      inspectOfficePackage(bytes);
       const result = await mammoth.extractRawText({ buffer: bytes });
       return boundedText(result.value, "Word document body text only. Layout, styling, embedded objects, headers and footers are not preserved.");
     }

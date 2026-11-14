@@ -54,7 +54,7 @@ const DESKTOP_CAPABILITIES = [
   {
     id: "file.write",
     category: "Files",
-    name: "Trusted file writing",
+    name: "Individually approved file writing",
     status: "available",
     permission: "trusted workspace",
     description:
@@ -72,11 +72,11 @@ const DESKTOP_CAPABILITIES = [
   {
     id: "terminal.allowlisted",
     category: "Sandbox",
-    name: "Allowlisted terminal commands",
-    status: "available",
+    name: "Isolated terminal execution",
+    status: "planned",
     permission: "selected workspace",
     description:
-      "Runs safe command families such as git, npm, node, npx, python, and PowerShell.",
+      "General commands are disabled on the host. A separately configured isolated Code Lab is required; fixed read-only Git inspections remain available.",
   },
   {
     id: "git.status",

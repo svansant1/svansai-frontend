@@ -16,6 +16,7 @@ export type WorkbookCellStyle = "title" | "header" | "input" | "output" | "note"
 export interface WorkbookCellSpec {
   address: string;
   value?: string | number | boolean | null;
+  valueType?: "date" | "datetime" | "time";
   formula?: string;
   style?: WorkbookCellStyle;
   numberFormat?: string;
@@ -44,8 +45,19 @@ export interface WorkbookSheetSpec {
   validations?: WorkbookValidationSpec[];
   formulaFills?: WorkbookFormulaFillSpec[];
   conditionalFormats?: WorkbookConditionalFormatSpec[];
+  tables?: { name: string; range: string }[];
+  charts?: WorkbookChartSpec[];
 }
-export interface WorkbookSpec { version: 1; title?: string; sheets: WorkbookSheetSpec[] }
+export interface WorkbookChartSpec {
+  type: "bar" | "line";
+  title: string;
+  anchor: string;
+  dataSheet: string;
+  categories: string;
+  series: { name: string; values: string }[];
+}
+export interface WorkbookNamedRange { name: string; sheet: string; range: string }
+export interface WorkbookSpec { version: 1; title?: string; sheets: WorkbookSheetSpec[]; namedRanges?: WorkbookNamedRange[] }
 
 export class WorkbookSpecError extends Error {
   constructor(message: string) {
@@ -67,6 +79,7 @@ function text(value: unknown, path: string, limit: number, allowEmpty = false): 
       /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/.test(value)) {
     fail(`${path} must be ${allowEmpty ? "" : "nonempty "}text of at most ${limit} characters.`);
   }
+  for (const char of value) { const code = char.codePointAt(0)!; if (code >= 0xd800 && code <= 0xdfff) fail(path + " has invalid Unicode."); }
   return value;
 }
 function number(value: unknown, path: string): number {
@@ -127,7 +140,7 @@ interface Reference { first: Coordinate; last: Coordinate; sheet: string; prefix
 interface Token { type: "value" | "reference" | "function" | "operator"; value: string }
 interface ParsedFormula { formula: string; references: Reference[] }
 
-function parseFormula(value: unknown, sheet: string, sheetNames: Set<string>, path: string): ParsedFormula {
+function parseFormula(value: unknown, sheet: string, sheetNames: Set<string>, path: string, definedNames = new Map<string, WorkbookNamedRange>()): ParsedFormula {
   let formula = text(value, path, WORKBOOK_LIMITS.formulaCharacters).trim();
   if (formula.startsWith("=")) formula = formula.slice(1).trim();
   if (!formula) fail(`${path} is empty.`);
@@ -159,6 +172,15 @@ function parseFormula(value: unknown, sheet: string, sheetNames: Set<string>, pa
       tokens.push({ type: "function", value: name }); offset += identifier[0].length; continue;
     }
     if (/[A-Za-z_$']/.test(char)) {
+      const named = identifier && definedNames.get(identifier[0].toLowerCase());
+      if (named && rest[identifier![0].length] !== "!") {
+        const selected = range(named.range, path);
+        const first = { ...selected.first, absoluteRow: true, absoluteColumn: true };
+        const last = { ...selected.last, absoluteRow: true, absoluteColumn: true };
+        references.push({ first, last, sheet: named.sheet.toLowerCase(), prefix: "'" + named.sheet.replace(/'/g, "''") + "'!",
+          isRange: key(first) !== key(last), start: offset, end: offset + identifier![0].length });
+        tokens.push({ type: "reference", value: identifier![0] }); offset += identifier![0].length; continue;
+      }
       let prefix = "", referencedSheet = sheet, remaining = rest;
       if (char === "'") {
         const qualified = /^'((?:[^']|'')+)'!/.exec(rest);
@@ -290,13 +312,13 @@ export function parseWorkbookSpec(input: unknown): WorkbookSpec {
     try { serialized = JSON.stringify(input); } catch { fail("input must be serializable JSON."); }
     if (!serialized || serialized.length > WORKBOOK_LIMITS.jsonCharacters) fail("JSON exceeds 100,000 characters or is missing.");
   }
-  const root = record(input, ["version", "title", "sheets"], "workbook");
+  const root = record(input, ["version", "title", "sheets", "namedRanges"], "workbook");
   if (root.version !== 1) fail("version must be 1.");
   const rawSheets = array(root.sheets, "sheets", WORKBOOK_LIMITS.sheets);
   if (!rawSheets.length) fail("at least one sheet is required.");
   const names = new Set<string>();
   const sheetRecords = rawSheets.map((item, index) => {
-    const raw = record(item, ["name", "cells", "merges", "columnWidths", "freezeRows", "autoFilter", "validations", "formulaFills", "conditionalFormats"], `sheets[${index}]`);
+    const raw = record(item, ["name", "cells", "merges", "columnWidths", "freezeRows", "autoFilter", "validations", "formulaFills", "conditionalFormats", "tables", "charts"], `sheets[${index}]`);
     const name = text(raw.name, `sheets[${index}].name`, 31);
     if (/[\\/*?:\[\]\u0000-\u001F]/.test(name) || /^'|'$/.test(name) || name.trim() !== name) fail(`sheet name ${name} is not a valid Excel name.`);
     if (names.has(name.toLowerCase())) fail(`duplicate sheet name ${name}.`);
@@ -304,6 +326,30 @@ export function parseWorkbookSpec(input: unknown): WorkbookSpec {
     return { raw, name };
   });
   const result: WorkbookSpec = { version: 1, sheets: [] };
+  const definedNames = new Map<string, WorkbookNamedRange>();
+  const objectNames = new Set<string>();
+  let namedRangeCells = 0;
+  function objectName(value: unknown): string {
+    const name = text(value, "named range/table name", 64);
+    if (Object.getOwnPropertyNames(Object.prototype).some((key) => key.toLowerCase() === name.toLowerCase())) fail("reserved named range/table name.");
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || /^[A-Za-z]{1,3}[1-9]\d*$|^R\d*C\d*$|^[RC]$|^(TRUE|FALSE)$/i.test(name) || FUNCTIONS.has(name.toUpperCase())) fail("named range/table name conflicts with an Excel reference or function.");
+    if (objectNames.has(name.toLowerCase())) fail("duplicate named range/table name.");
+    objectNames.add(name.toLowerCase());
+    return name;
+  }
+  if (root.namedRanges !== undefined) {
+    result.namedRanges = array(root.namedRanges, "namedRanges", 100).map((value) => {
+      const entry = record(value, ["name", "sheet", "range"], "namedRange");
+      const name = objectName(entry.name), sheet = text(entry.sheet, "namedRange.sheet", 31);
+      if (!names.has(sheet.toLowerCase())) fail("namedRange references a missing sheet.");
+      const selected = range(entry.range, "namedRange.range");
+      namedRangeCells += (selected.last.row - selected.first.row + 1) * (selected.last.column - selected.first.column + 1);
+      if (namedRangeCells > WORKBOOK_LIMITS.cells) fail("named ranges expand to more than 50,000 cells.");
+      const canonicalSheet = sheetRecords.find((item) => item.name.toLowerCase() === sheet.toLowerCase())!.name;
+      const named = { name, sheet: canonicalSheet, range: selected.address };
+      definedNames.set(name.toLowerCase(), named); return named;
+    });
+  }
   if (root.title !== undefined) result.title = text(root.title, "title", 200);
   let totalCells = 0, rangeWork = 0, formulaCharacters = 0;
   const formulaNodes: FormulaNode[] = [];
@@ -321,14 +367,14 @@ export function parseWorkbookSpec(input: unknown): WorkbookSpec {
       }
     }
     function addFormula(cell: WorkbookCellSpec, point: Coordinate): void {
-      const parsed = parseFormula(cell.formula, name, names, `${name}!${cell.address}`);
+      const parsed = parseFormula(cell.formula, name, names, `${name}!${cell.address}`, definedNames);
       cell.formula = parsed.formula;
       formulaCharacters += parsed.formula.length;
       if (formulaNodes.length >= WORKBOOK_LIMITS.formulas || formulaCharacters > WORKBOOK_LIMITS.expandedFormulaCharacters) fail("expanded workbook exceeds formula limits (5,000 formulas).");
       formulaNodes.push({ id: `${name.toLowerCase()}!${cell.address}`, sheet: name.toLowerCase(), point, parsed });
     }
     for (const item of array(raw.cells, `${name}.cells`, WORKBOOK_LIMITS.cells)) {
-      const rawCell = record(item, ["address", "value", "formula", "style", "numberFormat"], `${name}.cell`);
+      const rawCell = record(item, ["address", "value", "valueType", "formula", "style", "numberFormat"], `${name}.cell`);
       const point = coordinate(text(rawCell.address, "cell.address", 16), "cell.address"), cell: WorkbookCellSpec = { address: address(point) };
       if (cells.has(cell.address)) fail(`duplicate cell ${name}!${cell.address}.`);
       if (rawCell.value !== undefined) {
@@ -343,6 +389,20 @@ export function parseWorkbookSpec(input: unknown): WorkbookSpec {
         cell.formula = text(rawCell.formula, "cell.formula", WORKBOOK_LIMITS.formulaCharacters);
         addFormula(cell, point);
       }
+      if (rawCell.valueType !== undefined) {
+        cell.valueType = member(rawCell.valueType, ["date", "datetime", "time"], "cell.valueType");
+        if (cell.formula || typeof cell.value !== "string") fail("typed date/time needs a string value and cannot have a formula.");
+        const value = cell.value as string;
+        if (cell.valueType === "time") {
+          if (!/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(value)) fail("time must be HH:mm:ss in a 24-hour clock.");
+        } else {
+          const dateOnly = cell.valueType === "date";
+          if (!(dateOnly ? /^\d{4}-\d{2}-\d{2}$/ : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/).test(value)) fail("date must be YYYY-MM-DD; datetime must be YYYY-MM-DDTHH:mm:ssZ.");
+          const date = new Date(dateOnly ? value + "T00:00:00Z" : value);
+          if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() < 1900 || date.getUTCFullYear() > 9999 ||
+              (dateOnly ? date.toISOString().slice(0, 10) !== value : date.toISOString().replace(".000Z", "Z") !== value)) fail("invalid calendar date/datetime.");
+        }
+      }
       if (rawCell.style !== undefined) cell.style = member(rawCell.style, ["title", "header", "input", "output", "note"], "cell.style");
       if (rawCell.numberFormat !== undefined) cell.numberFormat = text(rawCell.numberFormat, "cell.numberFormat", 100);
       cells.set(cell.address, cell); touch(point);
@@ -350,7 +410,7 @@ export function parseWorkbookSpec(input: unknown): WorkbookSpec {
     if (raw.formulaFills !== undefined) {
       for (const item of array(raw.formulaFills, `${name}.formulaFills`, 200)) {
         const fill = record(item, ["range", "formula"], "formulaFill"), selected = range(fill.range, "formulaFill.range");
-        const parsed = parseFormula(fill.formula, name, names, "formulaFill.formula");
+        const parsed = parseFormula(fill.formula, name, names, "formulaFill.formula", definedNames);
         visit(selected, (point) => {
           const id = address(point), cell = cells.get(id) ?? { address: id };
           if (cell.formula !== undefined || (cell.value !== undefined && cell.value !== null)) fail(`formulaFill would overwrite ${name}!${id}.`);
@@ -383,6 +443,27 @@ export function parseWorkbookSpec(input: unknown): WorkbookSpec {
       sheet.freezeRows = rows;
     }
     if (raw.autoFilter !== undefined) { const selected = range(raw.autoFilter, "autoFilter"); visit(selected); sheet.autoFilter = selected.address; }
+    if (raw.tables !== undefined) {
+      if (raw.autoFilter !== undefined) fail("use native table filters or a sheet autoFilter, not both.");
+      const tableCells = new Set<number>();
+      const mergedRanges = (sheet.merges || []).map((item) => range(item, "merge"));
+      sheet.tables = array(raw.tables, "tables", 20).map((value) => {
+        const entry = record(value, ["name", "range"], "table");
+        const tableName = objectName(entry.name), selected = range(entry.range, "table.range");
+        if (selected.first.row === selected.last.row) fail("native table requires a header and at least one data row.");
+        if (mergedRanges.some((merged) => selected.first.row <= merged.last.row && selected.last.row >= merged.first.row &&
+            selected.first.column <= merged.last.column && selected.last.column >= merged.first.column)) fail("native tables cannot overlap merged cells.");
+        visit(selected, (point) => { if (tableCells.has(key(point))) fail("native tables cannot overlap."); tableCells.add(key(point)); });
+        const headers = new Set<string>();
+        for (let column = selected.first.column; column <= selected.last.column; column++) {
+          const cell = cells.get(address({ ...selected.first, column }));
+          if (!cell || typeof cell.value !== "string" || !cell.value.trim() || cell.value.length > 128 || cell.formula || cell.valueType || /[\r\n]/.test(cell.value)) fail("native table headers must be nonempty plain text of at most 128 characters.");
+          if (headers.has(cell.value.toLowerCase())) fail("native table headers must be unique.");
+          headers.add(cell.value.toLowerCase());
+        }
+        return { name: tableName, range: selected.address };
+      });
+    }
     if (raw.validations !== undefined) sheet.validations = array(raw.validations, `${name}.validations`, 200).map((item) => {
       const entry = record(item, ["range", "type", "values", "minimum", "maximum"], "validation"), selected = range(entry.range, "validation.range");
       const validation: WorkbookValidationSpec = { range: selected.address, type: member(entry.type, ["list", "whole", "decimal"], "validation.type") };
@@ -409,7 +490,48 @@ export function parseWorkbookSpec(input: unknown): WorkbookSpec {
       visit(selected);
       return { range: selected.address, operator: member(entry.operator, ["greaterThan", "lessThan", "equal"], "conditionalFormat.operator"), value: number(entry.value, "conditionalFormat.value"), color: (color.length === 6 ? `FF${color}` : color).toUpperCase() };
     });
+    if (raw.charts !== undefined) sheet.charts = array(raw.charts, "charts", 10).map((value) => {
+      const data = record(value, ["type", "title", "anchor", "dataSheet", "categories", "series"], "chart");
+      const anchor = range(data.anchor, "chart.anchor");
+      if (anchor.last.column - anchor.first.column < 4 || anchor.last.row - anchor.first.row < 6) fail("chart anchor needs at least 5 columns and 7 rows.");
+      const dataSheet = data.dataSheet === undefined ? name : text(data.dataSheet, "chart.dataSheet", 31);
+      const canonical = sheetRecords.find((item) => item.name.toLowerCase() === dataSheet.toLowerCase());
+      if (!canonical) fail("chart data sheet does not exist.");
+      const categories = range(data.categories, "chart.categories");
+      const vectorSize = (selected: Range) => {
+        if (selected.first.row !== selected.last.row && selected.first.column !== selected.last.column) fail("chart source must be a single row or column.");
+        const size = selected.last.row - selected.first.row + selected.last.column - selected.first.column + 1;
+        if (size > 200) fail("chart source exceeds 200 categories.");
+        return size;
+      };
+      const count = vectorSize(categories);
+      const series = array(data.series, "chart.series", 5).map((value) => {
+        const entry = record(value, ["name", "values"], "chart.series");
+        const selected = range(entry.values, "chart.series.values");
+        if (vectorSize(selected) !== count) fail("chart values must match the category count.");
+        return { name: text(entry.name, "chart.series.name", 80), values: selected.address };
+      });
+      if (!series.length) fail("chart requires at least one series.");
+      return { type: member(data.type, ["bar", "line"], "chart.type"), title: text(data.title, "chart.title", 120),
+        anchor: anchor.address, dataSheet: canonical.name, categories: categories.address, series };
+    });
     sheet.cells = [...cells.values()]; result.sheets.push(sheet);
+  }
+  let chartCount = 0;
+  for (const sheet of result.sheets) for (const chart of sheet.charts || []) {
+    if (++chartCount > 20) fail("workbook exceeds 20 charts.");
+    const source = new Map(result.sheets.find((item) => item.name === chart.dataSheet)!.cells.map((cell) => [cell.address, cell]));
+    for (const series of chart.series) {
+      const selected = range(series.values, "chart.series.values");
+      let dataPoints = 0;
+      for (let row = selected.first.row; row <= selected.last.row; row++) for (let column = selected.first.column; column <= selected.last.column; column++) {
+        const cell = source.get(address({ row, column, absoluteRow: false, absoluteColumn: false }));
+        if (!cell || cell.value === null) continue;
+        if (cell.formula || typeof cell.value === "number") dataPoints++;
+        else if (cell.value !== undefined) fail("chart series must reference numeric or formula cells, not text or dates.");
+      }
+      if (!dataPoints) fail("chart series has no numeric or formula data.");
+    }
   }
   assertAcyclic(formulaNodes);
   return result;

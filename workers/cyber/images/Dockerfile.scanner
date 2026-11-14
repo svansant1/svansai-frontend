@@ -1,0 +1,6 @@
+ARG NODE_BASE
+FROM ${NODE_BASE}
+LABEL com.svans.cyber.role="scanner" com.svans.cyber.version="1"
+COPY --chown=65532:65532 scanner.cjs /opt/svans/scanner.cjs
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/node", "/opt/svans/scanner.cjs"]

@@ -6,6 +6,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { User } from "@supabase/supabase-js";
 import AIHelper, { type ChatMessage } from "../components/AIHelper";
 import DesktopCommandCenter from "../components/DesktopCommandCenter";
+import BackgroundTasks from "../components/BackgroundTasks";
+import ExecutionLabs from "../components/ExecutionLabs";
 import { supabase } from "../lib/supabase";
 import {
   createConversation,
@@ -478,6 +480,23 @@ export default function HomePage() {
   };
 
   const handleLogout = async () => {
+    // Revoke privileged work before removing the Supabase identity from this tab.
+    const { data } = await supabase.auth.getSession();
+    if (data.session) {
+      try {
+        const headers = { Authorization: "Bearer " + data.session.access_token };
+        const status = await fetch("/api/system/owner-access", { headers, cache: "no-store", signal: AbortSignal.timeout(5000) });
+        if (status.ok && (await status.json()).owner) {
+          const locked = await fetch("/api/system/owner-access", { method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "lock" }), signal: AbortSignal.timeout(5000) });
+          if (!locked.ok) throw new Error("Owner lock could not be confirmed.");
+          if (typeof BroadcastChannel !== "undefined") {
+            const channel = new BroadcastChannel("sv-owner-controls:" + data.session.user.id);
+            channel.postMessage({ type: "locked" }); channel.close();
+          }
+        }
+      } catch { setAuthMessage("Signing out, but server-side owner revocation could not be confirmed. Idle locking still applies."); }
+    }
     await supabase.auth.signOut();
     setUser(null);
     localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
@@ -2308,6 +2327,8 @@ export default function HomePage() {
             }}
           >
             <DesktopCommandCenter />
+            <BackgroundTasks userId={user?.id} />
+            <ExecutionLabs userId={user?.id} />
             <AIHelper
               user={aiUser}
               onRequestLogin={() => setShowLogin(true)}

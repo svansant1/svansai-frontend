@@ -3,6 +3,7 @@ import { formatDataSummary, summarizeDelimitedData } from "@/lib/ai/data-underst
 import { extractPdfTextWithOcr } from "@/lib/ai/ocr";
 import { summarizeWorkbook } from "@/lib/ai/workbook-understanding";
 import mammoth from "mammoth";
+import { inspectOfficePackage } from "@/lib/artifacts/office-package";
 import { extractText, getDocumentProxy } from "unpdf";
 
 export type FileUnderstandingResult = {
@@ -56,6 +57,7 @@ export async function understandAttachedFile(file: AttachedFile): Promise<FileUn
   ) {
     try {
       const buffer = Buffer.from(file.base64, "base64");
+      inspectOfficePackage(buffer);
       const result = await mammoth.extractRawText({ buffer });
       const extractedText = result.value
         .replace(/\u0000/g, "")

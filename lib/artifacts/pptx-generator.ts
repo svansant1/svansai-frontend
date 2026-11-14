@@ -31,7 +31,7 @@ async function generateStructuredDeck(title: string, spec: DeckSpec): Promise<Bu
   for (const entry of spec.slides) {
     const lines = [...(entry.body ? [entry.body] : []), ...(entry.bullets || [])].flatMap((line) => line.match(/[\s\S]{1,160}(?:\s|$)|[\s\S]{1,160}/g) || []);
     let continuation = 0;
-    for (let offset = 0; offset < Math.max(lines.length, entry.table ? 0 : 1); offset += 5) {
+    for (let offset = 0; offset < Math.max(lines.length, entry.table || entry.chart ? 0 : 1); offset += 5) {
       const slide = newPage(entry.title + (continuation++ ? " (continued)" : ""), entry.notes);
       const text = lines.slice(offset, offset + 5).map((line) => ({ text: line, options: { bullet: entry.bullets?.length ? { indent: 18 } : undefined, breakLine: true } }));
       if (text.length) slide.addText(text, { x: 0.8, y: 1.8, w: 11.7, h: 4.7, fontSize: 20, color: foreground, fontFace, valign: "top", paraSpaceAfter: 16, margin: 0.03 });
@@ -56,6 +56,21 @@ async function generateStructuredDeck(title: string, spec: DeckSpec): Promise<Bu
         batch.push(row); height += needed;
       }
       flush();
+    }
+    if (entry.chart) {
+      const slide = newPage(entry.title + (continuation++ ? " (continued)" : ""), entry.notes);
+      // PptxGenJS creates an editable chart and an embedded workbook, not a chart screenshot.
+      slide.addChart(pptx.ChartType[entry.chart.type], entry.chart.series, {
+        x: 0.75, y: 1.7, w: 11.8, h: 4.9,
+        showTitle: Boolean(entry.chart.title), title: entry.chart.title,
+        showLegend: entry.chart.series.length > 1 || ["pie", "doughnut"].includes(entry.chart.type),
+        showValue: false, showLabel: false,
+        catAxisLabelFontFace: fontFace, catAxisLabelFontSize: 11, catAxisLabelColor: foreground,
+        valAxisLabelFontFace: fontFace, valAxisLabelFontSize: 11, valAxisLabelColor: foreground,
+        legendFontFace: fontFace, legendFontSize: 11, legendColor: foreground,
+        chartColors: ["236B8E", "D97706", "059669", "7C3AED", "DC2626"],
+        chartArea: { fill: { color: background } }, plotArea: { fill: { color: background } },
+      });
     }
   }
   return Buffer.from(await pptx.write({ outputType: "nodebuffer" }) as Buffer);

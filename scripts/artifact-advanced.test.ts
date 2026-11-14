@@ -42,6 +42,44 @@ test("six-round Hi-Lo request becomes a native workbook with blank inputs and re
   assert.match(await zip.file("xl/worksheets/sheet1.xml")!.async("string"), /conditionalFormatting/);
 });
 
+test("explicit interactive workbook specifications export locally without a provider", async () => {
+  const spec = { version: 1, sheets: [
+    { name: "Inputs", cells: [{ address: "A1", value: 3 }] },
+    { name: "Summary", cells: [{ address: "A1", formula: "Inputs!A1*2" }] },
+  ] };
+  const prompt = 'Create an interactive Excel workbook titled "Local formulas"\nContent:\n' + JSON.stringify(spec);
+  let calls = 0;
+  const result = await generateChatArtifact({ request: detectArtifactRequest(prompt)!, messages: [] },
+    { draft: async () => { calls++; return null; } });
+  assert.equal(calls, 0, "A finished native workbook specification must not invoke a provider.");
+  assert.ok("artifact" in result);
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(new Uint8Array(Buffer.from(result.artifact.base64, "base64")).buffer);
+  assert.equal(book.getWorksheet("Summary")!.getCell("A1").formula, "Inputs!A1*2");
+});
+
+test("raw source data still requires drafting when calculations are requested", async () => {
+  const prompt = 'Create an interactive Excel workbook calculating double the count\nData:\nName,Count\nRouters,2';
+  let calls = 0;
+  const result = await generateChatArtifact({ request: detectArtifactRequest(prompt)!, messages: [] },
+    { draft: async () => { calls++; return JSON.stringify({ version: 1, sheets: [{ name: "Data", cells: [
+      { address: "A1", value: 2 }, { address: "B1", formula: "A1*2" },
+    ] }] }); } });
+  assert.equal(calls, 1);
+  assert.ok("artifact" in result);
+});
+
+test("explicit native workbooks cannot bypass formula requirements or validation", async () => {
+  for (const cell of [{ address: "A1", value: 4 }, { address: "A1", formula: 'WEBSERVICE("https://example.com")' }]) {
+    const prompt = 'Create an interactive Excel workbook\nContent:\n' + JSON.stringify({ version: 1, sheets: [{ name: "Data", cells: [cell] }] });
+    let calls = 0;
+    const result = await generateChatArtifact({ request: detectArtifactRequest(prompt)!, messages: [] },
+      { draft: async () => { calls++; return null; } });
+    assert.equal(calls, 0, "Reject an invalid supplied workbook without silently rewriting it.");
+    assert.ok(!("artifact" in result));
+  }
+});
+
 test("formula validator rejects external, dynamic, malformed, cyclic and missing-sheet formulas", () => {
   const spec = (formula: string) => ({ version: 1, sheets: [{ name: "Test", cells: [{ address: "A1", formula }] }] });
   for (const formula of ['WEBSERVICE("https://example.com")','HYPERLINK("https://example.com","x")','INDIRECT("B1")',"'[remote.xlsx]Sheet1'!B1","Missing!A2","A1+1","SUM(","A99999"]) assert.throws(() => parseWorkbookSpec(spec(formula)), undefined, formula);

@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { inspectOfficePackage } from "@/lib/artifacts/office-package";
 import { formatDataSummary, summarizeDelimitedData } from "@/lib/ai/data-understanding";
 
 function cellToText(value: ExcelJS.CellValue): string {
@@ -37,7 +38,8 @@ function worksheetToDelimitedText(worksheet: ExcelJS.Worksheet): string {
 export async function summarizeWorkbook(base64: string): Promise<string> {
   const workbook = new ExcelJS.Workbook();
   const bytes = Buffer.from(base64, "base64");
-  await workbook.xlsx.load(bytes as unknown as ExcelJS.Buffer);
+  inspectOfficePackage(bytes);
+  await workbook.xlsx.load(bytes as unknown as ExcelJS.Buffer, { ignoreNodes: ["drawing", "picture"] });
 
   const sheetSummaries = workbook.worksheets.slice(0, 8).map((worksheet) => {
     const delimited = worksheetToDelimitedText(worksheet);

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_BASE64_LENGTH = Math.ceil(MAX_FILE_BYTES / 3) * 4;
 const FORMATS: Record<string, string> = {
+  pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -65,6 +66,9 @@ export function artifactToChatFile(value: unknown): FileAttachment | null {
     throw new Error("The generated file type is not supported for download.");
   }
   const bytes = decodeBase64(artifact.base64);
+  if (format === "pdf" && String.fromCharCode(...bytes.slice(0, 5)) !== "%PDF-") {
+    throw new Error("The generated file was not a native PDF.");
+  }
   if (typeof artifact.size !== "number" || artifact.size !== bytes.length) {
     throw new Error(
       "The generated file was incomplete. Please try generating it again.",

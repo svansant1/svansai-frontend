@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { generateDocx } from "@/lib/artifacts/docx-generator";
 import { generatePptx } from "@/lib/artifacts/pptx-generator";
 import { generateXlsx } from "@/lib/artifacts/xlsx-generator";
+import { generatePdf } from "@/lib/artifacts/pdf-generator";
 import { safeCsv } from "./tabular-content";
 
 import type {
@@ -13,6 +14,7 @@ import type {
 } from "@/lib/artifacts/types";
 
 const MIME_TYPES: Record<ArtifactFormat, string> = {
+  pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -92,6 +94,9 @@ export async function generateArtifact(params: {
   let buffer: Buffer;
 
   switch (params.format) {
+    case "pdf":
+      buffer = await generatePdf(title, content);
+      break;
     case "docx":
       buffer = await generateDocx(title, content);
       break;
@@ -119,8 +124,10 @@ export async function generateArtifact(params: {
   if (buffer.length > 8 * 1024 * 1024)
     throw new Error("The generated file exceeds 8 MB.");
 
+  const artifact = toArtifact(buffer, title, params.format, params.kind);
+  if (["docx", "xlsx", "pptx", "pdf"].includes(params.format) && content.startsWith("{")) artifact.sourceContent = content;
   return {
     text: `I created ${defaultName(title, params.format)}.`,
-    artifact: toArtifact(buffer, title, params.format, params.kind),
+    artifact,
   };
 }

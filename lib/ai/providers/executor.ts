@@ -3,6 +3,7 @@ import { generateWithAnthropic } from "@/lib/ai/providers/anthropic";
 import { generateWithGemini } from "@/lib/ai/providers/gemini";
 import { generateWithOpenAI } from "@/lib/ai/providers/openai";
 import type { ProviderName } from "@/lib/ai/providers/router";
+import { canFailover, classifyProviderError, ProviderError } from "./outcomes";
 
 export type ProviderRequest = {
   prompt: string;
@@ -12,6 +13,8 @@ export type ProviderRequest = {
   maxOutputTokens?: number;
   rejectTruncated?: boolean;
   attachedFiles?: AttachedFile[];
+  signal?: AbortSignal;
+  timeoutMs?: number;
 };
 
 const DEFAULT_TIMEOUT_MS = 25_000;
@@ -45,11 +48,9 @@ export function markProviderFailure(
   provider: ProviderName,
   error: unknown,
 ): void {
-  const message =
-    error instanceof Error ? error.message : String(error);
-
-  const longCooldown =
-    /\b(credit|quota|billing|rate limit|429|402)\b/i.test(message);
+  const outcome = classifyProviderError(error);
+  if (!canFailover(outcome) || outcome === "INVALID_OR_TRUNCATED_RESPONSE") return;
+  const longCooldown = ["RATE_LIMIT", "BILLING_OR_QUOTA_FAILURE", "AUTHENTICATION_OR_CONFIGURATION_FAILURE"].includes(outcome);
 
   providerCooldowns.set(
     provider,
@@ -76,18 +77,24 @@ export function markProviderHealthy(
 export async function callProvider(
   provider: ProviderName,
   request: ProviderRequest,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 ): Promise<string | null> {
+  if (request.signal?.aborted) throw new ProviderError("CANCELLED", "Request cancelled.");
+  const controller = new AbortController();
+  let timedOut = false;
+  const cancel = () => controller.abort(request.signal?.reason);
+  request.signal?.addEventListener("abort", cancel, { once: true });
+  const boundedRequest = { ...request, signal: controller.signal, timeoutMs };
   const providerCall = async (): Promise<string | null> => {
     switch (provider) {
       case "openai":
-        return generateWithOpenAI(request);
+        return generateWithOpenAI(boundedRequest);
 
       case "anthropic":
-        return generateWithAnthropic(request);
+        return generateWithAnthropic(boundedRequest);
 
       case "gemini":
-        return generateWithGemini(request);
+        return generateWithGemini(boundedRequest);
 
       default: {
         const exhaustiveCheck: never = provider;
@@ -107,15 +114,22 @@ export async function callProvider(
 
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
           reject(
-            new Error(
+            new ProviderError("TIMEOUT",
               `${provider} request timed out after ${timeoutMs}ms`,
             ),
           );
         }, timeoutMs);
       }),
     ]);
+  } catch (error) {
+    if (request.signal?.aborted) throw new ProviderError("CANCELLED", "Request cancelled.");
+    if (timedOut) throw new ProviderError("TIMEOUT", "Provider request timed out.");
+    throw error;
   } finally {
+    request.signal?.removeEventListener("abort", cancel);
     if (timeout) {
       clearTimeout(timeout);
     }

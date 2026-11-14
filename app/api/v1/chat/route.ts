@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readBoundedObject, RequestBodyError } from "@/lib/api/bounded-json";
 import type { AttachedFile } from "@/lib/ai/file-types";
 import type { ChatMessage, ResponseMode } from "@/lib/ai/types";
 import {
@@ -177,10 +178,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json();
+    const body = await readBoundedObject(req, MAX_REQUEST_BYTES);
+    if (body.cyberMode === true) return json(req, { error: "API keys do not grant owner Cyber Lab access.", requestId }, { status: 403 });
     const messages = Array.isArray(body?.messages)
-      ? (body.messages as ChatMessage[]).slice(-MAX_MESSAGES)
+      ? (body.messages as ChatMessage[])
       : [];
+    if (messages.length > MAX_MESSAGES) return json(req, { error: "Too many messages. Supply a continuation summary and a smaller message set; nothing was silently removed.", requestId }, { status: 413 });
 
     if (!messages.length) {
       return json(
@@ -287,11 +290,13 @@ export async function POST(req: Request) {
       isVerifiedOwner: false,
       writingProfile: null,
       userMemories: [],
-      userId: typeof body?.userId === "string" ? body.userId : null,
+      userId: null, // API-key callers cannot impersonate an authenticated user through request JSON.
       requestId,
+      signal: req.signal,
     });
 
     const {artifact, ...orchestration} = result;
+    const publicArtifact = artifact ? (({ sourceContent: _source, ...file }) => file)(artifact) : undefined;
     return json(
       req,
       {
@@ -306,11 +311,12 @@ export async function POST(req: Request) {
         route: result.route,
         coordinator: result.coordinator,
         orchestration,
-        ...(artifact ? {artifact} : {}),
+        ...(publicArtifact ? {artifact: publicArtifact} : {}),
       },
       { headers: { "x-svansai-request-id": requestId } },
     );
   } catch (error) {
+    if (error instanceof RequestBodyError) return json(req, { error: error.message, requestId }, { status: error.status });
     console.error("SVANSAI_V1_CHAT_ROUTE_ERROR:", requestId, error);
     return json(
       req,

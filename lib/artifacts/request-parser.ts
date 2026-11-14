@@ -9,6 +9,7 @@ const formats: Array<{
   kind: ArtifactKind;
   pattern: RegExp;
 }> = [
+  { format: "pdf", kind: "document", pattern: /\bpdfs?\b/i },
   {
     format: "docx",
     kind: "document",
@@ -47,7 +48,7 @@ function detectClause(instruction: string): ArtifactRequest | null {
     return null;
   // A bare capability question has no subject matter or previous-content instruction.
   if (
-    /^(can|could|do|are)\s+you\s+(?:able to\s+)?(?:create|make|generate|produce|export|write)\s+(?:(?:a|an|some)\s+)?(?:word documents?|excel (?:files?|spreadsheets?)|powerpoint(?: presentations?)?|documents?|spreadsheets?|presentations?)\s*\??$/i.test(
+    /^(can|could|do|are)\s+you\s+(?:able to\s+)?(?:create|make|generate|produce|export|write)\s+(?:(?:a|an|some)\s+)?(?:pdfs?(?: files?| documents?)?|word documents?|excel (?:files?|spreadsheets?)|powerpoint(?: presentations?)?|documents?|spreadsheets?|presentations?)\s*\??$/i.test(
       instruction,
     )
   )
@@ -59,7 +60,7 @@ function detectClause(instruction: string): ArtifactRequest | null {
     "",
   );
   const destination = command.match(
-    /\b(?:to|into|as|in)\s+(?:(?:a|an|the|new|downloadable|editable|microsoft)\s+){0,3}[`.]?(word(?:\s+(?:document|file))?|docx|excel|spreadsheet|workbook|xlsx|powerpoint|power point|presentation|slide deck|pptx|csv|markdown|md file|text file|txt file)\b/i,
+    /\b(?:to|into|as|in)\s+(?:(?:a|an|the|new|downloadable|editable|microsoft)\s+){0,3}[`.]?(word(?:\s+(?:document|file))?|docx|pdf|excel|spreadsheet|workbook|xlsx|powerpoint|power point|presentation|slide deck|pptx|csv|markdown|md file|text file|txt file)\b/i,
   );
   const target = destination
     ? destination[1].replace(/^word$/i, "word document")

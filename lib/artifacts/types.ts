@@ -1,4 +1,4 @@
-export type ArtifactFormat = "docx" | "xlsx" | "pptx" | "csv" | "txt" | "md";
+export type ArtifactFormat = "docx" | "xlsx" | "pptx" | "pdf" | "csv" | "txt" | "md";
 
 export type ArtifactKind = "document" | "spreadsheet" | "presentation" | "text";
 
@@ -17,6 +17,8 @@ export type GeneratedArtifact = {
   mimeType: string;
   base64: string;
   size: number;
+  /** Private, validated generation recipe; omitted from public response envelopes. */
+  sourceContent?: string;
 };
 
 export type ArtifactGenerationResult = {

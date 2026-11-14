@@ -1,22 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // instruction-handler.ts
-// Owner access via unlock/lock password session.
-// No dependency on userId or auth state.
-//
-// Flow:
-//   User: "sv unlock"
-//   SV:   "Enter owner password:"
-//   User: "mypassword"
-//   SV:   "Owner mode enabled."
-//   User: "sv analyze" / "sv deploy 1" / etc.
-//   User: "sv lock"
-//   SV:   "Owner mode disabled."
+// Legacy owner commands require a server-verified, live owner grant.
+// Unlock passwords are handled only by /api/system/owner-access, never by chat.
+// Self-modification/deployment commands require a separate approval executor.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import path from "path";
+import type { OwnerGrant } from "@/lib/auth/owner-grant";
+import { assertOwnerGrantCurrent } from "@/lib/auth/owner-session";
 import {
   getPendingCandidates,
   getUnnotifiedCandidates,
@@ -42,8 +36,6 @@ const supabase = createClient(
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-const OWNER_PASSWORD = process.env.SV_OWNER_PASSWORD;
-
 // Files that can never be touched by the improvement engine
 const LOCKED_FILES = [
   "lib/ai/deployer.ts",
@@ -53,21 +45,6 @@ const LOCKED_FILES = [
   "app/api/sv/deploy/route.ts",
   "app/api/sv/monitor/route.ts",
 ];
-
-// ─── In-memory owner session ──────────────────────────────────────────────────
-const ownerSessions = new Set<string>();
-
-export function isOwnerSession(sessionId: string): boolean {
-  return ownerSessions.has(sessionId);
-}
-
-export function unlockOwnerSession(sessionId: string): void {
-  ownerSessions.add(sessionId);
-}
-
-export function lockOwnerSession(sessionId: string): void {
-  ownerSessions.delete(sessionId);
-}
 
 // ─── Command types ────────────────────────────────────────────────────────────
 type SVCommand =
@@ -87,20 +64,13 @@ type SVCommand =
   | null;
 
 // ─── Awaiting password state per session ─────────────────────────────────────
-const awaitingPassword = new Set<string>();
-
-export function isAwaitingPassword(sessionId: string): boolean {
-  return awaitingPassword.has(sessionId);
-}
+/** Legacy callers must never solicit or consume a password in conversation text. */
+export function isAwaitingPassword(_sessionId: string): boolean { return false; }
 
 // ─── Parse sv commands ────────────────────────────────────────────────────────
 export function parseSVCommand(message: string, sessionId: string): SVCommand {
   const q = message.toLowerCase().trim();
   const raw = message.trim();
-
-  if (awaitingPassword.has(sessionId)) {
-    return { type: "password_attempt", text: raw };
-  }
 
   if (!q.startsWith("sv ") && q !== "sv") return null;
 
@@ -292,44 +262,33 @@ Say **sv deploy 1** to deploy this now, or **sv show candidates** to review all 
 // ─── Handle a parsed sv command ───────────────────────────────────────────────
 export async function handleSVCommand(
   command: SVCommand,
-  sessionId: string
+  sessionId: string,
+  grant?: OwnerGrant | null,
 ): Promise<string | null> {
   if (!command) return null;
 
   // ── sv unlock ──────────────────────────────────────────────────────────────
   if (command.type === "unlock") {
-    if (isOwnerSession(sessionId)) {
-      return "Owner mode is already enabled. Say **sv lock** to disable it.";
-    }
-    awaitingPassword.add(sessionId);
-    return "Enter owner password:";
+    return "Use the secure owner-unlock form. Do not send your password as a chat message.";
   }
 
   // ── password attempt ───────────────────────────────────────────────────────
   if (command.type === "password_attempt") {
-    awaitingPassword.delete(sessionId);
-
-    if (!OWNER_PASSWORD) {
-      return "SV_OWNER_PASSWORD is not set in environment variables. Add it to your Render dashboard.";
-    }
-
-    if (command.text === OWNER_PASSWORD) {
-      unlockOwnerSession(sessionId);
-      return "Owner mode enabled. You now have full access to self-improvement commands.\n\nAvailable commands:\n• **sv analyze** — run full self-analysis\n• **sv improve** — generate improvement candidates\n• **sv show candidates** — review pending upgrades\n• **sv show [n]** — see diff for candidate #n\n• **sv deploy [n]** — deploy candidate #n\n• **sv deploy all** — deploy all candidates\n• **sv reject [n]** — reject candidate #n\n• **sv status** — view current system status\n• **sv instruct: [text]** — give a direct improvement instruction and execute it immediately\n• **sv lock** — disable owner mode";
-    }
-
-    return "Incorrect password. Owner mode not enabled.";
+    return "Passwords are accepted only by the secure owner-unlock form.";
   }
 
   // ── sv lock ────────────────────────────────────────────────────────────────
   if (command.type === "lock") {
-    lockOwnerSession(sessionId);
-    return "Owner mode disabled.";
+    return "Use the owner Lock control to revoke access on the server.";
   }
 
   // All commands below require owner session
-  if (!isOwnerSession(sessionId)) {
+  if (!grant) {
     return "Owner mode is not enabled. Say **sv unlock** to authenticate.";
+  }
+  await assertOwnerGrantCurrent(grant);
+  if (["deploy", "deploy_all", "instruct", "improve", "analyze"].includes(command.type)) {
+    return "This action requires a separate reviewed action approval. A Cyber Lab unlock does not authorize self-modification or deployment.";
   }
 
   switch (command.type) {
@@ -443,8 +402,9 @@ export async function handleSVCommand(
 }
 
 // ─── Check for unnotified candidates — only shown in owner sessions ───────────
-export async function checkAndSurfaceUpgrades(sessionId: string): Promise<string | null> {
-  if (!isOwnerSession(sessionId)) return null;
+export async function checkAndSurfaceUpgrades(sessionId: string, grant?: OwnerGrant | null): Promise<string | null> {
+  if (!grant) return null;
+  await assertOwnerGrantCurrent(grant);
 
   const unnotified = await getUnnotifiedCandidates();
   if (unnotified.length === 0) return null;

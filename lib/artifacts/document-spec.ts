@@ -12,7 +12,7 @@ export type DocumentBlock =
   | { type: "pageBreak" };
 export type DocumentSpec = {
   version: 1;
-  kind: "docx";
+  kind: "docx" | "pdf";
   title?: string;
   theme?: DocumentTheme;
   header?: string;
@@ -26,6 +26,12 @@ export type DeckSlide = {
   bullets?: string[];
   table?: NativeTable;
   notes?: string;
+  chart?: DeckChart;
+};
+export type DeckChart = {
+  type: "bar" | "line" | "pie" | "doughnut";
+  title?: string;
+  series: { name: string; labels: string[]; values: number[] }[];
 };
 export type DeckSpec = {
   version: 1;
@@ -85,6 +91,24 @@ function table(value: unknown, path: string, maxColumns: number): NativeTable {
   });
   return { columns, rows };
 }
+function chart(value: unknown, path: string): DeckChart {
+  const data = record(value, path, ["type", "title", "series"]);
+  if (!["bar", "line", "pie", "doughnut"].includes(data.type as string)) fail(path, "chart type must be bar, line, pie, or doughnut");
+  const type = data.type as DeckChart["type"];
+  const series = array(data.series, path + ".series", 5).map((value, index) => {
+    const item = record(value, path + ".series[" + index + "]", ["name", "labels", "values"]);
+    const labels = stringArray(item.labels, path + ".labels", 50, 60);
+    const values = array(item.values, path + ".values", labels.length, labels.length).map((number) => {
+      if (typeof number !== "number" || !Number.isFinite(number) || Math.abs(number) > 1e15) fail(path + ".values", "chart values must be finite numbers within +/-1e15; missing data cannot be invented");
+      return number as number;
+    });
+    return { name: safeDocumentText(item.name, path + ".name", 80), labels, values };
+  });
+  if (series.some((item) => JSON.stringify(item.labels) !== JSON.stringify(series[0].labels))) fail(path, "series must use the same category labels in the same order");
+  if ((type === "pie" || type === "doughnut") &&
+      (series.length !== 1 || series[0].values.some((value) => value < 0) || !series[0].values.some((value) => value > 0))) fail(path, "pie/doughnut needs one nonnegative series with a positive total");
+  return { type, series, ...(data.title === undefined ? {} : { title: safeDocumentText(data.title, path + ".title", 100) }) };
+}
 function theme(value: unknown, deck: boolean): DeckSpec["theme"] {
   const colors = deck ? ["accentColor", "backgroundColor", "textColor"] : ["accentColor"];
   const data = record(value, "theme", [...colors, "fontFace"]);
@@ -110,12 +134,12 @@ function structured(content: string): unknown | undefined {
   try { return JSON.parse(source); }
   catch { fail("content", "malformed JSON"); }
 }
-export function parseDocumentSpec(content: string): DocumentSpec | undefined {
+export function parseDocumentSpec(content: string, kind: "docx" | "pdf" = "docx"): DocumentSpec | undefined {
   const candidate = structured(content);
   if (candidate === undefined) return undefined;
   const data = record(candidate, "document", ["version", "kind", "title", "theme", "header", "footer", "pageNumbers", "blocks"]);
-  if (data.version !== 1 || data.kind !== "docx") fail("document", 'expected version:1 and kind:"docx"');
-  const result: DocumentSpec = { version: 1, kind: "docx", blocks: [] };
+  if (data.version !== 1 || data.kind !== kind) fail("document", `expected version:1 and kind:"${kind}"`);
+  const result: DocumentSpec = { version: 1, kind, blocks: [] };
   if (data.title !== undefined) result.title = safeDocumentText(data.title, "title", 160);
   if (data.theme !== undefined) result.theme = theme(data.theme, false);
   for (const key of ["header", "footer"] as const) {
@@ -163,12 +187,13 @@ export function parseDeckSpec(content: string): DeckSpec | undefined {
   if (data.theme !== undefined) result.theme = theme(data.theme, true);
   result.slides = array(data.slides, "slides", 100).map((value, i) => {
     const path = `slides[${i}]`;
-    const slide = record(value, path, ["title", "body", "bullets", "table", "notes"]);
+    const slide = record(value, path, ["title", "body", "bullets", "table", "notes", "chart"]);
     const result: DeckSlide = { title: safeDocumentText(slide.title, `${path}.title`, 120) };
     if (slide.body !== undefined) result.body = safeDocumentText(slide.body, `${path}.body`);
     if (slide.bullets !== undefined) result.bullets = stringArray(slide.bullets, `${path}.bullets`, 200);
     if (slide.table !== undefined) result.table = table(slide.table, `${path}.table`, 6);
     if (slide.notes !== undefined) result.notes = safeDocumentText(slide.notes, `${path}.notes`);
+    if (slide.chart !== undefined) result.chart = chart(slide.chart, path + ".chart");
     return result;
   });
   return result;
