@@ -1,5 +1,8 @@
 # Cyber integration source ledger
 
+Web release `e15e554` is live and HTTP-verified as of November 15, 2026.
+Cyber/database/worker activation remains disabled. See the verification report below.
+
 ## November 14, 2026 verification update
 
 The owner authorized local testing, build, Git publication and deployment.

@@ -1,5 +1,29 @@
 # Verification and release scope — November 14, 2026
 
+## Deployment verified — November 15, 2026
+
+- Release commit `e15e554075b3d6f5f28f479425551a5ff6faa499` was pushed to
+  `svansant1/svansai-frontend` main with a normal fast-forward push; no force push.
+- Render deploy `dep-dbrutoluproc73bs36fg` reached **live**. Its build log
+  confirms a successful cloud production build. The service reports that exact
+  release commit as live.
+- `https://svansai-frontend.onrender.com/`: HTTPS 200; all seven formats
+  (DOCX/XLSX/PPTX/PDF/CSV/TXT/MD) returned valid native outputs. Each response
+  identified the local renderer; no paid inference was requested. XLSX retained
+  its actual formula, PDF parsed, and Office packages contained expected parts.
+- `https://svansai.com/`: HTTPS 200; owner-status endpoint confirms locked and
+  Cyber feature disabled; an interactive XLSX download retained `A1*2` as a formula.
+  An initial custom-domain request timed out; subsequent IPv4 and normal Node
+  HTTPS checks passed without changing DNS or service configuration.
+- Anonymous project/artifact/Cyber requests were denied (401/401/403).
+- The queried recent application-error log window returned no error entries.
+  This is a bounded observation, not a claim that every runtime scenario is covered.
+- No database migrations, new workers, containers or installer releases were run.
+  The disabled features below remain pending separate acceptance.
+
+This final record is a documentation-only commit with `[skip render]`; it does
+not change the verified application build or request another deployment.
+
 ## Verified locally
 
 - All 101 tests in `scripts/**/*.test.ts` and `scripts/**/*.test.cjs`: PASS,
@@ -60,7 +84,7 @@ replacing unrelated configuration: SVANSAI_ADMIN_CYBER_MODE_ENABLED,
 SVANSAI_CYBER_EXECUTION_ENABLED, SVANSAI_JOBS_ENABLED,
 SVANSAI_ARTIFACT_STORAGE_ENABLED, SVANSAI_LABS_ENABLED. They take effect with
 the applicable deployment. This is a web release, not a new Windows installer.
-Deployment is not complete until the release commit is live and HTTP checks pass.
+Deployment was subsequently verified as recorded above.
 
 ## Not yet verified / not activated
 

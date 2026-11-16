@@ -1,5 +1,9 @@
 # Massive update — implementation ledger
 
+The verified web release `e15e554` is live as of November 15, 2026. Native
+downloads pass live checks; new database-backed features and lab workers remain
+disabled. Details and remaining acceptance work are in the verification report.
+
 ## November 14, 2026 status update
 
 Local validation of the merged update passes: 101 tests, TypeScript, production
