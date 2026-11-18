@@ -19,6 +19,7 @@
     "lint": "next lint",
     "test:chat": "node scripts/chat-regression.mjs",
     "test:attachments": "node scripts/attachment-regression.mjs",
+    "test:photos": "tsx --test scripts/photo-attachments.test.ts",
     "test:artifacts": "tsx --test scripts/artifact-regression.test.ts scripts/artifact-source.test.ts scripts/artifact-advanced.test.ts",
     "test:expansion": "tsx --test scripts/provider-execution.test.ts scripts/capability-execution.test.ts scripts/job-payload.test.ts scripts/artifact-pdf.test.ts scripts/workbook-expansion.test.ts scripts/workbook-charts.test.ts scripts/presentation-charts.test.ts scripts/artifact-versions.test.ts scripts/runtime-journal.test.ts scripts/office-package.test.ts",
     "test:desktop-security": "node --test scripts/desktop-security.test.cjs",

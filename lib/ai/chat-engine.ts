@@ -2666,7 +2666,9 @@ Do not claim you have no browsing ability. Say that live search did not return e
     return buildNoRulesFramingResponse();
   }
 
-  if (!correctionRequest) {
+  // Fresh attachments are new evidence, even when pasted images share a filename
+  // and the UI generates the same caption. Never short-circuit their analysis.
+  if (!correctionRequest && attachedFiles.length === 0) {
     const duplicateQuestionResponse = getDuplicateQuestionResponse(
       latestUserMessage,
       previousUserMessage,
@@ -3110,6 +3112,7 @@ Runtime instructions:
 - Use the user's project/course context when relevant.
 - If coding is requested, prefer practical production-style code.
 - If an image is attached, analyze the image and answer what is visible.
+- Analyze the images supplied with this request afresh. Matching filenames or captions do not mean matching image contents; do not substitute a previous image's analysis. If details are unreadable, say what cannot be determined instead of guessing.
 - When multiple images are attached, analyze them as one ordered collection and identify them as Image 1, Image 2, and so on.
 - If a screenshot contains code or an error, explain what it means and give the answer according to the selected mode.
 - If extracted PDF, text, or code content is present, treat that content as primary evidence and answer the user's question from it. Never respond as though the user failed to provide a question.
