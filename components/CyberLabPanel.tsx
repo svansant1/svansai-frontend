@@ -49,6 +49,7 @@ export default function CyberLabPanel({ controls, userId, conversationId, projec
   return <details open={showUnlock || active} style={{ border: "1px solid #526174", borderRadius: 12, padding: 10, marginBottom: 12, color: "#dceaf5" }}>
     <summary>Cyber Lab — {!controls.status.unlocked ? "LOCKED" : active ? "ON" : "OFF"}</summary>
     <p>Advanced authorized training. Locks after 30 idle minutes; active use has no fixed cutoff. No device control is granted by unlocking.</p>
+    <p>Use questions, logs, code, configuration files or optional screenshots. Replies track suggested steps and reported results, explain revisits, and name where to run the next action.</p>
     <button type="button" onClick={() => { onActive(false); void controls.lock().catch(() => {}); }}>Lock now</button>
     {(showUnlock || !controls.status.unlocked) && <form onSubmit={event => {
       event.preventDefault();
@@ -72,7 +73,7 @@ export default function CyberLabPanel({ controls, userId, conversationId, projec
       onClick={() => void action(async () => { const status = await controls.request({ action: "mode", enabled: !active, projectId, conversationId }); onActive(status.unlocked && !active); })}>{active ? "Turn OFF" : "Turn ON"}</button>
     {snapshot && <details>
       <summary>Saved evidence · revision {snapshot.revision}</summary>
-      <p>Entries below are user reports unless a connected tool supplied them. Never paste passwords or tokens.</p>
+      <p>user_report means information you supplied; tool_observation means connected-tool output; inference means an assistant suggestion or assessment, not verified execution. Never paste passwords or tokens.</p>
       <select aria-label="Evidence entity" value={entity} onChange={e => { setEntity(e.target.value as ContextEvent["entity"]); setCorrects(""); }}>
         {["target", "scanner", "session"].map(v => <option key={v}>{v}</option>)}
       </select>

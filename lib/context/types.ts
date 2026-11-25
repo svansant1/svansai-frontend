@@ -7,4 +7,4 @@ export type ContextEvent = {
   assessment?: { status: "unconfirmed" | "supported" | "rejected"; confidence: number | null; basis: string };
 };
 export type ContextSnapshot = { scope: ContextScope; revision: number; events: ContextEvent[]; omittedEvents: number };
-export type ContextView = { scope: ContextScope; revision: number; text: string; omittedEvents: number };
+export type ContextView = { scope: ContextScope; revision: number; text: string; omittedEvents: number; events?: ContextEvent[] };

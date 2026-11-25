@@ -6,10 +6,15 @@ import { assertOwnerGrantCurrent, cyberEnabled, ownerDatabase, OwnerAccessError,
 import { buildContextView } from "@/lib/context/compaction";
 import { loadContext } from "@/lib/context/store";
 import { assertContextScope } from "@/lib/projects/permissions";
+import { assertContextRevisionCurrent } from "@/lib/context/revision-guard";
 export type TrustedRequestContext = {
   requestId: string; userId: string; scope: ContextScope; ownerGrant: OwnerGrant;
   cyber: CyberAccessContext; context: ContextView; signal?: AbortSignal;
   expectedContextRevision?: number;
+  /** Server-only: queued jobs retain their immutable publication binding. */
+  progressReadOnly?: boolean;
+  /** Server-only synchronization; not an authorization grant or client input. */
+  progressWrite?: Promise<void>;
 };
 export async function setCyberSelection(grant: OwnerGrant, scope: ContextScope, enabled: boolean) {
   await assertOwnerGrantCurrent(grant);
@@ -26,9 +31,9 @@ export async function assertCyberRequestCurrent(context: TrustedRequestContext) 
   if (!cyberEnabled()) throw new OwnerAccessError("Cyber Lab is disabled.");
   await assertOwnerGrantCurrent(context.ownerGrant);
   await assertContextScope(context.scope);
-  if (context.expectedContextRevision !== undefined && (await loadContext(context.scope)).revision !== context.expectedContextRevision) {
-    throw new OwnerAccessError("Investigation context changed. Review and submit again.");
-  }
+  try { await assertContextRevisionCurrent(context, async () => (await loadContext(context.scope)).revision); }
+  catch { throw new OwnerAccessError("Investigation context changed. Review and submit again."); }
+  if (context.signal?.aborted) throw new OwnerAccessError("Cyber request was cancelled.", 409);
   const { data, error } = await ownerDatabase().from("sv_cyber_modes").select("grant_id").eq("grant_id", context.ownerGrant.id).eq("project_id", context.scope.projectId).eq("conversation_id", context.scope.conversationId).maybeSingle();
   if (error || !data) throw new OwnerAccessError("Cyber Lab is OFF or locked for this conversation.");
 }

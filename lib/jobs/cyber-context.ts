@@ -45,7 +45,7 @@ export async function resolveCyberJobContext(job: Pick<JobRecord, "id" | "user_i
     // Deadlines here are not authority; every check resolves the live database grant.
     ownerGrant: { id: binding.grantId, userId: job.user_id, revision: binding.grantRevision, lastActivityAt: "", idleLocksAt: "" },
     cyber: resolveCyberAccess({ requested: true, ownerVerified: true, ownerSessionUnlocked: true, featureEnabled: true }),
-    context: buildContextView(snapshot), expectedContextRevision: binding.context.revision, signal,
+    context: buildContextView(snapshot), expectedContextRevision: binding.context.revision, progressReadOnly: true, signal,
   };
   await assertCyberRequestCurrent(context);
   return context;

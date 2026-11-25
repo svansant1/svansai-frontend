@@ -2483,7 +2483,14 @@ export async function generateChatResponse(rawMessages: unknown[], options: Chat
   }
 
   const latestUserMessage = getLatestUserMessage(fullMessages);
-  if (trustedContext?.cyber.active) return generateCyberResponse(fullMessages, attachedFiles, { ...trustedContext, signal }, runtimeTelemetry);
+  if (trustedContext?.cyber.active) {
+    // The route's watcher/publication checks share this object with progress persistence.
+    // Preserve both owner revocation and request cancellation rather than replacing either.
+    if (signal && signal !== trustedContext.signal) {
+      trustedContext.signal = trustedContext.signal ? AbortSignal.any([trustedContext.signal, signal]) : signal;
+    }
+    return generateCyberResponse(fullMessages, attachedFiles, trustedContext, runtimeTelemetry);
+  }
 
   if (!latestUserMessage && attachedFiles.length === 0) {
     return "I'm ready when you are. Send me your question or attach a file, and I'll help.";
