@@ -21,6 +21,7 @@ const env = {
   TAVILY_API_KEY: "",
   SVANSAI_API_KEY: "offline-smoke-api-key",
   SVANSAI_INTERNAL_API_KEY: "",
+  SVANSAI_APP_ORIGINS: `http://127.0.0.1:${port},https://svansai.com`,
   SVANSAI_JOBS_ENABLED: "0",
   SVANSAI_ARTIFACT_STORAGE_ENABLED: "0",
   SVANSAI_LABS_ENABLED: "0",
@@ -68,6 +69,14 @@ try {
   assert.equal(status.owner, false);
   assert.equal(status.unlocked, false);
   assert.equal(owner.headers.get("cache-control"), "no-store");
+  // A public origin must reach sign-in despite the local server's internal URL.
+  for (const [origin, expected] of [["https://svansai.com", 401], ["https://untrusted.example", 403], ["null", 403], [undefined, 403]]) {
+    const response = await fetch(base + "/api/projects", {
+      method: "POST", headers: { "content-type": "application/json", ...(origin ? { origin } : {}) }, body: "{}",
+    });
+    assert.equal(response.status, expected, "Project origin boundary: " + origin);
+    if (expected === 401) assert.deepEqual(await response.json(), { error: "Sign in to create a project." });
+  }
   for (const origin of [base, "https://untrusted.example"]) {
     const response = await fetch(base + "/api/system/owner-access", {
       method: "POST", headers: { "content-type": "application/json", origin },

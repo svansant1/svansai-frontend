@@ -69,9 +69,25 @@ export async function unlockOwner(req: Request, userId: string, password: string
   if (!grant) throw new OwnerAccessError("Unlock was cancelled by a lock action. Try again.");
   return { token, grant };
 }
+function isSerializedHttpOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+    // Browser Origin values have no credentials, path, query, fragment or trailing slash.
+    return (url.protocol === "https:" || url.protocol === "http:") && url.origin === value;
+  } catch { return false; }
+}
 export function requireSameOrigin(req: Request): void {
+  const configured = process.env.SVANSAI_APP_ORIGINS?.trim();
+  // A reverse proxy can leave req.url pointing at an internal hostname/port.
+  // Only server configuration may add public origins, never Host/Forwarded headers.
+  const allowed = configured ? configured.split(",").map(value => value.trim()) : [new URL(req.url).origin];
+  if (!allowed.every(isSerializedHttpOrigin)) {
+    throw new OwnerAccessError("Application origin configuration is invalid.", 503);
+  }
   const origin = req.headers.get("origin");
-  if (!origin || origin !== new URL(req.url).origin) throw new OwnerAccessError("Owner controls require a same-origin request.");
+  if (!origin || !isSerializedHttpOrigin(origin) || !allowed.includes(origin)) {
+    throw new OwnerAccessError("Owner controls require a same-origin request.");
+  }
 }
 /** Cancel promptly across processes, then recheck again at dispatch/publication boundaries. */
 export function watchOwnerGrant(grant: OwnerGrant, parent?: AbortSignal, validate?: () => Promise<void>) {

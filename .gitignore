@@ -42,6 +42,9 @@ Thumbs.db
 
 *.tsbuildinfo
 
+# Local Supabase CLI cache and link metadata
+supabase/.temp/
+
 # Coverage
 
 coverage/
