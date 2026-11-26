@@ -3,9 +3,10 @@
 ## Scope and current outcome
 
 The owner approved installing the missing database foundation and verifying project
-creation, without enabling Cyber Lab. The database portion is complete. The live
-Create project workflow is **not yet fixed end to end**: a separate origin-check
-failure was reproduced during the final HTTP checks.
+creation, without enabling Cyber Lab. The database portion is complete. A separate
+origin-check failure was reproduced during the final HTTP checks and subsequently
+corrected with approval. Live request acceptance is recorded below; an interactive
+signed-in browser Create project check is still pending.
 
 No application commit, push, deployment, feature-flag change, worker activation,
 password change or retained owner unlock was performed in this database pass.
@@ -31,7 +32,28 @@ the 20-export HTTP smoke suite. The HTTP suite also exercises the public-origin
 request against an internally addressed server and checks untrusted/null/missing
 origins. No paid providers or production account tokens were used.
 
-Deployment and post-deploy acceptance are recorded separately after they complete.
+### Deployment and live acceptance
+
+- Commit `6efaf46da6e7d46e8b01dc199cb0fb79e6a27bb3` was pushed to GitHub `main`
+  without force. Render deploy `dep-dc4aieco3iic73ckm440` reached `live` at
+  `2026-11-26T21:51:50.038848Z` with that exact commit.
+- Only `SVANSAI_APP_ORIGINS` was added/updated using a merge operation. Other
+  environment variables were not replaced. The configuration save first deployed
+  the prior build; the code deploy queued behind it and was monitored separately.
+- POST `/api/projects` with `Origin: https://svansai.com` now returns the expected
+  401 sign-in response, not the previous origin-check 403. The Render service URL
+  with its corresponding origin also reaches the 401 sign-in check.
+- Foreign, null and missing origins still return 403. These unauthenticated HTTP
+  probes did not create projects or bypass sign-in.
+- The custom-domain homepage returns 200. The anonymous owner-status endpoint
+  still reports `featureEnabled: false` and `unlocked: false`.
+- The bounded post-live application error-log query returned no entries.
+
+The production store create/list test and transaction checks above passed, but no
+signed-in browser session was exercised. The owner should refresh the site, sign
+in, enter a project name and select Create project. No temporary project fixtures
+remain. Cyber Lab activation and legacy conversation-table security remediation
+are separate from this origin-check release.
 
 ## Applied migration
 
